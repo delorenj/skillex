@@ -1,0 +1,150 @@
+version: "6.0.0"
+project_name: "skillex"
+project_level: 2
+current_sprint: 1
+sprint_plan_path: "docs/sprint-plan-skillex-2026-01-13.md"
+
+sprints:
+  - sprint_number: 1
+    start_date: "2026-01-13"
+    end_date: "2026-01-27"
+    capacity_points: 30
+    committed_points: 27
+    completed_points: 0
+    status: "not_started"
+    goal: "Establish infrastructure and core packaging functionality"
+    stories:
+      - story_id: "STORY-000"
+        title: "Project Setup and Infrastructure"
+        points: 3
+        status: "not_started"
+        assigned_to: "Jarad DeLorenzo"
+        epic: "Infrastructure"
+        priority: "Must Have"
+      - story_id: "STORY-001"
+        title: "File System Manager (Infrastructure Layer)"
+        points: 3
+        status: "not_started"
+        assigned_to: "Jarad DeLorenzo"
+        epic: "EPIC-001"
+        priority: "Must Have"
+      - story_id: "STORY-002"
+        title: "Path Validator (Security)"
+        points: 3
+        status: "not_started"
+        assigned_to: "Jarad DeLorenzo"
+        epic: "EPIC-001"
+        priority: "Must Have"
+      - story_id: "STORY-003"
+        title: "ZIP Archive Builder"
+        points: 5
+        status: "not_started"
+        assigned_to: "Jarad DeLorenzo"
+        epic: "EPIC-001"
+        priority: "Must Have"
+      - story_id: "STORY-004"
+        title: "Environment Configuration"
+        points: 2
+        status: "not_started"
+        assigned_to: "Jarad DeLorenzo"
+        epic: "EPIC-001"
+        priority: "Must Have"
+      - story_id: "STORY-005"
+        title: "Skill Discovery Service"
+        points: 3
+        status: "not_started"
+        assigned_to: "Jarad DeLorenzo"
+        epic: "EPIC-002"
+        priority: "Must Have"
+      - story_id: "STORY-006"
+        title: "Fuzzy Matcher Service"
+        points: 2
+        status: "not_started"
+        assigned_to: "Jarad DeLorenzo"
+        epic: "EPIC-001"
+        priority: "Must Have"
+      - story_id: "STORY-008"
+        title: "Validation Service"
+        points: 3
+        status: "not_started"
+        assigned_to: "Jarad DeLorenzo"
+        epic: "EPIC-001"
+        priority: "Must Have"
+      - story_id: "STORY-007"
+        title: "Packaging Service (Partial)"
+        points: 3
+        status: "not_started"
+        assigned_to: "Jarad DeLorenzo"
+        epic: "EPIC-001"
+        priority: "Must Have"
+
+  - sprint_number: 2
+    start_date: "2026-01-27"
+    end_date: "2026-02-10"
+    capacity_points: 30
+    committed_points: 27
+    completed_points: 0
+    status: "not_started"
+    goal: "Deliver complete CLI tool with enhanced UX and distribution capability"
+    stories:
+      - story_id: "STORY-009"
+        title: "CLI - Zip Command"
+        points: 5
+        status: "not_started"
+        assigned_to: "Jarad DeLorenzo"
+        epic: "EPIC-001"
+        priority: "Must Have"
+      - story_id: "STORY-010"
+        title: "CLI - List Command"
+        points: 3
+        status: "not_started"
+        assigned_to: "Jarad DeLorenzo"
+        epic: "EPIC-002"
+        priority: "Must Have"
+      - story_id: "STORY-011"
+        title: "Rich Terminal Output Enhancement"
+        points: 3
+        status: "not_started"
+        assigned_to: "Jarad DeLorenzo"
+        epic: "EPIC-003"
+        priority: "Should Have"
+      - story_id: "STORY-012"
+        title: "Comprehensive Error Handling"
+        points: 3
+        status: "not_started"
+        assigned_to: "Jarad DeLorenzo"
+        epic: "EPIC-003"
+        priority: "Must Have"
+      - story_id: "STORY-013"
+        title: "Testing Suite and Coverage"
+        points: 5
+        status: "not_started"
+        assigned_to: "Jarad DeLorenzo"
+        epic: "EPIC-003"
+        priority: "Must Have"
+      - story_id: "STORY-014"
+        title: "Package and Publish to PyPI"
+        points: 3
+        status: "not_started"
+        assigned_to: "Jarad DeLorenzo"
+        epic: "EPIC-004"
+        priority: "Must Have"
+      - story_id: "STORY-007"
+        title: "Packaging Service (Complete)"
+        points: 5
+        status: "not_started"
+        assigned_to: "Jarad DeLorenzo"
+        epic: "EPIC-001"
+        priority: "Must Have"
+
+velocity:
+  sprint_1: null  # Will be filled when sprint completes
+  sprint_2: null
+  rolling_average: null
+
+team:
+  size: 1
+  sprint_length_weeks: 2
+  capacity_per_sprint: 30
+  experience_level: "senior"
+  productive_hours_per_day: 6
