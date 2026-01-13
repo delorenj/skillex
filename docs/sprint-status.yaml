@@ -10,17 +10,19 @@ sprints:
     end_date: "2026-01-27"
     capacity_points: 30
     committed_points: 27
-    completed_points: 0
-    status: "not_started"
+    completed_points: 3
+    status: "in_progress"
     goal: "Establish infrastructure and core packaging functionality"
     stories:
       - story_id: "STORY-000"
         title: "Project Setup and Infrastructure"
         points: 3
-        status: "not_started"
+        status: "completed"
         assigned_to: "Jarad DeLorenzo"
         epic: "Infrastructure"
         priority: "Must Have"
+        completed_date: "2026-01-13"
+        actual_points: 3
       - story_id: "STORY-001"
         title: "File System Manager (Infrastructure Layer)"
         points: 3
