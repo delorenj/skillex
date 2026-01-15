@@ -10,7 +10,7 @@ sprints:
     end_date: "2026-01-27"
     capacity_points: 30
     committed_points: 27
-    completed_points: 9
+    completed_points: 14
     status: "in_progress"
     goal: "Establish infrastructure and core packaging functionality"
     stories:
@@ -44,10 +44,12 @@ sprints:
       - story_id: "STORY-003"
         title: "ZIP Archive Builder"
         points: 5
-        status: "not_started"
+        status: "completed"
         assigned_to: "Jarad DeLorenzo"
         epic: "EPIC-001"
         priority: "Must Have"
+        completed_date: "2026-01-15"
+        actual_points: 5
       - story_id: "STORY-004"
         title: "Environment Configuration"
         points: 2
