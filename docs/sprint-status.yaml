@@ -10,7 +10,7 @@ sprints:
     end_date: "2026-01-27"
     capacity_points: 30
     committed_points: 27
-    completed_points: 21
+    completed_points: 24
     status: "in_progress"
     goal: "Establish infrastructure and core packaging functionality"
     stories:
@@ -80,10 +80,12 @@ sprints:
       - story_id: "STORY-008"
         title: "Validation Service"
         points: 3
-        status: "not_started"
+        status: "completed"
         assigned_to: "Jarad DeLorenzo"
         epic: "EPIC-001"
         priority: "Must Have"
+        completed_date: "2026-01-16"
+        actual_points: 3
       - story_id: "STORY-007"
         title: "Packaging Service (Partial)"
         points: 3
