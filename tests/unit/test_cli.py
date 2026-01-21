@@ -9,6 +9,7 @@ from typer.testing import CliRunner
 from skillex.cli import _format_size, app
 from skillex.exceptions import PackagingError
 from skillex.services import PackagingResult, SkillPackageResult
+from skillex.services.discovery import SkillInfo
 
 runner = CliRunner()
 
@@ -391,3 +392,209 @@ class TestZipCommandVerboseTable:
 
             assert "Duration" in cli_result.stdout
             assert "1.23" in cli_result.stdout
+
+
+# ============================================================================
+# List Command Tests
+# ============================================================================
+
+
+class TestListCommandHelp:
+    """Tests for list command help and basic invocation."""
+
+    def test_help_shows_usage(self):
+        """Test that --help shows command usage."""
+        result = runner.invoke(app, ["list", "--help"])
+        assert result.exit_code == 0
+        assert "List available Claude skills" in result.stdout
+        assert "PATTERN" in result.stdout
+
+    def test_app_help_shows_list(self):
+        """Test that app help shows list command."""
+        result = runner.invoke(app, ["--help"])
+        assert result.exit_code == 0
+        assert "list" in result.stdout
+
+
+class TestListCommandSuccess:
+    """Tests for successful list command execution."""
+
+    @pytest.fixture
+    def mock_skills(self) -> list[SkillInfo]:
+        """Create mock skill list."""
+        return [
+            SkillInfo(
+                name="python-pro",
+                path=Path("/home/user/.claude/skills/python-pro"),
+                size_bytes=1024,
+                file_count=5,
+            ),
+            SkillInfo(
+                name="typescript-pro",
+                path=Path("/home/user/.claude/skills/typescript-pro"),
+                size_bytes=2048,
+                file_count=8,
+            ),
+            SkillInfo(
+                name="rust-pro",
+                path=Path("/home/user/.claude/skills/rust-pro"),
+                size_bytes=512,
+                file_count=3,
+            ),
+        ]
+
+    def test_list_all_skills(self, mock_skills):
+        """Test listing all skills without pattern."""
+        with (
+            patch("skillex.cli.SkillDiscoveryService") as mock_discovery_cls,
+            patch("skillex.cli.FuzzyMatcherService") as mock_fuzzy_cls,
+        ):
+            mock_discovery = MagicMock()
+            mock_discovery.discover_all.return_value = mock_skills
+            mock_discovery_cls.return_value = mock_discovery
+
+            mock_fuzzy = MagicMock()
+            mock_fuzzy_cls.return_value = mock_fuzzy
+
+            result = runner.invoke(app, ["list"])
+
+            assert result.exit_code == 0
+            assert "Found 3 skill(s)" in result.stdout
+            assert "python-pro" in result.stdout
+            assert "typescript-pro" in result.stdout
+            assert "rust-pro" in result.stdout
+            mock_discovery.discover_all.assert_called_once()
+
+    def test_list_with_pattern(self, mock_skills):
+        """Test listing skills with pattern filter."""
+        filtered_skills = [mock_skills[0]]  # Just python-pro
+
+        with (
+            patch("skillex.cli.SkillDiscoveryService") as mock_discovery_cls,
+            patch("skillex.cli.FuzzyMatcherService") as mock_fuzzy_cls,
+        ):
+            mock_discovery = MagicMock()
+            mock_discovery.discover_all.return_value = mock_skills
+            mock_discovery_cls.return_value = mock_discovery
+
+            mock_fuzzy = MagicMock()
+            mock_fuzzy.match.return_value = filtered_skills
+            mock_fuzzy_cls.return_value = mock_fuzzy
+
+            result = runner.invoke(app, ["list", "python"])
+
+            assert result.exit_code == 0
+            assert "Found 1 skill(s)" in result.stdout
+            assert "python-pro" in result.stdout
+            mock_fuzzy.match.assert_called_once_with("python", mock_skills)
+
+    def test_list_shows_table_columns(self, mock_skills):
+        """Test that list shows table with correct columns."""
+        with (
+            patch("skillex.cli.SkillDiscoveryService") as mock_discovery_cls,
+            patch("skillex.cli.FuzzyMatcherService") as mock_fuzzy_cls,
+        ):
+            mock_discovery = MagicMock()
+            mock_discovery.discover_all.return_value = mock_skills
+            mock_discovery_cls.return_value = mock_discovery
+
+            mock_fuzzy = MagicMock()
+            mock_fuzzy_cls.return_value = mock_fuzzy
+
+            result = runner.invoke(app, ["list"])
+
+            assert result.exit_code == 0
+            assert "Skill" in result.stdout
+            assert "Size" in result.stdout
+            assert "Files" in result.stdout
+            assert "Path" in result.stdout
+
+    def test_list_shows_size_formatted(self, mock_skills):
+        """Test that size is formatted correctly."""
+        with (
+            patch("skillex.cli.SkillDiscoveryService") as mock_discovery_cls,
+            patch("skillex.cli.FuzzyMatcherService") as mock_fuzzy_cls,
+        ):
+            mock_discovery = MagicMock()
+            mock_discovery.discover_all.return_value = mock_skills
+            mock_discovery_cls.return_value = mock_discovery
+
+            mock_fuzzy = MagicMock()
+            mock_fuzzy_cls.return_value = mock_fuzzy
+
+            result = runner.invoke(app, ["list"])
+
+            assert result.exit_code == 0
+            # 1024 bytes = 1.0 KB
+            assert "1.0 KB" in result.stdout
+            # 2048 bytes = 2.0 KB
+            assert "2.0 KB" in result.stdout
+
+
+class TestListCommandNoSkills:
+    """Tests for list command when no skills found."""
+
+    def test_no_skills_found(self):
+        """Test message when no skills found."""
+        with (
+            patch("skillex.cli.SkillDiscoveryService") as mock_discovery_cls,
+            patch("skillex.cli.FuzzyMatcherService") as mock_fuzzy_cls,
+        ):
+            mock_discovery = MagicMock()
+            mock_discovery.discover_all.return_value = []
+            mock_discovery_cls.return_value = mock_discovery
+
+            mock_fuzzy = MagicMock()
+            mock_fuzzy_cls.return_value = mock_fuzzy
+
+            result = runner.invoke(app, ["list"])
+
+            assert result.exit_code == 0
+            assert "No skills found" in result.stdout
+
+    def test_no_skills_matching_pattern(self):
+        """Test message when no skills match pattern."""
+        mock_skills = [
+            SkillInfo(
+                name="python-pro",
+                path=Path("/home/user/.claude/skills/python-pro"),
+                size_bytes=1024,
+                file_count=5,
+            ),
+        ]
+
+        with (
+            patch("skillex.cli.SkillDiscoveryService") as mock_discovery_cls,
+            patch("skillex.cli.FuzzyMatcherService") as mock_fuzzy_cls,
+        ):
+            mock_discovery = MagicMock()
+            mock_discovery.discover_all.return_value = mock_skills
+            mock_discovery_cls.return_value = mock_discovery
+
+            mock_fuzzy = MagicMock()
+            mock_fuzzy.match.return_value = []
+            mock_fuzzy_cls.return_value = mock_fuzzy
+
+            result = runner.invoke(app, ["list", "nonexistent"])
+
+            assert result.exit_code == 0
+            assert "No skills matching 'nonexistent' found" in result.stdout
+
+
+class TestListCommandErrors:
+    """Tests for list command error handling."""
+
+    def test_skillex_error_shows_message(self):
+        """Test that SkillexError shows error message."""
+        from skillex.exceptions import ConfigurationError
+
+        with patch("skillex.cli.SkillDiscoveryService") as mock_discovery_cls:
+            mock_discovery_cls.side_effect = ConfigurationError(
+                "Environment variable 'DC' is not set"
+            )
+
+            result = runner.invoke(app, ["list"])
+
+            assert result.exit_code == 1
+            assert "Error:" in result.output
+            assert "DC" in result.output

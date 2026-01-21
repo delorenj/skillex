@@ -12,6 +12,8 @@ from rich.table import Table
 
 from skillex.exceptions import PackagingError, SkillexError
 from skillex.services import PackagingResult, PackagingService
+from skillex.services.discovery import SkillDiscoveryService, SkillInfo
+from skillex.services.fuzzy import FuzzyMatcherService
 
 # Create typer app with explicit command handling
 app = typer.Typer(
@@ -173,6 +175,81 @@ def zip(
     except PackagingError as e:
         error_console.print(f"[red]Error:[/red] {e}")
         raise typer.Exit(code=1) from None
+
+    except SkillexError as e:
+        error_console.print(f"[red]Error:[/red] {e}")
+        raise typer.Exit(code=1) from None
+
+
+def _display_skills_table(skills: list[SkillInfo]) -> None:
+    """Display skills in a rich table.
+
+    Args:
+        skills: List of SkillInfo objects to display
+    """
+    table = Table(show_header=True, header_style="bold")
+    table.add_column("Skill", style="cyan")
+    table.add_column("Size", justify="right")
+    table.add_column("Files", justify="right")
+    table.add_column("Path")
+
+    for skill in skills:
+        table.add_row(
+            skill.name,
+            _format_size(skill.size_bytes),
+            str(skill.file_count),
+            str(skill.path),
+        )
+
+    console.print(table)
+
+
+@app.command(name="list")
+def list_skills(
+    pattern: Annotated[
+        str | None,
+        typer.Argument(
+            help="Pattern to filter skill names (empty shows all)",
+            show_default=False,
+        ),
+    ] = None,
+) -> None:
+    """List available Claude skills.
+
+    Discovers skills from the skills directory and displays them in a table.
+    If a pattern is provided, filters skills using fuzzy substring matching.
+
+    Examples:
+        skillex list              # List all skills
+        skillex list python       # List skills matching 'python'
+    """
+    search_pattern = pattern or ""
+
+    try:
+        # Create services
+        discovery_service = SkillDiscoveryService()
+        fuzzy_matcher = FuzzyMatcherService()
+
+        # Discover skills
+        all_skills = discovery_service.discover_all()
+
+        # Filter if pattern provided
+        skills = fuzzy_matcher.match(search_pattern, all_skills) if search_pattern else all_skills
+
+        # Handle no skills found
+        if not skills:
+            if search_pattern:
+                console.print(f"[yellow]No skills matching '{search_pattern}' found[/yellow]")
+            else:
+                console.print("[yellow]No skills found[/yellow]")
+            raise typer.Exit(code=0)
+
+        # Display table
+        _display_skills_table(skills)
+
+        # Summary
+        console.print()
+        console.print(f"[green]Found {len(skills)} skill(s)[/green]")
 
     except SkillexError as e:
         error_console.print(f"[red]Error:[/red] {e}")

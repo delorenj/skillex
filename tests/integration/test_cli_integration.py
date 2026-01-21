@@ -185,3 +185,91 @@ class TestCLIHelpOutput:
         assert "PATTERN" in result.stdout
         assert "--verbose" in result.stdout
         assert "-v" in result.stdout
+
+
+# ============================================================================
+# List Command Integration Tests
+# ============================================================================
+
+
+class TestListCommandIntegration:
+    """Integration tests for the list command."""
+
+    def test_list_all_shows_skills(self, temp_skills_env):
+        """Test that list command shows all skills."""
+        result = runner.invoke(app, ["list"])
+
+        assert result.exit_code == 0
+        assert "Found 3 skill(s)" in result.stdout
+        assert "test-skill-one" in result.stdout
+        assert "test-skill-two" in result.stdout
+        assert "python-helper" in result.stdout
+
+    def test_list_with_pattern_filters_skills(self, temp_skills_env):
+        """Test that pattern filtering works correctly."""
+        result = runner.invoke(app, ["list", "python"])
+
+        assert result.exit_code == 0
+        assert "Found 1 skill(s)" in result.stdout
+        assert "python-helper" in result.stdout
+        # Other skills should not be shown
+        assert "test-skill-one" not in result.stdout
+        assert "test-skill-two" not in result.stdout
+
+    def test_list_shows_table_format(self, temp_skills_env):
+        """Test that list shows rich table output."""
+        result = runner.invoke(app, ["list"])
+
+        assert result.exit_code == 0
+        # Table headers
+        assert "Skill" in result.stdout
+        assert "Size" in result.stdout
+        assert "Files" in result.stdout
+        assert "Path" in result.stdout
+
+    def test_list_pattern_no_match(self, temp_skills_env):
+        """Test message when pattern doesn't match any skills."""
+        result = runner.invoke(app, ["list", "nonexistent"])
+
+        assert result.exit_code == 0
+        assert "No skills matching 'nonexistent' found" in result.stdout
+
+    def test_list_shows_file_counts(self, temp_skills_env):
+        """Test that file counts are displayed."""
+        result = runner.invoke(app, ["list", "python-helper"])
+
+        assert result.exit_code == 0
+        # python-helper has SKILL.md and examples/example1.py (2 files)
+        # This checks that file count is shown
+        assert "2" in result.stdout
+
+    def test_list_case_insensitive(self, temp_skills_env):
+        """Test that pattern matching is case-insensitive."""
+        result = runner.invoke(app, ["list", "PYTHON"])
+
+        assert result.exit_code == 0
+        assert "Found 1 skill(s)" in result.stdout
+        assert "python-helper" in result.stdout
+
+    def test_list_partial_match(self, temp_skills_env):
+        """Test that partial pattern matches work."""
+        result = runner.invoke(app, ["list", "test"])
+
+        assert result.exit_code == 0
+        assert "Found 2 skill(s)" in result.stdout
+        assert "test-skill-one" in result.stdout
+        assert "test-skill-two" in result.stdout
+
+
+class TestListCommandEnvironmentErrors:
+    """Test list command behavior when environment is misconfigured."""
+
+    def test_missing_dc_env_var(self, tmp_path: Path, monkeypatch):
+        """Test error when DC environment variable is not set."""
+        # Remove DC from environment
+        monkeypatch.delenv("DC", raising=False)
+
+        result = runner.invoke(app, ["list"])
+
+        assert result.exit_code == 1
+        assert "DC" in result.output
