@@ -101,8 +101,8 @@ sprints:
     end_date: "2026-02-10"
     capacity_points: 30
     committed_points: 27
-    completed_points: 19
-    status: "in_progress"
+    completed_points: 27
+    status: "completed"
     goal: "Deliver complete CLI tool with enhanced UX and distribution capability"
     stories:
       - story_id: "STORY-009"
@@ -144,17 +144,21 @@ sprints:
       - story_id: "STORY-013"
         title: "Testing Suite and Coverage"
         points: 5
-        status: "not_started"
+        status: "completed"
         assigned_to: "Jarad DeLorenzo"
         epic: "EPIC-003"
         priority: "Must Have"
+        completed_date: "2026-01-25"
+        actual_points: 5
       - story_id: "STORY-014"
         title: "Package and Publish to PyPI"
         points: 3
-        status: "not_started"
+        status: "completed"
         assigned_to: "Jarad DeLorenzo"
         epic: "EPIC-004"
         priority: "Must Have"
+        completed_date: "2026-01-25"
+        actual_points: 3
       - story_id: "STORY-007"
         title: "Packaging Service (Complete)"
         points: 5
@@ -167,8 +171,8 @@ sprints:
 
 velocity:
   sprint_1: 27  # All committed points completed
-  sprint_2: null
-  rolling_average: null
+  sprint_2: 27  # All committed points completed
+  rolling_average: 27  # (27 + 27) / 2
 
 team:
   size: 1
