@@ -10,6 +10,7 @@ from skillex.cli import _format_size, app
 from skillex.exceptions import PackagingError
 from skillex.services import PackagingResult, SkillPackageResult
 from skillex.services.discovery import SkillInfo
+from tests.conftest import strip_ansi
 
 runner = CliRunner()
 
@@ -43,15 +44,15 @@ class TestZipCommandHelp:
         """Test that --help shows command usage."""
         result = runner.invoke(app, ["zip", "--help"])
         assert result.exit_code == 0
-        assert "Package Claude skills" in result.stdout
-        assert "PATTERN" in result.stdout
-        assert "--verbose" in result.stdout
+        assert "Package Claude skills" in strip_ansi(result.stdout)
+        assert "PATTERN" in strip_ansi(result.stdout)
+        assert "--verbose" in strip_ansi(result.stdout)
 
     def test_app_help_shows_zip(self):
         """Test that app help shows zip command."""
         result = runner.invoke(app, ["--help"])
         assert result.exit_code == 0
-        assert "zip" in result.stdout
+        assert "zip" in strip_ansi(result.stdout)
 
 
 class TestZipCommandSuccess:
@@ -92,7 +93,7 @@ class TestZipCommandSuccess:
             result = runner.invoke(app, ["zip"])
 
             assert result.exit_code == 0
-            assert "Packaged 2 skill(s)" in result.stdout
+            assert "Packaged 2 skill(s)" in strip_ansi(result.stdout)
             mock_service.package_skills.assert_called_once_with(pattern="")
 
     def test_zip_with_pattern(self, mock_packaging_result):
@@ -117,10 +118,10 @@ class TestZipCommandSuccess:
             result = runner.invoke(app, ["zip", "-v"])
 
             assert result.exit_code == 0
-            assert "Packaging Results" in result.stdout
-            assert "python-pro" in result.stdout
-            assert "typescript-pro" in result.stdout
-            assert "Size" in result.stdout
+            assert "Packaging Results" in strip_ansi(result.stdout)
+            assert "python-pro" in strip_ansi(result.stdout)
+            assert "typescript-pro" in strip_ansi(result.stdout)
+            assert "Size" in strip_ansi(result.stdout)
 
     def test_zip_verbose_long_flag(self, mock_packaging_result):
         """Test verbose mode with --verbose flag."""
@@ -132,7 +133,7 @@ class TestZipCommandSuccess:
             result = runner.invoke(app, ["zip", "--verbose"])
 
             assert result.exit_code == 0
-            assert "Packaging Results" in result.stdout
+            assert "Packaging Results" in strip_ansi(result.stdout)
 
     def test_zip_shows_output_paths(self, mock_packaging_result):
         """Test that output paths are shown."""
@@ -144,7 +145,7 @@ class TestZipCommandSuccess:
             result = runner.invoke(app, ["zip"])
 
             assert result.exit_code == 0
-            assert "/tmp/output/python-pro.zip" in result.stdout
+            assert "/tmp/output/python-pro.zip" in strip_ansi(result.stdout)
 
 
 class TestZipCommandNoSkills:
@@ -168,7 +169,7 @@ class TestZipCommandNoSkills:
             result = runner.invoke(app, ["zip"])
 
             assert result.exit_code == 0
-            assert "No skills found" in result.stdout
+            assert "No skills found" in strip_ansi(result.stdout)
 
     def test_no_skills_matching_pattern(self):
         """Test message when no skills match pattern."""
@@ -188,7 +189,7 @@ class TestZipCommandNoSkills:
             result = runner.invoke(app, ["zip", "nonexistent"])
 
             assert result.exit_code == 0
-            assert "No skills matching 'nonexistent' found" in result.stdout
+            assert "No skills matching 'nonexistent' found" in strip_ansi(result.stdout)
 
 
 class TestZipCommandPartialFailure:
@@ -228,9 +229,9 @@ class TestZipCommandPartialFailure:
             assert cli_result.exit_code == 2
             # Check combined output (stdout + stderr)
             output = cli_result.output
-            assert "1 skill(s) failed" in output
-            assert "broken-skill" in output
-            assert "Permission denied" in output
+            assert "1 skill(s) failed" in strip_ansi(output)
+            assert "broken-skill" in strip_ansi(output)
+            assert "Permission denied" in strip_ansi(output)
 
     def test_partial_failure_verbose_shows_table(self):
         """Test that partial failures show in verbose table."""
@@ -263,7 +264,7 @@ class TestZipCommandPartialFailure:
             cli_result = runner.invoke(app, ["zip", "-v"])
 
             assert cli_result.exit_code == 2
-            assert "1/2 successful" in cli_result.stdout
+            assert "1/2 successful" in strip_ansi(cli_result.stdout)
 
 
 class TestZipCommandTotalFailure:
@@ -390,8 +391,8 @@ class TestZipCommandVerboseTable:
 
             cli_result = runner.invoke(app, ["zip", "-v"])
 
-            assert "Duration" in cli_result.stdout
-            assert "1.23" in cli_result.stdout
+            assert "Duration" in strip_ansi(cli_result.stdout)
+            assert "1.23" in strip_ansi(cli_result.stdout)
 
 
 # ============================================================================
@@ -406,14 +407,14 @@ class TestListCommandHelp:
         """Test that --help shows command usage."""
         result = runner.invoke(app, ["list", "--help"])
         assert result.exit_code == 0
-        assert "List available Claude skills" in result.stdout
-        assert "PATTERN" in result.stdout
+        assert "List available Claude skills" in strip_ansi(result.stdout)
+        assert "PATTERN" in strip_ansi(result.stdout)
 
     def test_app_help_shows_list(self):
         """Test that app help shows list command."""
         result = runner.invoke(app, ["--help"])
         assert result.exit_code == 0
-        assert "list" in result.stdout
+        assert "list" in strip_ansi(result.stdout)
 
 
 class TestListCommandSuccess:
@@ -459,10 +460,10 @@ class TestListCommandSuccess:
             result = runner.invoke(app, ["list"])
 
             assert result.exit_code == 0
-            assert "Found 3 skill(s)" in result.stdout
-            assert "python-pro" in result.stdout
-            assert "typescript-pro" in result.stdout
-            assert "rust-pro" in result.stdout
+            assert "Found 3 skill(s)" in strip_ansi(result.stdout)
+            assert "python-pro" in strip_ansi(result.stdout)
+            assert "typescript-pro" in strip_ansi(result.stdout)
+            assert "rust-pro" in strip_ansi(result.stdout)
             mock_discovery.discover_all.assert_called_once()
 
     def test_list_with_pattern(self, mock_skills):
@@ -484,8 +485,8 @@ class TestListCommandSuccess:
             result = runner.invoke(app, ["list", "python"])
 
             assert result.exit_code == 0
-            assert "Found 1 skill(s)" in result.stdout
-            assert "python-pro" in result.stdout
+            assert "Found 1 skill(s)" in strip_ansi(result.stdout)
+            assert "python-pro" in strip_ansi(result.stdout)
             mock_fuzzy.match.assert_called_once_with("python", mock_skills)
 
     def test_list_shows_table_columns(self, mock_skills):
@@ -504,10 +505,10 @@ class TestListCommandSuccess:
             result = runner.invoke(app, ["list"])
 
             assert result.exit_code == 0
-            assert "Skill" in result.stdout
-            assert "Size" in result.stdout
-            assert "Files" in result.stdout
-            assert "Path" in result.stdout
+            assert "Skill" in strip_ansi(result.stdout)
+            assert "Size" in strip_ansi(result.stdout)
+            assert "Files" in strip_ansi(result.stdout)
+            assert "Path" in strip_ansi(result.stdout)
 
     def test_list_shows_size_formatted(self, mock_skills):
         """Test that size is formatted correctly."""
@@ -526,9 +527,9 @@ class TestListCommandSuccess:
 
             assert result.exit_code == 0
             # 1024 bytes = 1.0 KB
-            assert "1.0 KB" in result.stdout
+            assert "1.0 KB" in strip_ansi(result.stdout)
             # 2048 bytes = 2.0 KB
-            assert "2.0 KB" in result.stdout
+            assert "2.0 KB" in strip_ansi(result.stdout)
 
 
 class TestListCommandNoSkills:
@@ -550,7 +551,7 @@ class TestListCommandNoSkills:
             result = runner.invoke(app, ["list"])
 
             assert result.exit_code == 0
-            assert "No skills found" in result.stdout
+            assert "No skills found" in strip_ansi(result.stdout)
 
     def test_no_skills_matching_pattern(self):
         """Test message when no skills match pattern."""
@@ -578,7 +579,7 @@ class TestListCommandNoSkills:
             result = runner.invoke(app, ["list", "nonexistent"])
 
             assert result.exit_code == 0
-            assert "No skills matching 'nonexistent' found" in result.stdout
+            assert "No skills matching 'nonexistent' found" in strip_ansi(result.stdout)
 
 
 class TestListCommandErrors:

@@ -1,3 +1,4 @@
+from tests.conftest import strip_ansi
 """Integration tests for CLI - End-to-end command testing with real file operations."""
 
 import os
@@ -88,7 +89,7 @@ class TestZipCommandIntegration:
         result = runner.invoke(app, ["zip"])
 
         assert result.exit_code == 0
-        assert "Packaged" in result.stdout
+        assert "Packaged" in strip_ansi(result.stdout)
 
         # Check that ZIP files were created
         output_dir = temp_skills_env["root"] / "skills"
@@ -100,18 +101,18 @@ class TestZipCommandIntegration:
         result = runner.invoke(app, ["zip", "python"])
 
         assert result.exit_code == 0
-        assert "Packaged 1 skill(s)" in result.stdout
-        assert "python-helper" in result.stdout
+        assert "Packaged 1 skill(s)" in strip_ansi(result.stdout)
+        assert "python-helper" in strip_ansi(result.stdout)
 
     def test_zip_verbose_shows_table(self, temp_skills_env):
         """Test that verbose mode shows rich table output."""
         result = runner.invoke(app, ["zip", "-v"])
 
         assert result.exit_code == 0
-        assert "Packaging Results" in result.stdout
-        assert "Skill" in result.stdout
-        assert "Status" in result.stdout
-        assert "Size" in result.stdout
+        assert "Packaging Results" in strip_ansi(result.stdout)
+        assert "Skill" in strip_ansi(result.stdout)
+        assert "Status" in strip_ansi(result.stdout)
+        assert "Size" in strip_ansi(result.stdout)
 
     def test_zip_creates_valid_archives(self, temp_skills_env):
         """Test that created archives are valid ZIP files."""
@@ -141,14 +142,14 @@ class TestZipCommandIntegration:
         result = runner.invoke(app, ["zip", "nonexistent"])
 
         assert result.exit_code == 0
-        assert "No skills matching 'nonexistent' found" in result.stdout
+        assert "No skills matching 'nonexistent' found" in strip_ansi(result.stdout)
 
     def test_zip_output_paths_shown(self, temp_skills_env):
         """Test that output paths are displayed."""
         result = runner.invoke(app, ["zip", "python"])
 
         assert result.exit_code == 0
-        assert ".zip" in result.stdout
+        assert ".zip" in strip_ansi(result.stdout)
 
 
 class TestZipCommandEnvironmentErrors:
@@ -162,7 +163,7 @@ class TestZipCommandEnvironmentErrors:
         result = runner.invoke(app, ["zip"])
 
         assert result.exit_code == 1
-        assert "DC" in result.output
+        assert "DC" in strip_ansi(result.output)
 
 
 class TestCLIHelpOutput:
@@ -173,18 +174,18 @@ class TestCLIHelpOutput:
         result = runner.invoke(app, ["--help"])
 
         assert result.exit_code == 0
-        assert "skillex" in result.stdout.lower() or "claude" in result.stdout.lower()
-        assert "zip" in result.stdout
+        assert "skillex" in strip_ansi(result.stdout).lower() or "claude" in strip_ansi(result.stdout).lower()
+        assert "zip" in strip_ansi(result.stdout)
 
     def test_zip_help(self):
         """Test that zip help shows usage."""
         result = runner.invoke(app, ["zip", "--help"])
 
         assert result.exit_code == 0
-        assert "Package Claude skills" in result.stdout
-        assert "PATTERN" in result.stdout
-        assert "--verbose" in result.stdout
-        assert "-v" in result.stdout
+        assert "Package Claude skills" in strip_ansi(result.stdout)
+        assert "PATTERN" in strip_ansi(result.stdout)
+        assert "--verbose" in strip_ansi(result.stdout)
+        assert "-v" in strip_ansi(result.stdout)
 
 
 # ============================================================================
@@ -200,21 +201,21 @@ class TestListCommandIntegration:
         result = runner.invoke(app, ["list"])
 
         assert result.exit_code == 0
-        assert "Found 3 skill(s)" in result.stdout
-        assert "test-skill-one" in result.stdout
-        assert "test-skill-two" in result.stdout
-        assert "python-helper" in result.stdout
+        assert "Found 3 skill(s)" in strip_ansi(result.stdout)
+        assert "test-skill-one" in strip_ansi(result.stdout)
+        assert "test-skill-two" in strip_ansi(result.stdout)
+        assert "python-helper" in strip_ansi(result.stdout)
 
     def test_list_with_pattern_filters_skills(self, temp_skills_env):
         """Test that pattern filtering works correctly."""
         result = runner.invoke(app, ["list", "python"])
 
         assert result.exit_code == 0
-        assert "Found 1 skill(s)" in result.stdout
-        assert "python-helper" in result.stdout
+        assert "Found 1 skill(s)" in strip_ansi(result.stdout)
+        assert "python-helper" in strip_ansi(result.stdout)
         # Other skills should not be shown
-        assert "test-skill-one" not in result.stdout
-        assert "test-skill-two" not in result.stdout
+        assert "test-skill-one" not in strip_ansi(result.stdout)
+        assert "test-skill-two" not in strip_ansi(result.stdout)
 
     def test_list_shows_table_format(self, temp_skills_env):
         """Test that list shows rich table output."""
@@ -222,17 +223,17 @@ class TestListCommandIntegration:
 
         assert result.exit_code == 0
         # Table headers
-        assert "Skill" in result.stdout
-        assert "Size" in result.stdout
-        assert "Files" in result.stdout
-        assert "Path" in result.stdout
+        assert "Skill" in strip_ansi(result.stdout)
+        assert "Size" in strip_ansi(result.stdout)
+        assert "Files" in strip_ansi(result.stdout)
+        assert "Path" in strip_ansi(result.stdout)
 
     def test_list_pattern_no_match(self, temp_skills_env):
         """Test message when pattern doesn't match any skills."""
         result = runner.invoke(app, ["list", "nonexistent"])
 
         assert result.exit_code == 0
-        assert "No skills matching 'nonexistent' found" in result.stdout
+        assert "No skills matching 'nonexistent' found" in strip_ansi(result.stdout)
 
     def test_list_shows_file_counts(self, temp_skills_env):
         """Test that file counts are displayed."""
@@ -241,24 +242,24 @@ class TestListCommandIntegration:
         assert result.exit_code == 0
         # python-helper has SKILL.md and examples/example1.py (2 files)
         # This checks that file count is shown
-        assert "2" in result.stdout
+        assert "2" in strip_ansi(result.stdout)
 
     def test_list_case_insensitive(self, temp_skills_env):
         """Test that pattern matching is case-insensitive."""
         result = runner.invoke(app, ["list", "PYTHON"])
 
         assert result.exit_code == 0
-        assert "Found 1 skill(s)" in result.stdout
-        assert "python-helper" in result.stdout
+        assert "Found 1 skill(s)" in strip_ansi(result.stdout)
+        assert "python-helper" in strip_ansi(result.stdout)
 
     def test_list_partial_match(self, temp_skills_env):
         """Test that partial pattern matches work."""
         result = runner.invoke(app, ["list", "test"])
 
         assert result.exit_code == 0
-        assert "Found 2 skill(s)" in result.stdout
-        assert "test-skill-one" in result.stdout
-        assert "test-skill-two" in result.stdout
+        assert "Found 2 skill(s)" in strip_ansi(result.stdout)
+        assert "test-skill-one" in strip_ansi(result.stdout)
+        assert "test-skill-two" in strip_ansi(result.stdout)
 
 
 class TestListCommandEnvironmentErrors:
@@ -272,4 +273,4 @@ class TestListCommandEnvironmentErrors:
         result = runner.invoke(app, ["list"])
 
         assert result.exit_code == 1
-        assert "DC" in result.output
+        assert "DC" in strip_ansi(result.output)
