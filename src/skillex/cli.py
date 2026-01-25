@@ -263,25 +263,35 @@ def zip(
 
         # If verbose, show progress bar during packaging
         if verbose:
-            # Pre-discover skills for progress bar
-            from skillex.services.discovery import SkillDiscoveryService
-            from skillex.services.fuzzy import FuzzyMatcherService
+            with formatter.progress_bar() as progress:
+                # Start with indeterminate progress
+                task = progress.add_task("Discovering skills...", total=None)
 
-            discovery = SkillDiscoveryService()
-            matcher = FuzzyMatcherService()
-            all_skills = discovery.discover_all()
-            matched = matcher.match(search_pattern, all_skills)
+                # Create progress callback to update bar
+                def on_progress(current: int, total: int, skill_name: str) -> None:
+                    # Update task with total on first call
+                    if progress.tasks[task].total is None:
+                        progress.update(task, total=total, description=f"Packaging {total} skill(s)")
 
-            if matched:
-                with formatter.progress_bar() as progress:
-                    task = progress.add_task(
-                        f"Packaging {len(matched)} skill(s)...",
-                        total=len(matched)
+                    # Update progress with skill name
+                    progress.update(
+                        task,
+                        completed=current,
+                        description=f"Packaging {total} skill(s): {skill_name}"
                     )
-                    result = service.package_skills(pattern=search_pattern)
-                    progress.update(task, completed=len(matched))
-            else:
-                result = service.package_skills(pattern=search_pattern)
+
+                # Package with progress callback
+                result = service.package_skills(
+                    pattern=search_pattern,
+                    progress_callback=on_progress
+                )
+
+                # Mark complete
+                if result.total_skills > 0:
+                    progress.update(
+                        task,
+                        description=f"Packaged {result.success_count}/{result.total_skills} skill(s)"
+                    )
         else:
             result = service.package_skills(pattern=search_pattern)
 

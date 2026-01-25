@@ -6,6 +6,7 @@ validation, and archive creation.
 """
 
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -15,6 +16,9 @@ from skillex.infrastructure.zipbuilder import ZipArchiveBuilder
 from skillex.services.discovery import SkillDiscoveryService, SkillInfo
 from skillex.services.fuzzy import FuzzyMatcherService
 from skillex.services.validation import ValidationResult, ValidationService
+
+# Type alias for progress callback: (current: int, total: int, skill_name: str) -> None
+ProgressCallback = Callable[[int, int, str], None]
 
 
 @dataclass
@@ -139,6 +143,7 @@ class PackagingService:
         self,
         pattern: str = "",
         skip_validation: bool = False,
+        progress_callback: ProgressCallback | None = None,
     ) -> PackagingResult:
         """Package skills matching the given pattern.
 
@@ -149,12 +154,23 @@ class PackagingService:
         Args:
             pattern: Pattern to match skill names (empty matches all)
             skip_validation: Skip environment validation (for testing)
+            progress_callback: Optional callback for progress updates.
+                             Called with (current, total, skill_name) after each skill.
 
         Returns:
             PackagingResult with details of all packaging attempts
 
         Raises:
             PackagingError: If environment validation fails (unless skipped)
+
+        Example:
+            >>> def on_progress(current, total, skill):
+            ...     print(f"Packaging {current}/{total}: {skill}")
+            >>> service = PackagingService()
+            >>> result = service.package_skills("python", progress_callback=on_progress)
+            Packaging 1/3: python-utils
+            Packaging 2/3: python-helpers
+            Packaging 3/3: python-tools
         """
         start_time = time.monotonic()
         result = PackagingResult()
@@ -183,7 +199,7 @@ class PackagingService:
         result.total_skills = len(matched_skills)
 
         # Package each matched skill
-        for skill in matched_skills:
+        for index, skill in enumerate(matched_skills, start=1):
             skill_result = self._package_single_skill(skill, config)
 
             if skill_result.success:
@@ -191,6 +207,10 @@ class PackagingService:
                 result.total_size_bytes += skill_result.size_bytes
             else:
                 result.failed.append(skill_result)
+
+            # Call progress callback if provided
+            if progress_callback is not None:
+                progress_callback(index, len(matched_skills), skill.name)
 
         result.duration_seconds = time.monotonic() - start_time
         return result
