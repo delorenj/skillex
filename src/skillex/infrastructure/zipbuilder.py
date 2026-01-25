@@ -75,12 +75,14 @@ class ZipArchiveBuilder:
         # Validate source directory exists
         if not self.fs_manager.check_exists(source_dir_path):
             raise ArchiveCreationError(
-                f"Source directory not found: {source_dir_path}"
+                f"Source directory not found: {source_dir_path}. "
+                f"Please verify the directory exists before packaging."
             )
 
         if not source_dir_path.is_dir():
             raise ArchiveCreationError(
-                f"Source path is not a directory: {source_dir_path}"
+                f"Source path is not a directory: {source_dir_path}. "
+                f"Please provide a valid directory path to package."
             )
 
         # Create output directory if needed
@@ -123,7 +125,8 @@ class ZipArchiveBuilder:
                 raise
             else:
                 raise ArchiveCreationError(
-                    f"Failed to create archive '{output_path}': {e}"
+                    f"Failed to create archive '{output_path}': {e}. "
+                    f"Please check disk space and write permissions."
                 ) from e
 
     def _write_archive(self, source_dir: Path, archive_path: Path) -> None:
@@ -172,11 +175,13 @@ class ZipArchiveBuilder:
 
         except OSError as e:
             raise ArchiveCreationError(
-                f"Failed to write archive '{archive_path}': {e}"
+                f"Failed to write archive '{archive_path}': {e}. "
+                f"Please check source files are readable and destination has sufficient disk space."
             ) from e
         except zipfile.BadZipFile as e:
             raise ArchiveCreationError(
-                f"Failed to create valid ZIP file '{archive_path}': {e}"
+                f"Failed to create valid ZIP file '{archive_path}': {e}. "
+                f"Please check source directory contains valid files."
             ) from e
 
     def _validate_archive(self, archive_path: Path) -> None:
@@ -198,15 +203,17 @@ class ZipArchiveBuilder:
 
                 if bad_file is not None:
                     raise ArchiveIntegrityError(
-                        f"Archive '{archive_path}' is corrupt: "
-                        f"bad file '{bad_file}'"
+                        f"Archive '{archive_path}' is corrupt: bad file '{bad_file}'. "
+                        f"Please try repackaging or check source file integrity."
                     )
 
         except zipfile.BadZipFile as e:
             raise ArchiveIntegrityError(
-                f"Archive '{archive_path}' is not a valid ZIP file: {e}"
+                f"Archive '{archive_path}' is not a valid ZIP file: {e}. "
+                f"Please try repackaging the skill."
             ) from e
         except OSError as e:
             raise ArchiveIntegrityError(
-                f"Failed to validate archive '{archive_path}': {e}"
+                f"Failed to validate archive '{archive_path}': {e}. "
+                f"Please check the file is accessible and readable."
             ) from e

@@ -129,12 +129,14 @@ class FileSystemManager:
 
         if not dir_path.exists():
             raise DirectoryNotFoundError(
-                f"Directory not found: {dir_path}"
+                f"Directory not found: {dir_path}. "
+                f"Please check the path exists or create it first."
             )
 
         if not dir_path.is_dir():
             raise FileSystemError(
-                f"Path is not a directory: {dir_path}"
+                f"Path is not a directory: {dir_path}. "
+                f"Please provide a valid directory path."
             )
 
         try:
@@ -143,12 +145,14 @@ class FileSystemManager:
 
         except PermissionError as e:
             raise PermissionDeniedError(
-                f"Permission denied reading directory '{dir_path}': {e}"
+                f"Permission denied reading directory '{dir_path}': {e}. "
+                f"Please check file permissions or run with appropriate privileges."
             ) from e
 
         except OSError as e:
             raise FileSystemError(
-                f"Error reading directory '{dir_path}': {e}"
+                f"Error reading directory '{dir_path}': {e}. "
+                f"Please check the directory is accessible."
             ) from e
 
     def check_exists(self, path: str | Path) -> bool:
@@ -184,7 +188,8 @@ class FileSystemManager:
 
         if not resolved_path.exists():
             raise DirectoryNotFoundError(
-                f"Path not found: {resolved_path}"
+                f"Path not found: {resolved_path}. "
+                f"Please verify the path exists and is accessible."
             )
 
         try:
@@ -222,12 +227,14 @@ class FileSystemManager:
 
         except PermissionError as e:
             raise PermissionDeniedError(
-                f"Permission denied accessing '{resolved_path}': {e}"
+                f"Permission denied accessing '{resolved_path}': {e}. "
+                f"Please check file permissions or run with appropriate privileges."
             ) from e
 
         except OSError as e:
             raise FileSystemError(
-                f"Error getting metadata for '{resolved_path}': {e}"
+                f"Error getting metadata for '{resolved_path}': {e}. "
+                f"Please check the path is valid and accessible."
             ) from e
 
     def create_directory(
@@ -256,15 +263,18 @@ class FileSystemManager:
 
         except FileExistsError as e:
             raise DirectoryCreateError(
-                f"Directory already exists: {dir_path}"
+                f"Directory already exists: {dir_path}. "
+                f"Use exist_ok=True to allow existing directories."
             ) from e
 
         except PermissionError as e:
             raise PermissionDeniedError(
-                f"Permission denied creating directory '{dir_path}': {e}"
+                f"Permission denied creating directory '{dir_path}': {e}. "
+                f"Please check parent directory permissions or run with appropriate privileges."
             ) from e
 
         except OSError as e:
             raise DirectoryCreateError(
-                f"Failed to create directory '{dir_path}': {e}"
+                f"Failed to create directory '{dir_path}': {e}. "
+                f"Please check the path is valid and parent directory exists (or use parents=True)."
             ) from e

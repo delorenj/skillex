@@ -140,7 +140,8 @@ class ValidationService:
             )
         elif not config.skills_directory.is_dir():
             result.add_error(
-                f"Skills path is not a directory: {config.skills_directory}"
+                f"Skills path is not a directory: {config.skills_directory}. "
+                f"Please ensure ~/.claude/skills is a directory."
             )
 
         # Validate output directory (parent should exist or be creatable)
@@ -183,9 +184,15 @@ class ValidationService:
 
         # Validate source path exists
         if not source.exists():
-            result.add_error(f"Source path does not exist: {source}")
+            result.add_error(
+                f"Source path does not exist: {source}. "
+                f"Please check the path and try again."
+            )
         elif not source.is_dir():
-            result.add_error(f"Source path is not a directory: {source}")
+            result.add_error(
+                f"Source path is not a directory: {source}. "
+                f"Please provide a valid directory path."
+            )
 
         # Validate source is within allowed base (if specified)
         if allowed_base is not None:
@@ -203,7 +210,8 @@ class ValidationService:
             )
         elif not output_parent.is_dir():
             result.add_error(
-                f"Output path parent is not a directory: {output_parent}"
+                f"Output path parent is not a directory: {output_parent}. "
+                f"Please provide a valid output directory path."
             )
 
         # Check if output file already exists
@@ -233,12 +241,12 @@ class ValidationService:
 
         # Check for empty name
         if not skill_name:
-            result.add_error("Skill name cannot be empty")
+            result.add_error("Skill name cannot be empty. Please provide a valid skill name.")
             return result
 
         # Check for whitespace-only name
         if skill_name.isspace():
-            result.add_error("Skill name cannot be whitespace only")
+            result.add_error("Skill name cannot be whitespace only. Please provide a valid skill name.")
             return result
 
         # Strip whitespace for further validation
@@ -249,7 +257,8 @@ class ValidationService:
         found_invalid = [c for c in skill_name if c in invalid_chars]
         if found_invalid:
             result.add_error(
-                f"Skill name contains invalid characters: {', '.join(repr(c) for c in found_invalid)}"
+                f"Skill name contains invalid characters: {', '.join(repr(c) for c in found_invalid)}. "
+                f"Please use only alphanumeric characters, hyphens, and underscores."
             )
 
         # Check against available skills (if provided)
@@ -263,7 +272,8 @@ class ValidationService:
                 )
             else:
                 result.add_error(
-                    f"Skill '{skill_name}' not found in available skills"
+                    f"Skill '{skill_name}' not found in available skills. "
+                    f"Run 'skillex list' to see available skills."
                 )
 
         return result
