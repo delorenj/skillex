@@ -15,6 +15,27 @@
 
 The tool addresses the pain point of manually managing Claude skill files by automating packaging workflows and providing visibility into the local skills ecosystem.
 
+Think of the final result as a searchable skill catalog.
+
+1. From your project, skill repo, or global skills folder --> Skillex
+
+- find,
+- import
+- lint
+- review
+
+2. While in the Skillex Catalog
+
+- organize
+- package into meta groups
+- share
+- search
+
+3. Skillex --> your project, skill repo, or global skills folder
+
+- export
+- deploy
+
 ---
 
 ## Business Objectives
@@ -28,24 +49,26 @@ The tool addresses the pain point of manually managing Claude skill files by aut
 
 ## Success Metrics
 
-| Metric | Target | Measurement |
-|--------|--------|-------------|
-| Time to package skill | < 5 seconds | CLI execution time |
-| User adoption | 10+ active users | Installation count |
-| Skill packaging accuracy | 100% | No corrupt/incomplete archives |
-| Error rate | < 1% | Failed packaging operations |
+| Metric                   | Target           | Measurement                    |
+| ------------------------ | ---------------- | ------------------------------ |
+| Time to package skill    | < 5 seconds      | CLI execution time             |
+| User adoption            | 10+ active users | Installation count             |
+| Skill packaging accuracy | 100%             | No corrupt/incomplete archives |
+| Error rate               | < 1%             | Failed packaging operations    |
 
 ---
 
 ## User Personas
 
 ### Primary: AI Developer
+
 - **Role:** Software engineer building AI-powered applications
 - **Goals:** Quickly package and share Claude skills across projects
 - **Pain Points:** Manual zip creation, file path management, bulk operations
 - **Technical Level:** High (comfortable with CLI tools, Python, environment variables)
 
 ### Secondary: DevOps Engineer
+
 - **Role:** Infrastructure automation specialist
 - **Goals:** Automate skill deployment and backup workflows
 - **Pain Points:** Need scriptable, reliable packaging tools
@@ -63,6 +86,7 @@ The tool addresses the pain point of manually managing Claude skill files by aut
 System shall provide a `zip` command that packages Claude skill directories into distributable zip archives.
 
 **Acceptance Criteria:**
+
 - [ ] Command accepts skill name pattern as argument
 - [ ] Creates zip file with skill name + `.zip` extension
 - [ ] Outputs to `$DC/skills/` directory
@@ -82,6 +106,7 @@ System shall provide a `zip` command that packages Claude skill directories into
 System shall support case-insensitive fuzzy matching for skill names, allowing partial pattern matching.
 
 **Acceptance Criteria:**
+
 - [ ] Pattern "agent" matches "agent-browser", "ai-agent-sdk", etc.
 - [ ] Matching is case-insensitive
 - [ ] Returns all matching skills sorted alphabetically
@@ -99,6 +124,7 @@ System shall support case-insensitive fuzzy matching for skill names, allowing p
 System shall package multiple skills when fuzzy match returns multiple results.
 
 **Acceptance Criteria:**
+
 - [ ] All matched skills are packaged automatically
 - [ ] Displays list of matched skills before packaging
 - [ ] Shows progress for each skill being packaged
@@ -117,6 +143,7 @@ System shall package multiple skills when fuzzy match returns multiple results.
 System shall automatically discover Claude skills from standard directory `~/.claude/skills/`.
 
 **Acceptance Criteria:**
+
 - [ ] Reads from `~/.claude/skills/` directory
 - [ ] Validates directory exists before operations
 - [ ] Identifies skill directories (not files)
@@ -134,6 +161,7 @@ System shall automatically discover Claude skills from standard directory `~/.cl
 System shall output packaged skills to `$DC/skills/` directory, creating it if needed.
 
 **Acceptance Criteria:**
+
 - [ ] Reads `$DC` environment variable
 - [ ] Creates `$DC/skills/` directory if missing
 - [ ] Validates `$DC` is set before operations
@@ -151,6 +179,7 @@ System shall output packaged skills to `$DC/skills/` directory, creating it if n
 System shall provide a `list` command to display all available Claude skills.
 
 **Acceptance Criteria:**
+
 - [ ] Lists all skills in `~/.claude/skills/`
 - [ ] Displays in formatted table with skill name and path
 - [ ] Shows total skill count
@@ -168,6 +197,7 @@ System shall provide a `list` command to display all available Claude skills.
 System shall allow optional pattern argument to filter skills in list command.
 
 **Acceptance Criteria:**
+
 - [ ] `skillex list agent` shows only matching skills
 - [ ] Uses same fuzzy matching as zip command
 - [ ] Shows "no matches" message if pattern finds nothing
@@ -185,6 +215,7 @@ System shall allow optional pattern argument to filter skills in list command.
 System shall provide verbose flag (`-v`, `--verbose`) to show detailed packaging information.
 
 **Acceptance Criteria:**
+
 - [ ] Shows file size for each created zip
 - [ ] Displays detailed progress during packaging
 - [ ] Provides additional diagnostic information
@@ -202,6 +233,7 @@ System shall provide verbose flag (`-v`, `--verbose`) to show detailed packaging
 System shall provide colored, formatted terminal output for improved readability.
 
 **Acceptance Criteria:**
+
 - [ ] Uses colors to indicate success (green), errors (red), info (cyan)
 - [ ] Formats tables with borders and alignment
 - [ ] Displays checkmarks/symbols for visual feedback
@@ -219,6 +251,7 @@ System shall provide colored, formatted terminal output for improved readability
 System shall handle errors gracefully and provide actionable error messages.
 
 **Acceptance Criteria:**
+
 - [ ] Validates environment variables before operations
 - [ ] Checks file system permissions
 - [ ] Handles missing directories
@@ -237,6 +270,7 @@ System shall handle errors gracefully and provide actionable error messages.
 System shall create valid zip archives with proper internal structure.
 
 **Acceptance Criteria:**
+
 - [ ] Archive uses relative paths from skills parent directory
 - [ ] Maintains skill directory as top-level folder in zip
 - [ ] Uses ZIP_DEFLATED compression
@@ -254,6 +288,7 @@ System shall create valid zip archives with proper internal structure.
 System shall be installable as a Python CLI tool using `uv tool install`.
 
 **Acceptance Criteria:**
+
 - [ ] Installable via `uv tool install skillex`
 - [ ] Supports editable install: `uv tool install -e .`
 - [ ] Registers `skillex` command in PATH
@@ -274,6 +309,7 @@ System shall be installable as a Python CLI tool using `uv tool install`.
 Skill packaging operations shall complete quickly to support iterative workflows.
 
 **Acceptance Criteria:**
+
 - [ ] Single skill packaging completes in < 5 seconds for typical skills (< 50MB)
 - [ ] Bulk packaging processes skills concurrently where possible
 - [ ] No unnecessary file system scans
@@ -291,6 +327,7 @@ Developers need fast feedback loops when preparing skills for distribution.
 Packaged skills shall maintain complete file integrity with no data loss or corruption.
 
 **Acceptance Criteria:**
+
 - [ ] 100% of files in source directory included in zip
 - [ ] Zip archives pass integrity checks (`zip -T`)
 - [ ] File permissions preserved where supported
@@ -309,6 +346,7 @@ Skills must be reliably shareable without risk of missing files breaking functio
 CLI shall provide intuitive commands and helpful error messages for self-service usage.
 
 **Acceptance Criteria:**
+
 - [ ] Commands follow standard CLI conventions (verb-noun pattern)
 - [ ] Built-in help via `--help` flag
 - [ ] Error messages suggest corrective actions
@@ -327,6 +365,7 @@ Tool should be immediately usable without extensive documentation reference.
 Tool shall work across common development environments with minimal configuration.
 
 **Acceptance Criteria:**
+
 - [ ] Works on Linux, macOS, WSL
 - [ ] Requires only Python 3.12+ and standard libraries
 - [ ] Uses environment variables for configuration (no config files required)
@@ -345,6 +384,7 @@ Developers work in varied environments and expect tools to work consistently.
 Codebase shall follow Python best practices for long-term maintainability.
 
 **Acceptance Criteria:**
+
 - [ ] Type hints on all functions
 - [ ] Docstrings for public API
 - [ ] Clear separation of concerns (CLI, business logic, file operations)
@@ -363,6 +403,7 @@ Simple, well-structured code reduces maintenance burden and onboarding friction.
 Tool shall validate and sanitize file paths to prevent directory traversal attacks.
 
 **Acceptance Criteria:**
+
 - [ ] Validates skills directory is within expected location
 - [ ] Prevents packaging files outside skills directory
 - [ ] Sanitizes skill names before file system operations
@@ -381,6 +422,7 @@ Tool operates on file system with user-controlled inputs requiring security vali
 Implement fundamental skill packaging workflow: discover, match, zip, and save skills.
 
 **Functional Requirements:**
+
 - FR-001: Skill Packaging Command
 - FR-002: Fuzzy Skill Matching
 - FR-003: Bulk Skill Packaging
@@ -403,6 +445,7 @@ Core value proposition. Enables basic skill distribution workflow.
 Provide tools to list, filter, and discover available Claude skills in local environment.
 
 **Functional Requirements:**
+
 - FR-006: List Available Skills
 - FR-007: Filter Skills List
 
@@ -421,6 +464,7 @@ Improves developer workflow by surfacing available skills before packaging opera
 Improve CLI usability through rich output, verbose modes, and helpful feedback.
 
 **Functional Requirements:**
+
 - FR-008: Verbose Output Mode
 - FR-009: Rich Terminal Output
 - FR-010: Error Handling and Recovery
@@ -440,6 +484,7 @@ Reduces friction, improves debugging, and creates professional developer experie
 Package and distribute skillex as installable Python CLI tool via uv/pip.
 
 **Functional Requirements:**
+
 - FR-012: CLI Installation via uv
 
 **Story Count Estimate:** 2-3 stories
@@ -531,12 +576,12 @@ User → Sets $DC and retries
 
 ## Traceability Matrix
 
-| Epic ID | Epic Name | Functional Requirements | Story Estimate |
-|---------|-----------|-------------------------|----------------|
-| EPIC-001 | Core Skill Packaging | FR-001, FR-002, FR-003, FR-004, FR-005, FR-011 | 5-7 stories |
-| EPIC-002 | Skill Discovery | FR-006, FR-007 | 2-3 stories |
-| EPIC-003 | Enhanced UX | FR-008, FR-009, FR-010 | 3-4 stories |
-| EPIC-004 | Installation | FR-012 | 2-3 stories |
+| Epic ID  | Epic Name            | Functional Requirements                        | Story Estimate |
+| -------- | -------------------- | ---------------------------------------------- | -------------- |
+| EPIC-001 | Core Skill Packaging | FR-001, FR-002, FR-003, FR-004, FR-005, FR-011 | 5-7 stories    |
+| EPIC-002 | Skill Discovery      | FR-006, FR-007                                 | 2-3 stories    |
+| EPIC-003 | Enhanced UX          | FR-008, FR-009, FR-010                         | 3-4 stories    |
+| EPIC-004 | Installation         | FR-012                                         | 2-3 stories    |
 
 **Total Requirements:** 12 FRs, 6 NFRs
 **Total Epics:** 4
@@ -547,16 +592,19 @@ User → Sets $DC and retries
 ## Prioritization Summary
 
 ### Must Have (MVP Blockers)
+
 - **Functional:** 9 FRs (FR-001, FR-002, FR-003, FR-004, FR-005, FR-006, FR-010, FR-011, FR-012)
 - **Non-Functional:** 5 NFRs (NFR-001, NFR-002, NFR-003, NFR-004, NFR-006)
 - **Epics:** EPIC-001, EPIC-002, EPIC-004
 
 ### Should Have (High Value)
+
 - **Functional:** 3 FRs (FR-007, FR-008, FR-009)
 - **Non-Functional:** 1 NFR (NFR-005)
 - **Epics:** EPIC-003
 
 ### Could Have
+
 - None identified at this time
 
 ---
@@ -564,16 +612,19 @@ User → Sets $DC and retries
 ## Dependencies
 
 ### Internal Dependencies
+
 - `$DC` environment variable must be configured in user shell
 - Claude skills must exist in `~/.claude/skills/` directory
 - Python 3.12+ installed
 - `uv` package manager installed
 
 ### External Dependencies
+
 - **typer** (>=0.12.0): CLI framework
 - **rich** (>=13.0.0): Terminal formatting
 
 ### System Dependencies
+
 - Python 3.12+
 - Access to file system for read/write operations
 - Standard Unix-like shell environment
@@ -628,19 +679,19 @@ User → Sets $DC and retries
 
 ## Stakeholders
 
-| Role | Name | Involvement |
-|------|------|-------------|
-| Developer/Creator | Jarad DeLorenzo | Implementation, design decisions |
-| Primary User | AI Developers | Daily usage, feedback |
-| Secondary User | DevOps Engineers | Automation integration |
+| Role              | Name             | Involvement                      |
+| ----------------- | ---------------- | -------------------------------- |
+| Developer/Creator | Jarad DeLorenzo  | Implementation, design decisions |
+| Primary User      | AI Developers    | Daily usage, feedback            |
+| Secondary User    | DevOps Engineers | Automation integration           |
 
 ---
 
 ## Revision History
 
-| Version | Date | Author | Changes |
-|---------|------|--------|---------|
-| 1.0 | 2026-01-13 | PRD Generator | Initial PRD reverse-engineered from implementation |
+| Version | Date       | Author        | Changes                                            |
+| ------- | ---------- | ------------- | -------------------------------------------------- |
+| 1.0     | 2026-01-13 | PRD Generator | Initial PRD reverse-engineered from implementation |
 
 ---
 
@@ -656,6 +707,7 @@ Run `/bmad:architecture` to design system architecture that implements these req
 
 **Why Architecture?**
 With 12 functional requirements and 4 epics, architectural planning ensures:
+
 - Clean separation of CLI, business logic, and file operations
 - Testable, maintainable code structure
 - Clear module boundaries for future extensibility
