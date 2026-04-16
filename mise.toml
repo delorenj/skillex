@@ -1,0 +1,10 @@
+[hooks]
+enter = '{{config_root}}/.mise/scripts/link-agentfiles.sh'
+
+[[watch_files]]
+patterns = ["AGENTS.md"]
+task = "link-agentfiles"
+
+[tasks.link-agentfiles]
+description = "Symlink all agent files to AGENTS.md"
+run = ".mise/scripts/link-agentfiles.sh"
