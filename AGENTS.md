@@ -5,7 +5,7 @@ My [skill collection](./all-skills/) structured into categorized sets of compati
 ## Definitions
 
 - **Skill Root**: The skill path used by an agentic coding CLI containing a collection of skills. i.e. `/my-project/.agents/skills`, `~/.claude/skills`, etc.
-
+- **`all-skills/`**: A git submodule that tracks my personal collection of [skills](https://github.com/delorenj/skills)
 - **agentpack**: Similar to Claude's `Plugin`, but CLI-agnostic. Contains:
   - **skills**: A `Skill Root` containing a collection of non-overlapping synergistic skills.
   - **references/**: A set of supporting docs that the skills may refer to in cases where clarity is worth the token cost of extra context.

@@ -1,0 +1,19 @@
+[pack]
+name = "33god-dev"
+version = "0.1.0"
+description = "Standard loadout for 33god development work."
+
+# Note: this is a strawman. Fill slots by adding slotType frontmatter to the
+# relevant skills in all-skills/ and referencing them by name below. Or use
+# the freeform section for skills that don't declare a slotType yet.
+
+[slots.memory]
+required = false
+# skill = "hindsight"
+
+[slots.workflow]
+required = false
+# skill = "n8n-bridge"
+
+[freeform]
+skills = []

@@ -1,3 +1,7 @@
+[env]
+_.file = [".env"]
+CODEX_HOME = { value = ".codex", path = true }
+
 [hooks]
 enter = '{{config_root}}/.mise/scripts/link-agentfiles.sh'
 
@@ -7,4 +11,32 @@ task = "link-agentfiles"
 
 [tasks.link-agentfiles]
 description = "Symlink all agent files to AGENTS.md"
-run = ".mise/scripts/link-agentfiles.sh"
+run = "{{config_root}}/.mise/scripts/link-agentfiles.sh"
+
+[tasks.install]
+description = "Install dependencies with uv"
+run = "uv sync"
+
+[tasks.test]
+description = "Run the test suite"
+run = "uv run pytest"
+
+[tasks.lint]
+description = "Lint with ruff"
+run = "uv run ruff check ."
+
+[tasks.fmt]
+description = "Format with ruff"
+run = "uv run ruff format ."
+
+[tasks.tc]
+description = "Typecheck with mypy"
+run = "uv run mypy src/skillex"
+
+[tasks.build]
+description = "Build distribution"
+run = "uv build"
+
+[tasks.check]
+description = "Run all quality checks: lint, typecheck, test"
+depends = ["lint", "tc", "test"]

@@ -1,2 +1,13 @@
 CLAUDE.md
 GEMINI.md
+.venv/
+__pycache__/
+*.pyc
+dist/
+build/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/

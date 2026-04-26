@@ -1,0 +1,15 @@
+[pack]
+name = "test-pack"
+version = "0.1.0"
+description = "Fixture pack for loader tests"
+
+[slots.memory]
+required = true
+skill = "hindsight"
+
+[slots.workflow]
+required = false
+skill = "n8n-bridge"
+
+[freeform]
+skills = ["mermaid-expert"]
