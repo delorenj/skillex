@@ -1,0 +1,3 @@
+[submodule "all-skills"]
+	path = all-skills
+	url = git@github.com:delorenj/00_ceiling.git

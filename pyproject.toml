@@ -1,6 +1,6 @@
 [project]
 name = "skillex"
-version = "0.1.0"
+version = "0.1.1"
 description = "CLI-agnostic skill package manager. One pack, identical capability delivery across every agentic CLI."
 authors = [{ name = "Jarad DeLorenzo", email = "jaradd@gmail.com" }]
 requires-python = ">=3.12"
