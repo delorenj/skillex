@@ -1,0 +1,21 @@
+name: skillex-core
+version: 0.1.1
+source_repo: /home/delorenj/code/skillex
+source_authority: official
+language: python
+scope:
+  type: specific-modules
+  include:
+    - 'src/skillex/core/models.py'
+    - 'src/skillex/core/loader.py'
+    - 'src/skillex/core/linter.py'
+    - 'src/skillex/core/registry.py'
+    - 'src/skillex/core/file_lock.py'
+  exclude:
+    - 'src/skillex/core/activator.py'
+    - 'tests/**'
+  notes: 'Excludes activator.py — promoted to its own skill (skillex-core-activator) for the plan/apply/rollback pattern. file_lock and registry are utility helpers retained here for proximity to loader/models.'
+description: "Skillex domain layer: Pydantic v2 models for Skill/Pack/LinkOp/SkillexConfig, a typed loader error hierarchy, structured lint rules with severity + RuleCode codes, slot type registry, and a process-safe file lock. Forms the bottom of the skillex stack with no upward imports into commands or CLI."
+forge_tier: Deep
+created: '2026-04-28'
+created_by: Jarad DeLorenzo

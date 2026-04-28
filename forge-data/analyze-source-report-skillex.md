@@ -1,7 +1,8 @@
 ---
 workflowType: 'analyze-source'
-stepsCompleted: ['step-01-init', 'step-02-scan-project', 'step-03-identify-units', 'step-04-map-and-detect', 'step-05-recommend']
-lastStep: 'step-05-recommend'
+stepsCompleted: ['step-01-init', 'step-02-scan-project', 'step-03-identify-units', 'step-04-map-and-detect', 'step-05-recommend', 'step-06-generate-briefs']
+lastStep: 'step-06-generate-briefs'
+nextWorkflow: 'create-skill (briefs are detailed enough); brief-skill if scope refinement desired; create-stack-skill after individual skills exist'
 confirmed_units:
   - 'skillex-core'
   - 'skillex-adapters'
@@ -338,4 +339,24 @@ description: 'How skillex composes a CLI tool out of a Pydantic domain model, a 
 
 ## Generation Results
 
-[Appended by step-06-generate-briefs]
+### Generated Briefs
+
+| # | Unit Name | Output Path | Validation | Next Workflow |
+|---|-----------|-------------|------------|---------------|
+| 1 | `skillex-core` | `forge-data/skillex-core/skill-brief.yaml` | pass | `brief-skill` (refine specific-modules scope) **or** `create-skill` (brief is already detailed) |
+| 2 | `skillex-adapters` | `forge-data/skillex-adapters/skill-brief.yaml` | pass | `brief-skill` (public-api detailed scoping) **or** `create-skill` (brief is already detailed) |
+| 3 | `skillex-core-activator` | `forge-data/skillex-core-activator/skill-brief.yaml` | pass | `brief-skill` (refine specific-modules scope) **or** `create-skill` (brief is already detailed) |
+
+### Generation Summary
+
+- Total confirmed units: 3
+- Briefs generated: 3
+- Briefs skipped/failed: 0
+- Stack-skill candidates flagged: 1 (`skillex-stack`)
+
+### Next Steps
+
+1. **Run `create-skill` (CS) directly** for any of the three units — the briefs include explicit `scope.include` lists, descriptions, and notes; they are compilation-ready as-is. Use `--batch` to compile all three in sequence.
+2. **Or run `brief-skill` (BS)** on any unit first if you want to refine scope further (e.g., narrow `skillex-core` to only models + loader, or expand activator's brief with a worked-example narrative). Per-workflow recommendation favored this route, but the briefs are detailed enough to skip it.
+3. **After individual skills exist, run `create-stack-skill` (SS)** to compile `skillex-stack`, integrating the orchestration story (`cli.py → commands → core + adapters`) on top of the three component skills.
+4. **Optional follow-up:** address the two architectural smells flagged in step-04 — the layer inversion at `core/activator.py:18` and the private-symbol leak at `commands/status.py:11`. Neither blocks skilling; both belong in the activator skill's "constraints" section.

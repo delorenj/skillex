@@ -1,0 +1,30 @@
+{
+  "skill": "skf-analyze-source",
+  "status": "success",
+  "timestamp": "2026-04-28T20:32:24Z",
+  "outputs": [
+    {"type": "report", "path": "forge-data/analyze-source-report-skillex.md"},
+    {"type": "manifest", "path": "forge-data/skillex-core/skill-brief.yaml"},
+    {"type": "manifest", "path": "forge-data/skillex-adapters/skill-brief.yaml"},
+    {"type": "manifest", "path": "forge-data/skillex-core-activator/skill-brief.yaml"}
+  ],
+  "summary": {
+    "project_name": "skillex",
+    "project_paths": ["/home/delorenj/code/skillex"],
+    "forge_tier": "Deep",
+    "boundaries_detected": 4,
+    "qualifying_units": 5,
+    "confirmed_units": 3,
+    "rejected_units": 2,
+    "briefs_generated": 3,
+    "briefs_failed": 0,
+    "stack_skill_candidates": [
+      {
+        "name": "skillex-stack",
+        "members": ["skillex-core", "skillex-adapters", "skillex-core-activator", "skillex-commands"],
+        "flagged_for_create_stack_skill": true
+      }
+    ],
+    "next_workflow": "create-skill (briefs are detailed); create-stack-skill after individual skills"
+  }
+}

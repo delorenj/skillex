@@ -1,0 +1,16 @@
+name: skillex-core-activator
+version: 0.1.1
+source_repo: /home/delorenj/code/skillex
+source_authority: official
+language: python
+scope:
+  type: specific-modules
+  include:
+    - 'src/skillex/core/activator.py'
+  exclude:
+    - 'tests/**'
+  notes: 'Single-file skill scoped to the plan/apply/rollback algorithm. Public surface: plan(), apply(), ActivationError. Depends on adapters.base (registry enumeration) + core.file_lock + core.models — not standalone, but conceptually distinct from the rest of core. Document the layer-inversion (core depending on adapters.base) and the private-symbol leak in commands/status.py:11 where _skillex_owned_links_in is imported across module boundaries.'
+description: "Filesystem mutation engine for skillex: plan() computes a LinkOp diff for activating a Pack across one or more CLI scopes; apply() executes ops with per-op snapshot capture and rolls back on any failure. Reusable pattern for any reversible-mutation tool (migration runners, IaC executors, package linkers)."
+forge_tier: Deep
+created: '2026-04-28'
+created_by: Jarad DeLorenzo

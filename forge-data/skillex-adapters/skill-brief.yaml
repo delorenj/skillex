@@ -1,0 +1,19 @@
+name: skillex-adapters
+version: 0.1.1
+source_repo: /home/delorenj/code/skillex
+source_authority: official
+language: python
+scope:
+  type: public-api
+  include:
+    - 'src/skillex/adapters/base.py'
+    - 'src/skillex/adapters/claude.py'
+    - 'src/skillex/adapters/codex.py'
+    - 'src/skillex/adapters/opencode.py'
+  exclude:
+    - 'tests/**'
+  notes: 'Public Adapter Protocol contract plus three concrete CLI implementations. Side-effect registration via module-level register_adapter() at import time is a load-order contract that must be documented.'
+description: "CLI-specific renderer adapters for skillex. Defines an Adapter Protocol (name + render_links → list[LinkOp]), a module-level _REGISTRY, and three concrete implementations for Claude Code, Codex, and OpenCode. Each adapter registers itself via side effect at import time. Zero dependencies on commands/CLI/IO layers."
+forge_tier: Deep
+created: '2026-04-28'
+created_by: Jarad DeLorenzo
