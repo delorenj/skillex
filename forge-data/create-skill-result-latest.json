@@ -1,0 +1,32 @@
+{
+  "skill": "skf-create-skill",
+  "status": "partial",
+  "timestamp": "2026-04-29T14:59:51Z",
+  "outputs": [
+    {"type": "skill", "path": "skills/skillex-core/SKILL.md"},
+    {"type": "skill", "path": "skills/skillex-core/context-snippet.md"},
+    {"type": "skill", "path": "skills/skillex-core/metadata.json"},
+    {"type": "skill", "path": "skills/skillex-core/provenance-map.json"},
+    {"type": "skill", "path": "skills/skillex-core/references/api-reference.md"},
+    {"type": "report", "path": "skills/skillex-core/evidence-report.md"}
+  ],
+  "summary": {
+    "skill_name": "skillex-core",
+    "version": "0.1.1",
+    "forge_tier": "Deep",
+    "compilation_mode": "tightened-spec",
+    "exports_documented": 31,
+    "exports_total": 31,
+    "public_api_coverage": 1.0,
+    "validation_deferred": ["skill-check", "tessl"],
+    "batch_index": 0,
+    "batch_total": 3,
+    "batch_remaining": ["skillex-adapters", "skillex-core-activator"],
+    "next_steps": [
+      "Review skills/skillex-core/SKILL.md and references/api-reference.md",
+      "Run /skf-test-skill skillex-core to validate cognitive completeness",
+      "Run npx skill-check check skills/skillex-core for schema validation",
+      "If acceptable, resume batch with /skf-create-skill --batch (continues from index 1)"
+    ]
+  }
+}
