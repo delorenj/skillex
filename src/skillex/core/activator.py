@@ -60,6 +60,9 @@ def _skillex_owned_links_in(
     owned: list[Path] = []
     if not scope_root.exists():
         return owned
+
+    resolved_skills_root = skills_root.resolve()
+
     for sub in ("skills", "prompts", "agent", "command"):
         candidate = scope_root / sub
         if not candidate.is_dir():
@@ -72,7 +75,7 @@ def _skillex_owned_links_in(
             except OSError:
                 continue
             try:
-                target.relative_to(skills_root.resolve())
+                target.relative_to(resolved_skills_root)
             except ValueError:
                 continue
             owned.append(entry)
