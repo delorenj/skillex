@@ -12,3 +12,15 @@ Start with:
 - `skills/bmad-html-workspace/SKILL.md`
 - `skills/bmad-html-workspace/references/app-model.md`
 - `skills/bmad-html-workspace/templates/workspace.template.html`
+
+## Experimental: Autobrowse Skill Set
+
+Skill set at `skill-sets/autobrowse/` adapting Browserbase's Autobrowse loop to skillex: a browser agent runs a real task, iterates 3–5 rounds against failures, then graduates the converged path into a per-site `SKILL.md` that future agents load before they start. The markdown file is the memory.
+
+Four child skills cover the lifecycle:
+- `autobrowse-discover/` — failure-driven exploration loop (capped at 5 iterations)
+- `autobrowse-graduate/` — distill discovery into a portable site `SKILL.md`
+- `autobrowse-replay/` — execute the graduated skill, detect drift, hand back to discover when needed
+- `autobrowse-net-sleuth/` — find hidden JSON endpoints buried in network traffic
+
+Start with the hub at `skill-sets/autobrowse/SKILL.md` and the shared site-skill template at `skill-sets/autobrowse/references/site-skill.template.md`.
