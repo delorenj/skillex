@@ -19,6 +19,26 @@ All subagent invocations originate from this skill (the orchestrator runs the Sk
 
 If preconditions fail, abort or fix manually. Don't silently re-detect type — it would diverge from the recorded value.
 
+## Autonomous-mode contract
+
+This SKILL runs autonomously end-to-end. NEVER use `AskUserQuestion`. Every fork in the road has a defensible default; pick it and document the assumption.
+
+When the card description is empty or scope is ambiguous:
+1. Pick the highest-confidence default scope (e.g., "Provider Portal" for a portal-UX ticket where the codebase has two portals).
+2. Post a Trello comment stating the assumption: `🤖 tflo-implement: card description empty. Assuming scope = X. Abort and re-scope if wrong.`
+3. Document the assumption in the deliverable's "Assumptions" section.
+4. Proceed.
+
+When confidence is genuinely too low to pick a default (e.g., the ticket requires a credential or business decision only the human can give):
+1. Run `mise run tflo abort --yes --reason "<why>"` to release the ticket.
+2. Re-run triage to claim something tractable.
+3. Do NOT pause for HITL.
+
+When subagents disagree (architect vs test-engineer, etc.):
+- Architect plan is the source of truth. Test engineer adapts. If irreconcilable, escalate via `tickets/{id}/escalation.md` and stop — but that's a true escalation, not a question.
+
+Source of this contract: `feedback_tflo_autonomous_no_clarification.md` in user memory, learned from card #61 (Provider Portal UX review, 2026-05-11).
+
 ## Type-routing matrix
 
 | Type | Chain | Deliverable | Branch lands code? |
@@ -26,8 +46,8 @@ If preconditions fail, abort or fix manually. Don't silently re-detect type — 
 | `code`, `feature` | architect → tea → create-story → dev-story | commits + story.md + plans | yes |
 | `bug` | architect (root-cause) → tea (regression test required) → create-story → dev-story | commits including failing-then-passing regression test + story.md | yes |
 | `refactor` | architect (scope assessment) → dev-story (no behavior change) | commits + brief story.md (no AC change) | yes |
-| `discovery` | architect (synthesis) → produce deliverable | `tickets/{id}/deliverable.md` (markdown analysis/recommendations doc) | no |
-| `design` | bmad-bmm-ux-designer.agent → produce design | `tickets/{id}/design.md` (or excalidraw via bmad-bmm-create-excalidraw-*) | no |
+| `discovery` | ui-ux-designer (for UX) or architect (for everything else) → produce deliverable | `docs/domains/<area>/YYYY-MM-DD-<slug>.md` + memory-bank copy | yes (commit the doc) |
+| `design` | bmad-bmm-ux-designer.agent → produce design | `docs/domains/<area>/YYYY-MM-DD-<slug>-design.md` + memory-bank copy | yes (commit the doc) |
 | `doc` | bmad-bmm-tech-writer-tech-writer.agent → produce doc in `docs/` | new file in `docs/<area>/<title>.md` | yes (commit the doc) |
 
 ## Capabilities
@@ -92,9 +112,11 @@ For discovery and design: skip story creation. The deliverable doc IS the story.
 
 Type-routed:
 - **code/feature/bug/refactor**: invoke `bmad-bmm-dev-story` with the story file. Commits land on the active ticket branch.
-- **discovery**: invoke architect (or general-purpose Agent with analyst persona) to write the deliverable doc to `tickets/{idShort}/deliverable.md`. Optionally commit the doc to the ticket branch so it ships with the PR.
-- **design**: invoke `bmad-bmm-ux-designer.agent` to produce design doc / mockup. Optionally use `bmad-bmm-create-excalidraw-wireframe` for visuals.
+- **discovery**: invoke the right specialist subagent for the card label (`ui-ux-designer` for UX-labeled, `architect-review` for system/architecture, `general-purpose` otherwise) to write the deliverable. Write to `docs/domains/<area>/YYYY-MM-DD-<slug>.md` (NOT the gitignored memory bank — keep a memory-bank copy at `tickets/{id}/deliverable.md` for archive). Commit the doc to the ticket branch so it ships with the PR.
+- **design**: invoke `bmad-bmm-ux-designer.agent` to produce design doc / mockup. Write to `docs/domains/<area>/YYYY-MM-DD-<slug>-design.md`. Optionally use `bmad-bmm-create-excalidraw-wireframe` for visuals. Commit to the ticket branch.
 - **doc**: invoke `bmad-bmm-tech-writer-tech-writer.agent` to write the documentation file in `docs/<area>/<title>.md`. Commit the file to the ticket branch.
+
+**Why the docs/ path matters**: `_bmad/memory/tflo/tickets/` is gitignored. Anything written only there will not ship with the PR. Discovery/design/doc deliverables must land in a non-ignored path. Keep a memory-bank copy for local archive, but it is not the artifact-of-record.
 
 ### Hand off to verify
 
@@ -116,11 +138,12 @@ If `retry_count` would exceed 3, escalate to human instead of re-running.
 
 | Symptom | Action |
 |---|---|
-| Architect returns "ticket as written cannot be done" | Escalate. Write `tickets/{id}/escalation.md` with the architect's reasoning. Don't proceed. |
-| Test engineer and architect disagree on approach | Surface both opinions to user. Pause. |
-| dev-story produces commits that don't match story AC | Pause. Don't auto-transition. |
-| Subagent invocation errors out | Retry once. If still failing, escalate. |
-| Doc/design subagent unavailable | Fall back to general-purpose Agent with appropriate persona prompt. Logged warning. |
+| Architect returns "ticket as written cannot be done" | True escalation. Write `tickets/{id}/escalation.md` with the architect's reasoning. Transition phase to `escalated`. Stop. |
+| Test engineer and architect disagree on approach | Architect plan wins. Comment on the Trello card noting the disagreement + the chosen path. Do not pause. |
+| dev-story produces commits that don't match story AC | Hand to verify anyway with the mismatch noted in the transition log; verify will catch it via the AC checklist and either retry (cycle < 3) or escalate (cycle = 3). |
+| Card description is empty / scope is ambiguous | Apply the autonomous-mode contract (above): pick highest-confidence default, comment on card with assumption, proceed. If confidence too low to pick, abort + retriage. |
+| Subagent invocation errors out | Retry once. If still failing, escalate via `tickets/{id}/escalation.md`. |
+| Doc/design subagent unavailable | Fall back to general-purpose Agent with appropriate persona prompt. Log warning. |
 
 ## Inputs
 
@@ -129,15 +152,23 @@ If `retry_count` would exceed 3, escalate to human instead of re-running.
 
 ## Outputs
 
+Memory-bank artifacts (local archive only, gitignored):
 - `_bmad/memory/tflo/tickets/{id}/research.md`
 - `_bmad/memory/tflo/tickets/{id}/architect-plan.md`
 - `_bmad/memory/tflo/tickets/{id}/test-plan.md` (code/feature/bug only)
 - `_bmad/memory/tflo/tickets/{id}/story.md` (code/feature/bug/refactor/doc)
-- `_bmad/memory/tflo/tickets/{id}/deliverable.md` (discovery only)
-- `_bmad/memory/tflo/tickets/{id}/design.md` (design only)
-- For doc-typed tickets: a new file under `docs/`
-- Commits on the ticket branch (code-typed only)
+- `_bmad/memory/tflo/tickets/{id}/deliverable.md` (discovery, memory copy)
+- `_bmad/memory/tflo/tickets/{id}/design.md` (design, memory copy)
+
+Committed artifacts (ship with the PR):
+- Code commits on the ticket branch (code/feature/bug/refactor only)
+- `docs/domains/<area>/YYYY-MM-DD-<slug>.md` (discovery)
+- `docs/domains/<area>/YYYY-MM-DD-<slug>-design.md` (design)
+- `docs/<area>/<title>.md` (doc)
+
+FSM + side effects:
 - Updated `current-ticket.md` with `phase: verifying`
+- Appended entry in `tickets/{id}/transitions.jsonl`
 - Comment on the Trello card summarizing what was implemented
 
 ## Handoff

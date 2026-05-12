@@ -53,12 +53,29 @@ If any AC is unchecked and not n-a → fail.
 
 ### Deliverable review (discovery/design/doc)
 
-Invoke the appropriate review subagent on the produced artifact:
+Prefer the **inline spot-check rubric** over a full subagent re-review. Subagent verify costs ~50K tokens for a yes/no on a doc the prior subagent just produced; the failure modes that matter (fabricated file:line citations, unactionable recommendations, missing rubric items) are catchable in O(seconds) with a 4–5 sample inline check.
+
+**Inline spot-check rubric (preferred path):**
+
+1. **Existence + non-empty**: deliverable file exists at the expected path, ≥10 lines.
+2. **Clear findings**: structured format with severity / problem / recommendation. For discovery: ≥10 findings expected. For design: explicit design decisions section. For doc: scannable structure (TOC, examples, headings).
+3. **Actionable recommendations**: every finding has a concrete fix + effort sizing (S/M/L/XL, never time estimates).
+4. **No factual errors**: pick 4–5 random file:line citations from the deliverable and spot-check against the actual code. If any citation is fabricated or wrong, fail the verify and feed the bad citations back to implement.
+5. **Assumptions documented**: if the card description was empty or scope was ambiguous, the deliverable's "Assumptions" section must state what was assumed.
+
+Score each rubric item `pass` / `fail` and write the structured result to `verify-log.md`.
+
+**Escalate to subagent review only when:**
+- Spot-check uncovers ≥2 fabricated citations (you need a real reviewer to determine the scope of the problem)
+- The deliverable lacks structure entirely (no findings, no rubric framework) and inline scoring isn't possible
+- Retry cycle 2+ and the prior cycle's deliverable was rubric-passing but rejected by the human downstream
+
+Subagent fallback (if escalating):
 - discovery → `bmad-agent-architect` or `bmad-bmm-architect.agent`
 - design → `bmad-bmm-ux-designer.agent`
 - doc → `bmad-bmm-tech-writer-tech-writer.agent`
 
-The review subagent returns `pass` or `needs-revision` with specific gaps.
+Source: card #61 retro (2026-05-11). Full subagent re-review took ~76K tokens / 500s; inline spot-check produced the same verdict in <60s.
 
 ### Decide outcome
 
