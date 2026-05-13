@@ -24,6 +24,9 @@ from skillex.core.models import (
     SkillFrontmatter,
     SlotAssignment,
 )
+from skillex.logging import get_logger
+
+log = get_logger(__name__)
 
 
 class LoaderError(Exception):
@@ -156,7 +159,11 @@ def discover_skills(skills_root: Path) -> dict[str, Skill]:
             continue
         if not (child / "SKILL.md").is_file():
             continue
-        skill = load_skill(child)
+        try:
+            skill = load_skill(child)
+        except SkillError as e:
+            log.warning("skipping malformed skill", path=str(child), error=str(e))
+            continue
         index.setdefault(skill.name, []).append(skill)
 
     for name, skills in index.items():

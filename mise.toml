@@ -1,3 +1,6 @@
+[tools]
+lefthook = "latest"
+
 [env]
 _.file = [".env"]
 CODEX_HOME = { value = ".codex", path = true }
@@ -40,3 +43,7 @@ run = "uv build"
 [tasks.check]
 description = "Run all quality checks: lint, typecheck, test"
 depends = ["lint", "tc", "test"]
+
+[tasks.setup]
+description = "Install dependencies and git hooks"
+run = ["uv sync", "lefthook install"]

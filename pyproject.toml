@@ -37,6 +37,9 @@ extend-exclude = [
   "skill-sets",
   "test",
   ".mise",
+  ".agents",
+  ".claude",
+  ".codex",
   "scripts",
   "docs",
 ]

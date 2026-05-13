@@ -1,0 +1,28 @@
+min_version: 1.7.0
+
+# Fast checks on commit. Auto-fixes get re-staged.
+# --force-exclude makes ruff honor pyproject.toml's extend-exclude even when
+# files are passed explicitly, so vendored skills under .agents/, .claude/,
+# all-skills/, packs/, etc. are never touched.
+pre-commit:
+  parallel: true
+  jobs:
+    - name: ruff-check
+      glob: "*.py"
+      run: uv run ruff check --force-exclude --fix {staged_files}
+      stage_fixed: true
+    - name: ruff-format
+      glob: "*.py"
+      run: uv run ruff format --force-exclude {staged_files}
+      stage_fixed: true
+
+# Slower, repo-wide checks on push.
+pre-push:
+  parallel: false
+  jobs:
+    - name: lint
+      run: uv run ruff check .
+    - name: typecheck
+      run: uv run mypy src/skillex
+    - name: test
+      run: uv run pytest -q

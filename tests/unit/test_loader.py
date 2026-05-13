@@ -79,6 +79,27 @@ class TestDiscoverSkills:
         index = discover_skills(tmp_path)
         assert index == {}
 
+    def test_skips_malformed_skills_without_aborting(self, tmp_path: Path) -> None:
+        good = tmp_path / "good"
+        good.mkdir()
+        (good / "SKILL.md").write_text("---\nname: good\n---\n# good\n", encoding="utf-8")
+
+        bad_yaml = tmp_path / "bad-yaml"
+        bad_yaml.mkdir()
+        (bad_yaml / "SKILL.md").write_text(
+            "---\nname: bad-yaml\ndescription: oops: this breaks yaml\n---\n",
+            encoding="utf-8",
+        )
+
+        bad_name = tmp_path / "bad-name"
+        bad_name.mkdir()
+        (bad_name / "SKILL.md").write_text(
+            "---\nname: not:valid\n---\n# bad-name\n", encoding="utf-8"
+        )
+
+        index = discover_skills(tmp_path)
+        assert set(index.keys()) == {"good"}
+
 
 class TestLoadPackManifest:
     def test_loads_fixture(self, pack_fixture: Path) -> None:
@@ -127,9 +148,7 @@ skill = "elevenlabs"
 
 
 class TestLoadPack:
-    def test_loads_and_resolves_skills(
-        self, pack_fixture: Path, skills_fixture: Path
-    ) -> None:
+    def test_loads_and_resolves_skills(self, pack_fixture: Path, skills_fixture: Path) -> None:
         index = discover_skills(skills_fixture)
         pack = load_pack(pack_fixture, index)
         assert pack.manifest.name == "test-pack"
@@ -138,9 +157,7 @@ class TestLoadPack:
         assert len(pack.freeform_skills) == 1
         assert pack.freeform_skills[0].name == "mermaid-expert"
 
-    def test_unknown_skill_reference_raises(
-        self, pack_fixture: Path, skills_fixture: Path
-    ) -> None:
+    def test_unknown_skill_reference_raises(self, pack_fixture: Path, skills_fixture: Path) -> None:
         # Provide an empty index so references fail.
         with pytest.raises(SkillReferenceError, match="unknown skill"):
             load_pack(pack_fixture, {})
