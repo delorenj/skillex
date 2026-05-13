@@ -1,6 +1,6 @@
 [submodule "all-skills"]
 	path = all-skills
-	url = git@github.com:delorenj/00_ceiling.git
+	url = git@github.com:delorenj/skills.git
 [submodule "packs/google-agent-skills"]
 	path = packs/google-agent-skills
 	url = git@github.com:delorenj/google-agent-skills.git

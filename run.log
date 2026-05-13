@@ -1,0 +1,90 @@
+=== Checkpointing: skillex ===
+Fetching all remotes...
+Found 2 submodule(s)
+Processing submodules...
+Entering 'packs/google-agent-skills'
+--- Processing submodule: packs/google-agent-skills ---
+path='packs/google-agent-skills'; 
+        echo "--- Processing submodule: $name ---"
+        if [[ -n "$(git status --porcelain)" ]]; then
+            echo "  Dirty submodule, running git-checkpoint..."
+            "$CHECKPOINT_BIN" "$(pwd)" || echo "  Warning: checkpoint failed for $name"
+        else
+            DEFAULT_BRANCH=main
+            git show-ref --verify --quiet refs/remotes/origin/master && DEFAULT_BRANCH=master
+            CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
+            if [[ "$CURRENT_BRANCH" != "$DEFAULT_BRANCH" ]]; then
+                git checkout "$DEFAULT_BRANCH" 2>/dev/null || { echo "  Could not switch to $DEFAULT_BRANCH; skipping pull"; exit 0; }
+            fi
+            echo "  Pulling latest from origin/$DEFAULT_BRANCH..."
+            git fetch origin "$DEFAULT_BRANCH" --quiet || true
+            git pull --ff-only origin "$DEFAULT_BRANCH" || echo "  Warning: pull failed for $name"
+        fi
+    : 3: [[: not found
+path='packs/google-agent-skills'; 
+        echo "--- Processing submodule: $name ---"
+        if [[ -n "$(git status --porcelain)" ]]; then
+            echo "  Dirty submodule, running git-checkpoint..."
+            "$CHECKPOINT_BIN" "$(pwd)" || echo "  Warning: checkpoint failed for $name"
+        else
+            DEFAULT_BRANCH=main
+            git show-ref --verify --quiet refs/remotes/origin/master && DEFAULT_BRANCH=master
+            CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
+            if [[ "$CURRENT_BRANCH" != "$DEFAULT_BRANCH" ]]; then
+                git checkout "$DEFAULT_BRANCH" 2>/dev/null || { echo "  Could not switch to $DEFAULT_BRANCH; skipping pull"; exit 0; }
+            fi
+            echo "  Pulling latest from origin/$DEFAULT_BRANCH..."
+            git fetch origin "$DEFAULT_BRANCH" --quiet || true
+            git pull --ff-only origin "$DEFAULT_BRANCH" || echo "  Warning: pull failed for $name"
+        fi
+    : 10: [[: not found
+  Pulling latest from origin/main...
+From github.com:delorenj/google-agent-skills
+ * branch            main       -> FETCH_HEAD
+Already up to date.
+Entering 'packs/n8n-skills'
+--- Processing submodule: packs/n8n-skills ---
+path='packs/n8n-skills'; 
+        echo "--- Processing submodule: $name ---"
+        if [[ -n "$(git status --porcelain)" ]]; then
+            echo "  Dirty submodule, running git-checkpoint..."
+            "$CHECKPOINT_BIN" "$(pwd)" || echo "  Warning: checkpoint failed for $name"
+        else
+            DEFAULT_BRANCH=main
+            git show-ref --verify --quiet refs/remotes/origin/master && DEFAULT_BRANCH=master
+            CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
+            if [[ "$CURRENT_BRANCH" != "$DEFAULT_BRANCH" ]]; then
+                git checkout "$DEFAULT_BRANCH" 2>/dev/null || { echo "  Could not switch to $DEFAULT_BRANCH; skipping pull"; exit 0; }
+            fi
+            echo "  Pulling latest from origin/$DEFAULT_BRANCH..."
+            git fetch origin "$DEFAULT_BRANCH" --quiet || true
+            git pull --ff-only origin "$DEFAULT_BRANCH" || echo "  Warning: pull failed for $name"
+        fi
+    : 3: [[: not found
+path='packs/n8n-skills'; 
+        echo "--- Processing submodule: $name ---"
+        if [[ -n "$(git status --porcelain)" ]]; then
+            echo "  Dirty submodule, running git-checkpoint..."
+            "$CHECKPOINT_BIN" "$(pwd)" || echo "  Warning: checkpoint failed for $name"
+        else
+            DEFAULT_BRANCH=main
+            git show-ref --verify --quiet refs/remotes/origin/master && DEFAULT_BRANCH=master
+            CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
+            if [[ "$CURRENT_BRANCH" != "$DEFAULT_BRANCH" ]]; then
+                git checkout "$DEFAULT_BRANCH" 2>/dev/null || { echo "  Could not switch to $DEFAULT_BRANCH; skipping pull"; exit 0; }
+            fi
+            echo "  Pulling latest from origin/$DEFAULT_BRANCH..."
+            git fetch origin "$DEFAULT_BRANCH" --quiet || true
+            git pull --ff-only origin "$DEFAULT_BRANCH" || echo "  Warning: pull failed for $name"
+        fi
+    : 10: [[: not found
+  Pulling latest from origin/main...
+From https://github.com/czlonkowski/n8n-skills
+ * branch            main       -> FETCH_HEAD
+Already up to date.
+Current branch: main
+Staging all changes...
+Committing: checkpoint: 2026-05-13T11:43:51Z auto-commit
+╭──────────────────────────────────────╮
+│ 🥊 lefthook v2.1.6  hook: pre-commit │
+╰──────────────────────────────────────╯
