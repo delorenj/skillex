@@ -1,0 +1,6 @@
+# Provenance for this skill. Managed by skill_ssot.py.
+origin:
+  type: adhoc
+  extracted_at: 2026-05-18T17:06:26+00:00
+  rescued_from: "/home/delorenj/code/skillex/skill-sets/global/source-command-bmad-bmb-agent-builder-agent"
+modified_locally: false
