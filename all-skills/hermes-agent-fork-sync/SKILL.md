@@ -273,6 +273,28 @@ Running `git diff upstream/main HEAD -- tools/voice_mode.py` shows BOTH directio
 
 **How to apply:** before stashing, record `git submodule status` and the submodule's actual HEAD. After the sync, the modification reappears — that's intentional.
 
+### 4b. `git stash pop` keeps the entry (won't auto-drop) when the stash includes a submodule pointer move
+
+In Step 6, `git stash pop` ends with:
+
+```
+The stash entry is kept in case you need it again.
+```
+
+…even when there are **no conflicts** and the working tree applied perfectly. This is NOT a failure — git refuses to auto-drop because the stash carries a submodule gitlink movement (`agents/hermes/pm/runtime`) it can't cleanly reconcile its bookkeeping for.
+
+**Why:** the same submodule-independence from gotcha #4 — stash apply can restore the gitlink in the working tree but git stays conservative about discarding the stash.
+
+**How to apply:** don't panic and don't try to "resolve a conflict" that isn't there. Verify completeness, then drop manually:
+```bash
+git diff --name-only --diff-filter=U          # confirm: empty (no real conflicts)
+comm -23 <(git stash show --name-only stash@{0} | sort) \
+         <(git status --short | grep -vE '^\?\?' | awk '{print $2}' | sort)
+# ^ empty output = every stashed file is reflected in the working tree
+git stash drop stash@{0}                       # safe to drop once verified
+```
+If you skip the drop it's harmless (push only carries commits), but a stale stash can confuse the next run's LIFO pop — so clean it up.
+
 ### 5. Branch switch leaves submodule working dir behind
 
 When you `git checkout -b … upstream/main` (which has no `agents/` directory), git emits:
