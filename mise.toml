@@ -3,7 +3,6 @@ lefthook = "latest"
 
 [env]
 _.file = [".env"]
-CODEX_HOME = { value = ".codex", path = true }
 
 [hooks]
 enter = '{{config_root}}/.mise/scripts/link-agentfiles.sh'
