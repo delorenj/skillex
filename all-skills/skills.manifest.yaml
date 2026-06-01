@@ -138,6 +138,7 @@ always_on:
     - code-reviewer
     - debugging-complex-multi-layer-systems
     - github-issue-creator
+    - mise-versioning
     - pr-address-comments
     - pr-creator
     - review-duplication
