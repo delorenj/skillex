@@ -12,3 +12,6 @@ build/
 .coverage
 htmlcov/
 _bmad/_memory/
+
+# Generated source-command shims should not be committed as skill-set entries.
+skill-sets/*/source-command-*

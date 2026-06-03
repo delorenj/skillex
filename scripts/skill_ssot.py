@@ -36,6 +36,7 @@ SKILL_MARKER_FILES = ("SKILL.md", "SKILL.yaml", "SKILL.yml")
 SOURCE_YAML = ".source.yaml"
 QUARANTINE_DIR_NAME = ".quarantine"
 CONFLICTS_DIR_NAME = ".conflicts"
+RESERVED_GENERATED_PREFIXES = ("source-command-",)
 
 
 # ----------------------------- path resolution ------------------------------ #
@@ -84,6 +85,10 @@ def looks_like_skill(d: Path) -> bool:
     return any((d / fn).is_file() for fn in SKILL_MARKER_FILES)
 
 
+def is_reserved_generated_skill(name: str) -> bool:
+    return any(name.startswith(prefix) for prefix in RESERVED_GENERATED_PREFIXES)
+
+
 def write_source_yaml(skill_dir: Path, origin_type: str, rescued_from: Path | None = None) -> None:
     """Hand-write a minimal YAML doc. Stdlib-only to keep the script dep-free."""
     out = skill_dir / SOURCE_YAML
@@ -129,6 +134,9 @@ def rescue_one(path: Path) -> tuple[str, str]:
         return ("skip", "hidden")
     if not looks_like_skill(path):
         return ("skip", "no SKILL marker")
+    if is_reserved_generated_skill(name):
+        quarantined = quarantine(path, reason="reserved-generated")
+        return ("quarantined", f"{path} parked at {quarantined}; no active symlink created")
 
     ssoT = skills_available()
     target = ssoT / name
