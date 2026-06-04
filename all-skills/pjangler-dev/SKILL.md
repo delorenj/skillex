@@ -11,7 +11,19 @@ description: |
 
 # Pjangler Development
 
+This skill is about **developing pjangler** (authoring Commands/Recipes). For *using* pjangler
+to create a 33god project — bootstrapping CommonProject, provisioning a Hermes PM or Ticket
+Sentinel, the `.project.json` source of truth, mise/bmad/hindsight/bloodbank wiring — use the
+**`33god-projects`** skill instead.
+
 Pjangler uses a Command Pattern architecture where Commands are atomic operations and Recipes compose Commands into subsystem bootstrappers.
+
+> **Vendored templates:** the copier templates pjangler deploys are git submodules under
+> `templates/commonproject` and `templates/hermes-agent`. `RunCopierTemplate` resolves the
+> hermes template as: `PJANGLER_HERMES_TEMPLATE` env → vendored `templates/hermes-agent` →
+> `~/code/hermes-agent-template` → `gh:delorenj/hermes-agent-template`. The `hermes-agent`
+> recipe passes `ticket_provider` + `with_scrum_master` and the template binds agents to the
+> repo's one board recorded in `.project.json` (it does not mint role-suffixed boards).
 
 ## Architecture Overview
 

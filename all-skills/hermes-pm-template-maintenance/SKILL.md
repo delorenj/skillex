@@ -27,7 +27,8 @@ Interpret:
 - Canonical global skill root: `/home/delorenj/.agents/skills`
 - PM workflow skill path: `/home/delorenj/.agents/skills/subagent-driven-development/SKILL.md`
 - Fleet registry source of truth: `/home/delorenj/.hermes/agents-registry.yaml`
-- Template repo: `/home/delorenj/code/hermes-agent-template`
+- Template repo: `/home/delorenj/code/hermes-agent-template` (also vendored as a pjangler submodule at `~/code/pjangler/templates/hermes-agent`; push the template repo, then bump the submodule pointer)
+- Provisioning/board model (how agents bind to the repo's one board via `.project.json`): see the `33god-projects` skill
 
 ## Procedure
 
