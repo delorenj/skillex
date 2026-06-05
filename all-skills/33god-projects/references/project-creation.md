@@ -62,6 +62,36 @@ repo-named board and writes it back to `.project.json`. The agent is added to
 Non-interactive: `pjangler hermes-agent --yes` (accepts defaults, provider inherited from
 `.project.json`, skips Telegram/email).
 
+### Inherited profile config
+
+New 33god Hermes agents use opt-in inherited config instead of cloned
+standalone config. pjangler creates a named profile such as
+`~/.hermes/profiles/drumjangler-pm`, points it at
+`agents/hermes/pm/runtime/`, and writes this metadata into
+`runtime/profile.yaml`:
+
+```yaml
+config:
+  inherit_from: default
+  save_mode: delta
+```
+
+This keeps the common, non-secret settings in the fleet default
+`~/.hermes/config.yaml`. A practical example: when the operator changes the
+default model from one OpenAI model to another, the PM and Ticket Sentinel pick
+up the new model automatically. If a repo agent only needs a local working
+directory, its `runtime/config.yaml` can stay as small as:
+
+```yaml
+terminal:
+  cwd: /home/delorenj/code/drumjangler
+```
+
+Only `config.yaml` inherits. API keys, Telegram tokens, SOUL, memories,
+sessions, skills, gateway state, cron, and runtime files remain profile-local
+inside the runtime repo. Treat inherited config as maintenance convenience, not
+as a security boundary.
+
 ## 3. Create the Ticket Sentinel (Hermes scrum-master)
 
 The Ticket Sentinel is a Hermes **scrum-master** agent: a systemd `--user` timer (1-min

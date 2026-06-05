@@ -1,17 +1,16 @@
 ---
 name: 33god-projects
 description: >
-  How a 33god/DeLoNET project is created and wired end to end. Covers bootstrapping a
-  new repo from the CommonProject template via pjangler, provisioning a Hermes Project
-  Manager agent, creating a Ticket Sentinel service (Hermes scrum-master), the mandatory
-  mise integration (mise.toml + .mise/scripts, AGENTS.md→CLAUDE.md/GEMINI.md linking, op
-  inject .env.op on enter), default BMAD installation, and agent hooks wired to Hindsight
-  memory and Bloodbank events. Use when creating or scaffolding a new project, running
-  `pjangler init`/`pjangler hermes-agent`/`mise run init-project`, adding a PM or
-  scrum-master/ticket sentinel to a repo, wiring mise/.env.op/op inject, installing BMAD,
-  or configuring an agent's hindsight/bloodbank hooks. Keywords: pjangler, CommonProject,
-  hermes-agent-template, .project.json, ticket_provider, Plane board, Ticket Sentinel,
-  scrum-master, mise, op inject, bmad-method, hindsight, bloodbank, 33god, project bootstrap.
+  Create, wire, and maintain 33god/DeLoNET projects. Covers pjangler/CommonProject
+  bootstrap, Hermes PM and scrum-master/Ticket Sentinel provisioning with inherited
+  profile config, mandatory mise/.env.op wiring, BMAD, Hindsight/Bloodbank hooks,
+  and shared Hermes fleet updates. Use when running `pjangler init`, `pjangler
+  hermes-agent`, or `mise run init-project`; adding a PM or ticket sentinel;
+  updating Hermes for the fleet; changing the fleet default model/config; touching
+  hermes-agent-template or pjangler provisioning; wiring mise/op inject; installing
+  BMAD; or configuring agent hooks. Keywords: pjangler, CommonProject,
+  hermes-agent-template, .project.json, Ticket Sentinel, inherited profile config,
+  Hermes update, BMAD, Hindsight, Bloodbank.
 ---
 
 # 33god Project Creation & Wiring
@@ -33,6 +32,12 @@ identity. There is **one ticket board per repo**; every agent binds to it.
   `project_slug`, and the `agents` map live there. Never reintroduce a separate `.plane.json`.
 - **One board per repo.** The PM owns it; the Scrum Master sentinel watches the same board.
   Board name = the project name (no role suffix); identifier = `slug[:4]` uppercased.
+- **Agent config is inherited by default for new fleet agents.** pjangler creates
+  `~/.hermes/profiles/<repo>-<role>` as a named profile that points at the
+  role's `agents/hermes/<role>/runtime/` repo and opts `config.yaml` into
+  inheriting from the fleet default profile. Local agent `config.yaml` files
+  contain only overrides, such as `terminal.cwd`; `.env`, SOUL, memories,
+  sessions, skills, gateway state, cron, and runtime files stay local.
 - **mise is mandatory and uniform.** Every repo gets the same `mise.toml` contract (below).
 - **Agents are memory- and event-wired by default.** Hindsight recall/retain + Bloodbank
   emit/consume are part of provisioning, not an afterthought.
@@ -44,6 +49,7 @@ identity. There is **one ticket board per repo**; every agent binds to it.
 | You want to… | Read |
 |---|---|
 | Create a new project / bootstrap CommonProject / add a PM or Ticket Sentinel | [references/project-creation.md](references/project-creation.md) |
+| Update shared Hermes, inherited config, or future-agent template defaults | [references/hermes-fleet-updates.md](references/hermes-fleet-updates.md) |
 | Set up or fix mise (mise.toml, .mise/scripts, AGENTS.md linking, `op inject .env.op`) | [references/mise-conventions.md](references/mise-conventions.md) |
 | Install / re-install BMAD with the standard modules + tools | [references/bmad-init.md](references/bmad-init.md) |
 | Wire an agent's Hindsight memory and Bloodbank emit/consume hooks | [references/agent-hooks.md](references/agent-hooks.md) |
@@ -54,7 +60,7 @@ Read only the topic you need. Most tasks touch exactly one.
 
 ```
 1. CommonProject  →  mise run init-project        # repo skeleton + Plane board + .project.json + BMAD
-2. pjangler hermes-agent (role: pm, +companion)   # PM agent, binds to the repo board
+2. pjangler hermes-agent (role: pm, +companion)   # PM agent, inherited profile, repo board
    └─ companion provisions the scrum-master (Ticket Sentinel) on the SAME board
 3. mise trust && direnv-style `enter`             # links AGENTS.md, op-injects .env.op → .env
 ```
@@ -68,6 +74,12 @@ the mise `enter` behavior in [references/mise-conventions.md](references/mise-co
   (kept current by the `link-agentfiles` mise task + a `watch_files` trigger).
 - Secrets live in `.env.op` (1Password references); `mise` `enter` runs
   `op inject -i .env.op > .env`. Never commit `.env`; `.env.op` holds only `op://` refs.
+- Shared non-secret Hermes settings live in the fleet default
+  `~/.hermes/config.yaml`. New PM and scrum-master profiles inherit that config
+  through `profile.yaml`:
+  `config.inherit_from: default` and `config.save_mode: delta`. When the fleet
+  default model changes, the repo agents follow automatically unless their local
+  profile has an intentional override.
 - No code changes in a hermes-managed repo without an active ticket on the repo board
   (`ALLOW_NO_TICKET=1` is the emergency bypass).
 - Board creation is outward-facing (creates a real Plane/Linear/Trello board) — confirm

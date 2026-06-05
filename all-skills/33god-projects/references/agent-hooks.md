@@ -22,6 +22,11 @@ The Hermes runtime scaffold seeds `runtime/memories/{MEMORY.md,USER.md}` as the 
 memory surface. For the full API, bank-routing architecture, and reflection, use the
 `hindsight` skill — this hub only states that agents are memory-wired by default.
 
+The runtime is also the target of the named Hermes profile symlink
+`~/.hermes/profiles/<repo>-<role>`. Hooks and memories remain profile-local in
+that runtime repo even though `config.yaml` inherits shared non-secret defaults
+from the fleet default profile.
+
 ## Bloodbank events (emit + consume)
 
 Bloodbank is the NATS event bus (`BLOODBANK_NATS_HOST`/`PORT`, default `127.0.0.1:4222`;
