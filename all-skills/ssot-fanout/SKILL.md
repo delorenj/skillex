@@ -1,7 +1,7 @@
 ---
 name: ssot-fanout
 description: >-
-  Single-source-of-truth config fan-out: keep ONE master file (e.g. hooks.master.json) and propagate it to many downstream targets that each have their own native format/dialect, with a lock file (hooks.mappings.lock.json) recording how ambiguous/divergent mappings were resolved so re-syncs are seamless. Reference implementation: bloodbank services/agent-hooks — hooks.master.json → sync.py → per-agent generated configs + event_map.generated.json, gated by `mise run hooks:check` / `hooks:sync`. Use when adding a new agent CLI or target to agent-hooks, editing hooks.master.json, fixing generated-config drift, resolving an ambiguous mapping, or designing a NEW master-config → multi-dialect propagation engine with ambiguity-resolution memory. Keywords: SSOT, single source of truth, fan-out, generated-config drift. Do NOT use for bumping versions across files (use mise-versioning), defining event schemas or the event-naming contract, or single-target config templating with no dialect/ambiguity dimension.
+  Single-source-of-truth config fan-out: keep ONE master file (e.g. hooks.master.json) and propagate it to many downstream targets that each have their own native format/dialect, with a lock file (hooks.mappings.lock.json) recording how ambiguous/divergent mappings were resolved so re-syncs are seamless. Reference implementation: bloodbank services/agent-hooks — hooks.master.json → sync.py → per-agent generated configs + event_map.generated.json, gated by `mise run hooks:check` / `hooks:sync`. Use when adding a new agent CLI or target to agent-hooks, editing hooks.master.json, fixing generated-config drift, resolving an ambiguous mapping, designing a NEW master-config → multi-dialect propagation engine with ambiguity-resolution memory, or installing project-scoped per-dev agent hooks into a repo (committed Claude settings + injected Codex/Hermes, mise enter/leave, per-dev local.json opt-out, adding Kimi or another CLI). Keywords: SSOT, single source of truth, fan-out, generated-config drift, project-scoped hooks, per-dev opt-out. Do NOT use for bumping versions across files (use mise-versioning), defining event schemas or the event-naming contract, or single-target config templating with no dialect/ambiguity dimension.
 ---
 
 # ssot-fanout
@@ -39,6 +39,7 @@ canonical reference implementation (see [references/reference-implementation.md]
 | Situation | Read |
 |---|---|
 | Operate the existing bloodbank agent-hooks system (add an agent CLI, fix drift, resolve a mapping) | [references/reference-implementation.md](./references/reference-implementation.md) |
+| Install **per-dev agent hooks in a repo** (committed Claude + injected Codex/Hermes, per-dev opt-out, mise enter/leave) — or add Kimi/another CLI to it | [references/project-scoped-pattern.md](./references/project-scoped-pattern.md) |
 | Build a NEW master → multi-dialect propagation engine for another domain | [references/engine-design.md](./references/engine-design.md) + `assets/master.template.json`, `assets/mappings.lock.template.json` |
 | Output drifts, sync isn't idempotent, a consumer broke, an ambiguity won't clear | [references/gotchas.md](./references/gotchas.md) |
 
