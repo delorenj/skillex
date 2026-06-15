@@ -1,10 +1,13 @@
-# Project-scoped variant: per-dev agent hooks in a repo
+# Project-scoped variant: per-dev agent hooks in a repo (internals)
 
-A second worked instance of the fan-out pattern, **lean** (no lock file) and aimed
-at a different problem than the bloodbank reference: install the *same* agent hooks
-for **every dev who clones a repo**, fanned out to each agent CLI's native config,
-with a **per-dev opt-out** — and driven by `mise enter/leave` instead of an
-explicit deploy.
+The deep dialect mechanics behind [project-scoped-hooks.md](project-scoped-hooks.md) (the
+adoption guide). This is a **lean** (no lock file) instance of the SSOT config fan-out engine;
+that generic engine and its full **bloodbank `services/agent-hooks` reference** live in the
+**`pjangler-dev`** skill (`references/ssot-fanout-engine.md`, `references/ssot-fanout-reference.md`).
+
+The problem this variant solves differs from the bloodbank reference: install the *same* agent
+hooks for **every dev who clones a repo**, fanned out to each agent CLI's native config, with a
+**per-dev opt-out** — and driven by `mise enter/leave` instead of an explicit deploy.
 
 Live implementation: `~/code/CoachingAgentFramework/.agents/hooks/`
 (`hooks.master.json` + `sync.py`). Mirror it when adding this shape to another repo.
@@ -91,6 +94,29 @@ Caveat to document: `leave` fires per-shell, so multi-shell users can race the
 codex uninstall — acceptable for a solo/small team; the absolute-path marker keeps
 re-install trivially idempotent.
 
+### 3. Sibling layer — skill fan-out with global-deference
+
+The same repo also fans **skills** out (not just hook configs), reusing the exact
+`local.json` + mise-enter machinery. SSOT is `.agents/skills/` (the project's
+enabled set: committed inherited skills + on-enter `./skills/*` app-skill links).
+A table-driven linker symlinks each skill into every CLI that doesn't read
+`.agents/` natively, with a per-target **scope**:
+
+- **global** dir (e.g. `~/.codex/skills`, shared across projects): link ours in,
+  never clobber foreign entries, remove ours on leave.
+- **local** dir (e.g. `./.kimi-code/skills`, a project-scoped mirror): fully
+  managed — replace stale real copies/foreign links with symlinks, prune disabled.
+
+The reusable idea here is **`defer_to_global`**: when one dev runs a *machine-global*
+skill system (`~/.agents/skills`) and a teammate doesn't, the project must provide
+the full set to the teammate **without** duplicating-into / colliding-with the
+global dev's per-CLI dirs. Solution — a per-dev `local.json` flag that, when set,
+makes the linker **skip (and yield the slot for) any skill whose name also exists
+in the global SSOT**. Auto-detected (membership test against `~/.agents/skills`),
+so it needs no hand-maintained list; the teammate omits the flag and inherits
+everything. This is the general answer to "share a curated set with someone whose
+environment is a strict superset of the shared set."
+
 ## Adding a new agent CLI to this variant
 
 1. Add `agents.<cli>` to `hooks.master.json`: `dialect`, `config_target`,
@@ -104,12 +130,34 @@ re-install trivially idempotent.
    `hook_disabled` check.
 4. Wire it into the install/uninstall/check branches; respect `disabled_agents`.
 
-### TODO: Kimi (`kimi-code`) hooks
+### Worked example: adding the Kimi (`kimi-code`) dialect
 
-Kimi recently gained hook support. It appears as `.kimi-code/` in a repo (skills
-live under `.kimi-code/skills/`, mirroring the Codex layout). Not yet wired. To
-add: confirm whether Kimi reads a **project-scoped** hook file (like Claude) or
-only a **per-user** one (like Codex) — that decides committed-vs-injected — then
-follow the steps above. Capture its event names + payload shape + timeout unit in
-a new `agents.kimi` block. Likely a near-clone of either the `claude_settings`
-(if project-scoped) or `codex_hooks` (if per-user) dialect.
+Done in CAF — a clean illustration of "scout the target, then pick the closest
+existing dialect." Kimi's hook engine is in its (unstripped) binary; `strings`
+mining the `agent-core/src/session/hooks/` code revealed the full contract:
+
+- **Per-user config only.** Hooks live in `~/.kimi-code/config.toml` (`KIMI_CODE_HOME`
+  overrides) as a top-level `hooks` array of `{event, command, matcher?, timeout}`.
+  There is **no** project-local `config.toml` (project scope covers only MCP, skills,
+  instructions) — so it's **injected like Codex**, not committed like Claude.
+- **Claude-compatible runtime.** Identical event names (`UserPromptSubmit`,
+  `PostToolUse`, `Stop`, …); payload `{hook_event_name, session_id, cwd, prompt}` /
+  `{tool_name, tool_input}` delivered as **JSON on stdin**; `spawn(command, {shell:true})`
+  so `command` is a shell string; `timeout` in **seconds** (default 30); edit tools
+  named `Write`/`Edit`. Net: **reuse the exact same guard-wrapped scripts** as
+  Claude/Codex — no adapter needed (unlike Hermes).
+
+The new dialect is therefore a near-clone of `codex_hooks`, differing only in the
+**target file + format**: a **sentinel-bounded `[[hooks]]` block** appended to a TOML
+file. The injection is **pure text** (no TOML library): strip any prior block between
+the `# >>> marker BEGIN` / `# <<< marker END` sentinels, refuse if a *foreign* `hooks`
+key exists (TOML would reject duplicate keys), drop an empty `hooks = []`, then append.
+Strip removes exactly the one separator newline + block, so uninstall is **byte-exact**.
+Marker = the repo's `.agents/hooks/` path in the command (same reversibility trick as
+Codex). `disabled_agents:["kimi"]` opts out.
+
+> Lesson for the next CLI: most coding-agent CLIs converge on the Claude hook shape
+> (event names + stdin JSON + `shell:true` command + matcher). Confirm **(a)** config
+> scope (project-committed vs per-user-injected) and **(b)** file format/dialect, and
+> you can usually reuse the scripts verbatim — the dialect is just *where* and *how* the
+> mapping is written.

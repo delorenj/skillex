@@ -1,4 +1,65 @@
-# Engine design — building the pattern for a new domain
+# SSOT config fan-out — the engine pattern & how to build one
+
+Keep one hand-edited master file and **generate** every downstream config from it. The targets are
+heterogeneous — each speaks its own dialect (different key names, nesting, invocation shape) — so the
+master maps a *canonical* model onto each target. When two targets would map the "same thing"
+differently, or a mapping is otherwise ambiguous, the decision is made once and recorded in a lock file
+so the next sync applies it automatically.
+
+Canonical instance: `services/agent-hooks/hooks.master.json` in bloodbank — operate/copy it via
+[ssot-fanout-reference.md](./ssot-fanout-reference.md); symptoms & fixes in
+[ssot-fanout-gotchas.md](./ssot-fanout-gotchas.md). This file is the design you copy when building a fan-out
+engine for a new domain (e.g. the project-scoped `AgentHooksRecipe` in this skill's main body).
+
+## Operating principles
+
+- **One source of truth.** The master file is the *only* hand-edited artifact. Every per-target config and
+  every per-consumer map is GENERATED. Never hand-edit a generated file or a consumer's embedded fallback —
+  edit the master and re-run sync. Drift is a bug, not a state to tolerate.
+- **Generated output is deterministic and idempotent.** No timestamps, no random ordering. Re-running sync
+  with an unchanged master writes zero bytes. This is what lets `--check` diff generated-on-disk against
+  generated-from-master and gate CI.
+- **Ambiguity is detected, resolved once, and remembered.** The engine surfaces ambiguities; each resolution
+  is written to the lock keyed by a *stable* id. The next run auto-applies it — so re-syncs, and even adding
+  a brand-new target whose decisions are already made, are seamless.
+- **Consumers read the projection, fall back to an embedded default.** A target's runtime loads the generated
+  map but degrades to a small embedded default if it's missing/corrupt — a generated artifact going missing
+  must never silently break the consumer.
+- **Validate the projection against the domain's contract.** Generated output must satisfy whatever
+  schema/regex/allowlist the targets require; sync asserts this, it doesn't template blindly.
+- **`check` is the gate; `sync` is the apply.** CI runs `--check` (read-only, nonzero on drift or unresolved
+  ambiguity). Humans run `--sync` (writes) and `--resolve` (interactive, appends to lock).
+
+## The three artifacts
+
+| Artifact | Role | Hand-edited? |
+|---|---|---|
+| `*.master.json` (SSOT) | canonical model + per-target bindings/dialect | **yes — the only one** |
+| `*.mappings.lock.json` | remembered resolutions for ambiguous/divergent mappings | only via `--resolve` (or a reviewed seed) |
+| `sync.py` (engine) | detect → resolve → generate; `--check` / `--apply` / `--resolve` | yes (it's code) |
+
+…producing, per target: its **native config** (the dialect file the tool actually loads) and, optionally, a
+**machine map** the consumer reads at runtime (e.g. `event_map.generated.json`).
+
+The master separates *what* (a canonical **catalog** keyed by id, each with a `role` — the cross-target
+normalization unit) from *how each target expresses it* (**targets**: per target a `dialect`, output paths, a
+`runner`/command template, and **bindings** mapping the target's *native* names → a catalog entry + role +
+dialect detail). `role` is the key idea: divergence is detected when the **same role maps to different
+canonical entries across targets** — exactly the ambiguity the lock resolves.
+
+## Build workflow (a fan-out engine for a new domain)
+
+1. Copy `assets/master.template.json` and `assets/mappings.lock.template.json`; fill the catalog + targets +
+   bindings for your domain.
+2. Adapt `sync.py` using the design below. Keep generation deterministic.
+3. Point each consumer at its generated map with an embedded fallback (merge generated OVER default).
+4. Wire `check` (CI gate) and `sync` (apply) tasks, plus a verifier that builds one output per binding and
+   validates it against the domain's contract.
+5. Seed the lock with the resolutions you make on first run; thereafter re-syncs are seamless.
+
+---
+
+# Engine design — the algorithm in detail
 
 Read this with `assets/master.template.json` and `assets/mappings.lock.template.json` open. The reference
 implementation (`services/agent-hooks/sync.py`) is the working version of everything here — copy and adapt it.

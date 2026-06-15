@@ -8,9 +8,12 @@ description: >
   hermes-agent`, or `mise run init-project`; adding a PM or ticket sentinel;
   updating Hermes for the fleet; changing the fleet default model/config; touching
   hermes-agent-template or pjangler provisioning; wiring mise/op inject; installing
-  BMAD; or configuring agent hooks. Keywords: pjangler, CommonProject,
+  BMAD; configuring agent hooks; or wiring the per-dev, committed project-scoped
+  hook + skill fan-out so teammates and every agent CLI (Claude/Codex/Hermes/Kimi)
+  inherit the same hooks and skills. Keywords: pjangler, CommonProject,
   hermes-agent-template, .project.json, Ticket Sentinel, inherited profile config,
-  Hermes update, BMAD, Hindsight, Bloodbank.
+  Hermes update, BMAD, Hindsight, Bloodbank, project-scoped hooks, skill fan-out,
+  .agents/local.json, defer_to_global, hindsight-setup, hooks.master.json.
 ---
 
 # 33god Project Creation & Wiring
@@ -41,6 +44,10 @@ identity. There is **one ticket board per repo**; every agent binds to it.
 - **mise is mandatory and uniform.** Every repo gets the same `mise.toml` contract (below).
 - **Agents are memory- and event-wired by default.** Hindsight recall/retain + Bloodbank
   emit/consume are part of provisioning, not an afterthought.
+- **Hooks and skills fan out from the repo, per-dev.** A repo that adopts the project-scoped
+  agent layer commits one hooks SSOT + one skill set and lets `mise enter/leave` install them
+  into each dev's CLIs, so teammates inherit them with zero setup (see
+  [references/project-scoped-hooks.md](references/project-scoped-hooks.md)). Reference impl: CAF.
 - **Templates are version-locked.** pjangler runs the vendored submodule, not an ad-hoc
   checkout, unless `PJANGLER_HERMES_TEMPLATE` overrides it for template development.
 
@@ -52,7 +59,8 @@ identity. There is **one ticket board per repo**; every agent binds to it.
 | Update shared Hermes, inherited config, or future-agent template defaults | [references/hermes-fleet-updates.md](references/hermes-fleet-updates.md) |
 | Set up or fix mise (mise.toml, .mise/scripts, AGENTS.md linking, `op inject .env.op`) | [references/mise-conventions.md](references/mise-conventions.md) |
 | Install / re-install BMAD with the standard modules + tools | [references/bmad-init.md](references/bmad-init.md) |
-| Wire an agent's Hindsight memory and Bloodbank emit/consume hooks | [references/agent-hooks.md](references/agent-hooks.md) |
+| Wire an agent's Hindsight memory and Bloodbank emit/consume hooks (harness/global layer) | [references/agent-hooks.md](references/agent-hooks.md) |
+| Wire the **per-dev, committed** project-scoped hook + skill fan-out (Claude/Codex/Hermes/Kimi, `.agents/local.json` opt-out, `hindsight-setup`) — adoption checklist, then per-CLI dialect mechanics | [references/project-scoped-hooks.md](references/project-scoped-hooks.md) → [references/project-scoped-internals.md](references/project-scoped-internals.md) |
 
 Read only the topic you need. Most tasks touch exactly one.
 
