@@ -1,6 +1,8 @@
 ---
 name: hermes-pm-template-maintenance
 description: Standard workflow for PM agents to capture new governance rules/workflows/skills into the hermes PM template and propagate to existing agents.
+pipeline-status:
+  - new
 ---
 
 # Hermes PM Template Maintenance

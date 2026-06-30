@@ -1,3 +1,7 @@
+---
+pipeline-status:
+  - new
+---
 # Fleet self-check workflow
 
 Use this lane when the operator asks for a Hermes fleet self-check, especially when PM/scrum-master agents disagree with other CLIs or when MCP servers fail only in repo-backed daemons.
