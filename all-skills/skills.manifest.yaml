@@ -93,7 +93,7 @@ always_on:
     - follow-up-boss
     - google
     - just-fucking-cancel
-    - managing-tickets-and-tasks-in-plane
+    - project-lifecycle
     - notebooklm
     - obsidian-vault-management
     - openrouter-transcribe
@@ -116,16 +116,22 @@ always_on:
     - hindsight-memory-governance # DEPRECATED: consolidated into hindsight
     - hindsight-self-hosted
 
-  # 33GOD platform components and internal tooling (11 skills).
+  # 33GOD platform components and internal tooling (16 skills).
   33god_ecosystem:
-    - 33god
+    - 33god-ecosystem
+    - 33god-projects
     - 33god-task-triage
+    - agent-config-fanout
     - agent-factory
     - agent-team-kit
+    - bloodbank-integration
     - bub-email-triage
     - god-docs
+    - agent-fleet-operations
+    - hermes-pm-template-maintenance # DEPRECATED: compatibility shim for agent-fleet-operations
     - openclaw-runtime-git
     - openclaw-upgrade
+    - project-jangler
     - project-crank-engine
     - security-monitor
     - svgme-status-handoff
@@ -174,7 +180,7 @@ always_on:
     - mise-tasks
     - opencode-controller
     - pirate-skill # candidate for removal: novelty only
-    - pjangler-dev
+    - brule-method # novelty persona: Dr. Denny Grubbs / Brule Method
     - pricing-strategy
     - self-improving-agent
     - skill-creator
@@ -193,6 +199,7 @@ profiles:
       - google
       - agent-skills-lifecycle
       - ralph-wiggum
+      - product-manager
 
   google:
     description: "Google agent skills lifecycle (~/code/google-agent-skills)"
@@ -203,6 +210,7 @@ profiles:
       - bmad
       - agent-skills-lifecycle
       - ralph-wiggum
+      - product-manager
 
   agent-skills-lifecycle:
     description: "addy-agent-skills plugin lifecycle (idea-refine -> ship)"
@@ -213,6 +221,7 @@ profiles:
       - bmad
       - google
       - ralph-wiggum
+      - product-manager
 
   ralph-wiggum:
     description: "Autonomous TDD swarm loop with parallel agent evolution"
@@ -224,6 +233,22 @@ profiles:
       - bmad
       - google
       - agent-skills-lifecycle
+      - product-manager
+
+  product-manager:
+    description: "ProductManager feature-candidate discovery: research, mock use, visual inspection, brainstorming, feature docs, and final reports"
+    source: filesystem
+    skills:
+      - product-manager-agent
+      - product-manager-research-phase
+      - product-manager-brainstorm-phase
+      - product-manager-feature-doc-phase
+      - product-manager-report-phase
+    conflicts_with:
+      - bmad
+      - google
+      - agent-skills-lifecycle
+      - ralph-wiggum
 
 # ─────────────────────────────────────────────────────────────────────────────
 # CLI-specific integration hints.
@@ -233,16 +258,29 @@ cli_targets:
   claude_code: "~/.claude/skills"
   opencode: "~/.config/opencode/skills"
   codex: "~/.config/codex/skills"
-  gemini: "~/.config/gemini/skills"
+  gemini: "~/.gemini/config/skills"
+  kimi: "~/.kimi-code/skills"
+  hermes: "~/.hermes/skills"
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Audit notes (2026-04-14)
+# Audit notes (2026-07-01)
 # ─────────────────────────────────────────────────────────────────────────────
-# Total skills categorized: 120 (118 always-on + 2 in ralph-wiggum profile)
+# Total skills categorized: 129 (122 always-on + 2 in ralph-wiggum profile + 5 in product-manager profile)
+#
+# 33GOD ecosystem boundary migration completed:
+#   - Added 33god-ecosystem (router hub), 33god-projects (project bootstrap),
+#     agent-config-fanout (agent hook/skill SSOT fan-out),
+#     agent-fleet-operations (Hermes fleet/template/runtime).
+#   - Replaced legacy 33god entry with 33god-ecosystem.
+#   - Moved project-jangler into 33god_ecosystem bucket.
+#   - Added bloodbank-integration to 33god_ecosystem bucket.
+#   - hermes-pm-template-maintenance retained as compatibility shim; content
+#     canonicalized under agent-fleet-operations.
 #
 # Deprecated skills flagged for review/removal:
 #   - digipop-coloring-book-creation (superseded by creating-coloring-books)
 #   - hindsight-memory-governance    (consolidated into hindsight)
+#   - hermes-pm-template-maintenance (compatibility shim for agent-fleet-operations)
 #
 # Skills that could be profile-gated if unused frequently:
 #   - clerk.*              (10 skills; only needed on Clerk-using projects)
@@ -254,5 +292,5 @@ cli_targets:
 # above four buckets into filesystem profiles keyed by project type (e.g.
 # profile: react-native-app activates clerk + expo + react_ecosystem).
 #
-# Context cost note: ~120 skills at ~30 tokens/metadata entry ≈ 3.6K tokens
+# Context cost note: ~122 skills at ~30 tokens/metadata entry ≈ 3.7K tokens
 # ALWAYS present in Claude Code context. That's the baseline.

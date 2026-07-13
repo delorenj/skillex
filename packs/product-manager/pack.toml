@@ -1,0 +1,13 @@
+[pack]
+name = "product-manager"
+version = "0.1.0"
+description = "ProductManager feature-candidate discovery agent and phase skills."
+
+[freeform]
+skills = [
+  "product-manager-agent",
+  "product-manager-research-phase",
+  "product-manager-brainstorm-phase",
+  "product-manager-feature-doc-phase",
+  "product-manager-report-phase",
+]

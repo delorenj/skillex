@@ -7,7 +7,14 @@ from pathlib import Path
 
 import pytest
 
-from skillex.adapters import claude, codex, opencode  # noqa: F401 -- registration
+from skillex.adapters import (  # noqa: F401 -- registration
+    claude,
+    codex,
+    gemini,
+    hermes,
+    kimi,
+    opencode,
+)
 from skillex.core.activator import ActivationError, apply, plan
 from skillex.core.models import (
     CliAdapterConfig,
@@ -34,6 +41,9 @@ def tmp_tree(tmp_path: Path) -> Path:
     (tmp_path / "global-claude").mkdir()
     (tmp_path / "global-codex").mkdir()
     (tmp_path / "global-opencode").mkdir()
+    (tmp_path / "global-gemini").mkdir()
+    (tmp_path / "global-kimi").mkdir()
+    (tmp_path / "global-hermes").mkdir()
     (tmp_path / "config").mkdir()
     return tmp_path
 
@@ -60,6 +70,24 @@ def _make_config(tmp_tree: Path) -> SkillexConfig:
                 enabled=True,
                 global_root=tmp_tree / "global-opencode",
                 project_root=Path(".opencode"),
+            ),
+            "gemini": CliAdapterConfig(
+                name="gemini",
+                enabled=True,
+                global_root=tmp_tree / "global-gemini",
+                project_root=Path(".gemini"),
+            ),
+            "kimi": CliAdapterConfig(
+                name="kimi",
+                enabled=True,
+                global_root=tmp_tree / "global-kimi",
+                project_root=Path(".kimi-code"),
+            ),
+            "hermes": CliAdapterConfig(
+                name="hermes",
+                enabled=True,
+                global_root=tmp_tree / "global-hermes",
+                project_root=Path(".hermes"),
             ),
         },
     )
@@ -103,16 +131,16 @@ def _make_pack(tmp_tree: Path) -> Pack:
 
 
 class TestPlan:
-    def test_fresh_plan_has_add_ops_for_all_three_clis(self, tmp_tree: Path) -> None:
+    def test_fresh_plan_has_add_ops_for_all_six_clis(self, tmp_tree: Path) -> None:
         cfg = _make_config(tmp_tree)
         pack = _make_pack(tmp_tree)
         ops = plan(pack, "global", cfg)
 
         add_ops = [o for o in ops if o.action == "add"]
-        # 2 skills x 3 CLIs = 6 add ops
-        assert len(add_ops) == 6
+        # 2 skills x 6 CLIs = 12 add ops
+        assert len(add_ops) == 12
         clis = {o.cli for o in add_ops}
-        assert clis == {"claude", "codex", "opencode"}
+        assert clis == {"claude", "codex", "opencode", "gemini", "kimi", "hermes"}
 
     def test_plan_is_idempotent(self, tmp_tree: Path) -> None:
         cfg = _make_config(tmp_tree)
@@ -133,9 +161,7 @@ class TestPlan:
             update={
                 "cli_adapters": {
                     **cfg.cli_adapters,
-                    "codex": cfg.cli_adapters["codex"].model_copy(
-                        update={"enabled": False}
-                    ),
+                    "codex": cfg.cli_adapters["codex"].model_copy(update={"enabled": False}),
                 }
             }
         )
@@ -156,6 +182,9 @@ class TestApply:
         assert not (tmp_tree / "global-claude" / "skills").exists()
         assert not (tmp_tree / "global-codex" / "prompts").exists()
         assert not (tmp_tree / "global-opencode" / "agent").exists()
+        assert not (tmp_tree / "global-gemini" / "config" / "skills").exists()
+        assert not (tmp_tree / "global-kimi" / "skills").exists()
+        assert not (tmp_tree / "global-hermes" / "skills").exists()
 
     def test_apply_creates_symlinks(self, tmp_tree: Path) -> None:
         cfg = _make_config(tmp_tree)
@@ -166,19 +195,27 @@ class TestApply:
         claude_link = tmp_tree / "global-claude" / "skills" / "hindsight"
         codex_link = tmp_tree / "global-codex" / "prompts" / "hindsight.md"
         opencode_link = tmp_tree / "global-opencode" / "agent" / "hindsight.md"
+        gemini_link = tmp_tree / "global-gemini" / "config" / "skills" / "hindsight"
+        kimi_link = tmp_tree / "global-kimi" / "skills" / "hindsight"
+        hermes_link = tmp_tree / "global-hermes" / "skills" / "hindsight"
 
         assert claude_link.is_symlink()
         assert claude_link.resolve() == (tmp_tree / "all-skills" / "hindsight").resolve()
 
         assert codex_link.is_symlink()
-        assert codex_link.resolve() == (
-            tmp_tree / "all-skills" / "hindsight" / "SKILL.md"
-        ).resolve()
+        assert (
+            codex_link.resolve() == (tmp_tree / "all-skills" / "hindsight" / "SKILL.md").resolve()
+        )
 
         assert opencode_link.is_symlink()
-        assert opencode_link.resolve() == (
-            tmp_tree / "all-skills" / "hindsight" / "SKILL.md"
-        ).resolve()
+        assert (
+            opencode_link.resolve()
+            == (tmp_tree / "all-skills" / "hindsight" / "SKILL.md").resolve()
+        )
+
+        for directory_link in (gemini_link, kimi_link, hermes_link):
+            assert directory_link.is_symlink()
+            assert directory_link.resolve() == (tmp_tree / "all-skills" / "hindsight").resolve()
 
     def test_deactivate_removes_owned_links_only(self, tmp_tree: Path) -> None:
         cfg = _make_config(tmp_tree)
@@ -228,8 +265,14 @@ class TestApply:
             apply(ops, lock_path=tmp_tree / "config" / ".lock")
 
         # No leftover symlinks from the partial apply.
-        for cli_subdir in ("global-claude/skills", "global-codex/prompts",
-                            "global-opencode/agent"):
+        for cli_subdir in (
+            "global-claude/skills",
+            "global-codex/prompts",
+            "global-opencode/agent",
+            "global-gemini/config/skills",
+            "global-kimi/skills",
+            "global-hermes/skills",
+        ):
             directory = tmp_tree / cli_subdir
             if directory.exists():
                 children = list(directory.iterdir())

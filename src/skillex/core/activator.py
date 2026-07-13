@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
+import skillex.adapters  # noqa: F401 - registers built-in adapters
 from skillex.adapters.base import Scope, all_adapters
 from skillex.core.file_lock import FileLock
 from skillex.core.models import LinkOp, Pack, SkillexConfig
@@ -49,9 +50,7 @@ def _scope_root_for(
     return project_root / adapter_cfg.project_root
 
 
-def _skillex_owned_links_in(
-    scope_root: Path, skills_root: Path
-) -> list[Path]:
+def _skillex_owned_links_in(scope_root: Path, skills_root: Path) -> list[Path]:
     """Find existing symlinks under scope_root that point into skills_root.
 
     Recursively walks the expected subdirectories (skills/, prompts/, agent/).
@@ -60,7 +59,7 @@ def _skillex_owned_links_in(
     owned: list[Path] = []
     if not scope_root.exists():
         return owned
-    for sub in ("skills", "prompts", "agent", "command"):
+    for sub in ("skills", "prompts", "agent", "command", "config/skills"):
         candidate = scope_root / sub
         if not candidate.is_dir():
             continue
@@ -97,9 +96,10 @@ def plan(
         if scope_root is None:
             continue
 
-        existing = {p.resolve(strict=False): p for p in _skillex_owned_links_in(
-            scope_root, config.skills_root
-        )}
+        existing = {
+            p.resolve(strict=False): p
+            for p in _skillex_owned_links_in(scope_root, config.skills_root)
+        }
         desired_ops: list[LinkOp] = []
         for skill in skills_to_link:
             desired_ops.extend(adapter.render_links(skill, scope_root, scope))
@@ -156,9 +156,7 @@ def apply(
             # Snapshot anything we're about to remove or overwrite.
             for op in ops:
                 if op.action == "remove" and op.target.is_symlink():
-                    snapshots.append(
-                        _Snapshot(path=op.target, target=op.target.readlink())
-                    )
+                    snapshots.append(_Snapshot(path=op.target, target=op.target.readlink()))
 
             # Remove first.
             for op in ops:
@@ -174,9 +172,7 @@ def apply(
                             _Snapshot(
                                 path=op.target,
                                 target=(
-                                    op.target.readlink()
-                                    if op.target.is_symlink()
-                                    else op.target
+                                    op.target.readlink() if op.target.is_symlink() else op.target
                                 ),
                             )
                         )
@@ -187,9 +183,7 @@ def apply(
             # Verify.
             for target in created:
                 if not target.is_symlink() or not target.exists():
-                    raise ActivationError(
-                        f"post-apply verification failed for {target}"
-                    )
+                    raise ActivationError(f"post-apply verification failed for {target}")
         except Exception as e:
             _rollback(created, snapshots)
             raise ActivationError(f"activation failed, rolled back: {e}") from e
