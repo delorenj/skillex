@@ -110,6 +110,8 @@ def desired_jobs(config: dict[str, Any]) -> list[dict[str, Any]]:
             "skills": ["delonet-daily-report"],
             "provider_snapshot": config["inference"]["provider"],
             "model_snapshot": config["inference"]["model"],
+            "repeat_times": None,
+            "repeat_completed": 0,
         }
         for topic in config["topics"]
     ]
@@ -124,6 +126,8 @@ def desired_jobs(config: dict[str, Any]) -> list[dict[str, Any]]:
             "skills": ["delonet-daily-report"],
             "provider_snapshot": config["inference"]["provider"],
             "model_snapshot": config["inference"]["model"],
+            "repeat_times": None,
+            "repeat_completed": 0,
         }
     )
     return sorted(jobs, key=lambda job: job["name"])
@@ -159,6 +163,22 @@ def normalize_job(job: Any) -> dict[str, Any]:
         skills = [skills]
     if not isinstance(skills, list) or not all(nonempty(skill) for skill in skills):
         raise ConfigError(f"observed job {job['name']} has invalid skills")
+    repeat = job.get("repeat")
+    if repeat is None:
+        repeat_times, repeat_completed = None, 0
+    elif isinstance(repeat, dict):
+        repeat_times = repeat.get("times")
+        repeat_completed = repeat.get("completed", 0)
+    elif isinstance(repeat, int) and not isinstance(repeat, bool):
+        repeat_times, repeat_completed = repeat, 0
+    else:
+        raise ConfigError(f"observed job {job['name']} has invalid repeat state")
+    if isinstance(repeat_times, bool) or (repeat_times is not None and not isinstance(repeat_times, int)):
+        raise ConfigError(f"observed job {job['name']} has invalid repeat times")
+    if repeat_times is not None and repeat_times <= 0:
+        repeat_times = None
+    if isinstance(repeat_completed, bool) or not isinstance(repeat_completed, int) or repeat_completed < 0:
+        raise ConfigError(f"observed job {job['name']} has invalid repeat completed count")
     return {
         "id": job["id"],
         "name": job["name"],
@@ -174,11 +194,29 @@ def normalize_job(job: Any) -> dict[str, Any]:
         "provider_snapshot": job.get("provider_snapshot"),
         "model_snapshot": job.get("model_snapshot"),
         "base_url": job.get("base_url"),
+        "repeat_times": repeat_times,
+        "repeat_completed": repeat_completed,
     }
 
 
 def managed(name: str) -> bool:
     return name == DAILY_NAME or name.startswith(MANAGED_PREFIX)
+
+
+def recurrence_issues(jobs: list[dict[str, Any]]) -> list[dict[str, str]]:
+    return [
+        {
+            "id": job["id"],
+            "name": job["name"],
+            "reason": (
+                f"repeat.times={job['repeat_times']}, "
+                f"repeat.completed={job['repeat_completed']}"
+            ),
+        }
+        for job in jobs
+        if managed(job["name"])
+        and (job["repeat_times"] is not None or job["repeat_completed"] != 0)
+    ]
 
 
 def reconciliation_plan(
@@ -206,6 +244,12 @@ def reconciliation_plan(
         wanted = desired[name]
         current = retained[name]
         if snapshot_mismatch(wanted, current):
+            actions.append({"action": "recreate", "id": current["id"], **wanted})
+            continue
+        if (
+            current["repeat_times"] is not None
+            or current["repeat_completed"] != wanted["repeat_completed"]
+        ):
             actions.append({"action": "recreate", "id": current["id"], **wanted})
             continue
         fields = ("schedule", "prompt", "deliver", "workdir", "skills")
@@ -284,6 +328,7 @@ def action_command(action: dict[str, Any]) -> list[str]:
             command += ["--skill", skill]
         if action["workdir"]:
             command += ["--workdir", action["workdir"]]
+        command += ["--repeat", str(action["repeat_times"] or 0)]
         return command
     command = ["hermes", "cron", "edit", action["id"]]
     flags = {
@@ -294,6 +339,9 @@ def action_command(action: dict[str, Any]) -> list[str]:
         "skills": "--skill",
     }
     for field in sorted(action["changes"]):
+        if field == "repeat_times":
+            command += ["--repeat", str(action["changes"][field] or 0)]
+            continue
         values = action["changes"][field] if field == "skills" else [action["changes"][field]]
         for value in values:
             command += [flags[field], value]
@@ -441,6 +489,7 @@ def main(argv: list[str] | None = None) -> int:
                 runtime_timezone = timezone_state(config)
                 runtime_inference = inference_state(config)
                 inference_drift = inference_issues(config, jobs, managed)
+                recurrence_drift = recurrence_issues(jobs)
                 skill_ready = profile_skill_installed("delonet-daily-report")
                 daily = next((job for job in jobs if job["name"] == DAILY_NAME), {})
                 next_run_valid = daily_next_run_valid(daily.get("next_run_at"), config)
@@ -451,6 +500,7 @@ def main(argv: list[str] | None = None) -> int:
                     and runtime_timezone["valid"]
                     and runtime_inference["valid"]
                     and not inference_drift
+                    and not recurrence_drift
                     and next_run_valid
                     and manifest["status"] == "valid"
                     and all(item["status"] == "complete" for item in sections)
@@ -461,6 +511,7 @@ def main(argv: list[str] | None = None) -> int:
                     "expected_timezone": config["timezone"],
                     "scheduler_inference": runtime_inference,
                     "inference_drift": inference_drift,
+                    "recurrence_drift": recurrence_drift,
                     "skill_available": skill_ready,
                     "daily_next_run_at": daily.get("next_run_at"),
                     "daily_next_run_valid": next_run_valid,

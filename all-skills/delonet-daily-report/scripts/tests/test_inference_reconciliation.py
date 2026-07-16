@@ -20,6 +20,7 @@ def native_jobs(value: dict) -> list[dict]:
             "provider": None,
             "model": None,
             "base_url": None,
+            "repeat": {"times": job["repeat_times"], "completed": job["repeat_completed"]},
         }
         for index, job in enumerate(reportctl.desired_jobs(value), 1)
     ]
@@ -44,6 +45,10 @@ def created_job(action: dict, *, staged: bool, enabled: bool) -> dict:
             "provider": None,
             "model": None,
             "base_url": None,
+            "repeat": {
+                "times": 1 if staged else action["repeat_times"],
+                "completed": 0,
+            },
         }
     )
 
@@ -119,6 +124,31 @@ class InferenceReconciliationTests(unittest.TestCase):
         self.assertGreater(staging_at, dt.datetime.now(dt.UTC) + dt.timedelta(days=3650))
         self.assertEqual(reportctl_inference.STAGING_PROMPT, commands[1][4])
         self.assertEqual("pause", commands[2][2])
+        self.assertEqual("1", commands[1][commands[1].index("--repeat") + 1])
+        self.assertEqual("0", commands[3][commands[3].index("--repeat") + 1])
+
+    def test_finite_repeat_is_recreated_and_infinite_is_idempotent(self) -> None:
+        observed = native_jobs(self.value)
+        observed[0]["repeat"] = {"times": 3, "completed": 1}
+        plan = reportctl.reconciliation_plan(self.value, observed)
+        recreate = next(item for item in plan if item["name"] == observed[0]["name"])
+        self.assertEqual("recreate", recreate["action"])
+        normalized = [reportctl.normalize_job(job) for job in observed]
+        issues = reportctl.recurrence_issues(normalized)
+        self.assertEqual(observed[0]["name"], issues[0]["name"])
+        self.assertIn("repeat.times=3", issues[0]["reason"])
+        repaired = copy.deepcopy(observed)
+        repaired[0]["repeat"] = {"times": None, "completed": 0}
+        self.assertEqual([], reportctl.reconciliation_plan(self.value, repaired))
+
+    def test_legacy_missing_or_null_repeat_normalizes_to_infinite(self) -> None:
+        desired = reportctl.desired_jobs(self.value)[0]
+        base = {"id": "legacy", **desired}
+        base.pop("repeat_times")
+        base.pop("repeat_completed")
+        self.assertIsNone(reportctl.normalize_job(base)["repeat_times"])
+        base["repeat"] = None
+        self.assertIsNone(reportctl.normalize_job(base)["repeat_times"])
 
     def test_enabled_create_resumes_only_after_staging_and_desired_postchecks(self) -> None:
         action = reportctl.reconciliation_plan(self.value, [native_jobs(self.value)[0]])[0]

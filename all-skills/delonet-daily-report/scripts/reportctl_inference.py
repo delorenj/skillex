@@ -12,7 +12,7 @@ from reportctl_runtime import run_command
 SNAPSHOT_FIELDS = ("provider_snapshot", "model_snapshot")
 STAGING_SCHEDULE = "2099-12-31T23:59:59Z"
 STAGING_PROMPT = "Staged DeLoNET Daily Report job; execution is disabled until verified."
-DESIRED_FIELDS = ("schedule", "prompt", "deliver", "workdir", "skills")
+DESIRED_FIELDS = ("schedule", "prompt", "deliver", "workdir", "skills", "repeat_times")
 
 
 def snapshot_mismatch(wanted: dict[str, Any], current: dict[str, Any]) -> bool:
@@ -74,11 +74,25 @@ def _verify_created(
     if current["enabled"] != enabled:
         raise ConfigError(f"created job {action['name']} did not preserve enabled state")
     expected = (
-        action if desired_fields else {"schedule": STAGING_SCHEDULE, "prompt": STAGING_PROMPT}
+        action
+        if desired_fields
+        else {
+            "schedule": STAGING_SCHEDULE,
+            "prompt": STAGING_PROMPT,
+            "repeat_times": 1,
+            "repeat_completed": 0,
+        }
     )
-    fields = DESIRED_FIELDS if desired_fields else ("schedule", "prompt")
+    fields = DESIRED_FIELDS if desired_fields else (
+        "schedule",
+        "prompt",
+        "repeat_times",
+        "repeat_completed",
+    )
     if any(current.get(field) != expected[field] for field in fields):
         raise ConfigError(f"created job {action['name']} has unexpected staged or desired fields")
+    if desired_fields and current.get("repeat_completed") != action["repeat_completed"]:
+        raise ConfigError(f"created job {action['name']} has unexpected desired repeat progress")
 
 
 def _verify_only_created(
@@ -131,6 +145,8 @@ def apply_create(
         "schedule": STAGING_SCHEDULE,
         "prompt": STAGING_PROMPT,
         "enabled": False,
+        "repeat_times": 1,
+        "repeat_completed": 0,
     }
     result = run_command(action_command(staged), env=environment)
     created_id = _created_id(result.stdout, action["name"])
