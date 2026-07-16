@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import datetime as dt
 import subprocess
 import unittest
 from unittest import mock
@@ -22,6 +23,25 @@ def native_jobs(value: dict) -> list[dict]:
         }
         for index, job in enumerate(reportctl.desired_jobs(value), 1)
     ]
+
+
+def created_job(action: dict, *, staged: bool, enabled: bool) -> dict:
+    return reportctl.normalize_job(
+        {
+            **action,
+            "id": "new-job",
+            "schedule": (
+                {"kind": "at", "at": reportctl_inference.STAGING_SCHEDULE}
+                if staged
+                else action["schedule"]
+            ),
+            "prompt": reportctl_inference.STAGING_PROMPT if staged else action["prompt"],
+            "enabled": enabled,
+            "provider": None,
+            "model": None,
+            "base_url": None,
+        }
+    )
 
 
 class InferenceReconciliationTests(unittest.TestCase):
@@ -52,7 +72,7 @@ class InferenceReconciliationTests(unittest.TestCase):
         with self.assertRaisesRegex(reportctl.ConfigError, "missing keys.*inference"):
             reportctl.validate_config(invalid)
 
-    def test_paused_recreate_removes_then_creates_pauses_and_postchecks(self) -> None:
+    def test_paused_recreate_has_no_due_window_for_concurrent_ticker(self) -> None:
         value = copy.deepcopy(self.value)
         value["topics"][0]["enabled"] = False
         observed = native_jobs(value)
@@ -67,16 +87,9 @@ class InferenceReconciliationTests(unittest.TestCase):
         self.assertEqual("recreate", action["action"])
         self.assertFalse(action["enabled"])
         old = reportctl.normalize_job(target)
-        created = reportctl.normalize_job(
-            {
-                **target,
-                "id": "new-job",
-                "provider_snapshot": "openai-codex",
-                "model_snapshot": "gpt-5.4",
-                "enabled": False,
-            }
-        )
-        stable_states = [[old], [], [], [created]]
+        staged = created_job(action, staged=True, enabled=False)
+        created = created_job(action, staged=False, enabled=False)
+        stable_states = [[old], [], [], [staged], [created]]
 
         def command_result(command, **_kwargs):
             stdout = "Created job: new-job\n" if command[2] == "create" else ""
@@ -90,10 +103,44 @@ class InferenceReconciliationTests(unittest.TestCase):
         ):
             reportctl.apply_plan([action], value)
         commands = [call.args[0] for call in run.call_args_list]
-        self.assertEqual(["remove", "create", "pause"], [command[2] for command in commands])
+        self.assertEqual(
+            ["remove", "create", "pause", "edit"],
+            [command[2] for command in commands],
+        )
         self.assertNotIn("run", [part for command in commands for part in command])
         self.assertNotIn("--provider", commands[1])
         self.assertNotIn("--model", commands[1])
+        staging_at = dt.datetime.fromisoformat(commands[1][3].replace("Z", "+00:00"))
+        self.assertGreater(staging_at, dt.datetime.now(dt.UTC) + dt.timedelta(days=3650))
+        self.assertEqual(reportctl_inference.STAGING_PROMPT, commands[1][4])
+        self.assertEqual("pause", commands[2][2])
+
+    def test_enabled_create_resumes_only_after_staging_and_desired_postchecks(self) -> None:
+        action = reportctl.reconciliation_plan(self.value, [native_jobs(self.value)[0]])[0]
+        staged = created_job(action, staged=True, enabled=False)
+        edited = created_job(action, staged=False, enabled=False)
+        resumed = created_job(action, staged=False, enabled=True)
+
+        def command_result(command, **_kwargs):
+            stdout = "Created job: new-job\n" if command[2] == "create" else ""
+            return subprocess.CompletedProcess(command, 0, stdout, "")
+
+        with (
+            mock.patch.object(
+                reportctl,
+                "read_stable_live_jobs",
+                side_effect=[[], [staged], [edited], [resumed]],
+            ),
+            mock.patch.object(
+                reportctl_inference, "run_command", side_effect=command_result
+            ) as run,
+        ):
+            reportctl.apply_plan([action], self.value)
+        commands = [call.args[0] for call in run.call_args_list]
+        self.assertEqual(
+            ["create", "pause", "edit", "resume"],
+            [command[2] for command in commands],
+        )
 
     def test_recreate_race_aborts_before_create(self) -> None:
         observed = native_jobs(self.value)
@@ -117,23 +164,49 @@ class InferenceReconciliationTests(unittest.TestCase):
     def test_fresh_create_requires_expected_snapshots(self) -> None:
         action = reportctl.reconciliation_plan(self.value, [native_jobs(self.value)[0]])[0]
         self.assertEqual("create", action["action"])
-        bad = reportctl.normalize_job(
-            {
-                "id": "new-job",
-                **action,
-                "provider_snapshot": None,
-                "model_snapshot": None,
-            }
-        )
+        bad = created_job(action, staged=True, enabled=False)
+        bad["provider_snapshot"] = None
+        bad["model_snapshot"] = None
         with (
-            mock.patch.object(reportctl, "read_stable_live_jobs", side_effect=[[], [bad]]),
+            mock.patch.object(
+                reportctl, "read_stable_live_jobs", side_effect=[[], [bad], [bad], []]
+            ),
             mock.patch.object(
                 reportctl_inference,
                 "run_command",
-                return_value=subprocess.CompletedProcess([], 0, "Created job: new-job\n", ""),
-            ),
+                side_effect=lambda command, **_kwargs: subprocess.CompletedProcess(
+                    command,
+                    0,
+                    "Created job: new-job\n" if command[2] == "create" else "",
+                    "",
+                ),
+            ) as run,
         ):
             with self.assertRaisesRegex(reportctl.ConfigError, "unexpected inference"):
+                reportctl.apply_plan([action], self.value)
+        self.assertEqual(
+            ["create", "pause", "pause", "remove"],
+            [call.args[0][2] for call in run.call_args_list],
+        )
+
+    def test_cleanup_failure_is_aggregated(self) -> None:
+        action = reportctl.reconciliation_plan(self.value, [native_jobs(self.value)[0]])[0]
+        bad = created_job(action, staged=True, enabled=False)
+        bad["provider_snapshot"] = None
+
+        def fail_remove(command, **_kwargs):
+            if command[2] == "remove":
+                raise reportctl.ConfigError("forced remove failure")
+            stdout = "Created job: new-job\n" if command[2] == "create" else ""
+            return subprocess.CompletedProcess(command, 0, stdout, "")
+
+        with (
+            mock.patch.object(reportctl, "read_stable_live_jobs", side_effect=[[], [bad], [bad]]),
+            mock.patch.object(reportctl_inference, "run_command", side_effect=fail_remove),
+        ):
+            with self.assertRaisesRegex(
+                reportctl.ConfigError, "cleanup failed.*forced remove failure"
+            ):
                 reportctl.apply_plan([action], self.value)
 
     def test_health_inference_flags_null_and_mismatch(self) -> None:

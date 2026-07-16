@@ -59,9 +59,13 @@ the active `$HERMES_HOME/skills`. The active profile’s `config.yaml` must
 authoritatively match the configured timezone and required
 `inference.provider`/`inference.model`; a conflicting `HERMES_TIMEZONE` fails
 preflight. Hermes snapshots those profile defaults when a public cron create
-command runs. Snapshot drift triggers a remove-first recreate, immediate pause
-restoration when configured, and a canonical post-check. The controller never
-edits `jobs.json` directly and never passes unsupported provider or model flags.
+command runs. Snapshot drift triggers a remove-first recreate. Every create uses
+a far-future one-shot staging schedule, pauses the returned ID immediately,
+verifies ID/name ownership and snapshots, edits desired fields while paused,
+and resumes only after a final post-check when configuration enables the job.
+Failures trigger verified pause/remove compensation so no unsafe replacement
+remains. The controller never edits `jobs.json` directly and never passes
+unsupported provider or model flags.
 Health flags null or mismatched snapshots. It also converts observable
 `next_run_at` through `zoneinfo` and requires the exact next future 07:00 Eastern
 occurrence, including DST transitions. Stale and later-day values fail health.

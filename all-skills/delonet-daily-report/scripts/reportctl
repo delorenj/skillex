@@ -135,7 +135,13 @@ def normalize_job(job: Any) -> dict[str, Any]:
         raise ConfigError("jobs snapshot enabled must be boolean")
     schedule = job.get("schedule", "")
     if isinstance(schedule, dict):
-        schedule = schedule.get("expr") or schedule.get("display") or schedule.get("value") or ""
+        schedule = (
+            schedule.get("expr")
+            or schedule.get("at")
+            or schedule.get("display")
+            or schedule.get("value")
+            or ""
+        )
     deliver = job.get("deliver") or "local"
     if isinstance(deliver, list):
         deliver = deliver[0] if len(deliver) == 1 else ",".join(deliver)

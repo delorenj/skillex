@@ -10,6 +10,9 @@ from reportctl_contracts import ConfigError
 from reportctl_runtime import run_command
 
 SNAPSHOT_FIELDS = ("provider_snapshot", "model_snapshot")
+STAGING_SCHEDULE = "2099-12-31T23:59:59Z"
+STAGING_PROMPT = "Staged DeLoNET Daily Report job; execution is disabled until verified."
+DESIRED_FIELDS = ("schedule", "prompt", "deliver", "workdir", "skills")
 
 
 def snapshot_mismatch(wanted: dict[str, Any], current: dict[str, Any]) -> bool:
@@ -50,14 +53,67 @@ def _created_id(stdout: str, name: str) -> str:
     return match.group(1)
 
 
-def _verify_created(action: dict[str, Any], created_id: str, jobs: list[dict[str, Any]]) -> None:
+def _owned_job(action: dict[str, Any], created_id: str, jobs: list[dict[str, Any]]) -> dict:
     current = next((job for job in jobs if job["id"] == created_id), None)
     if current is None or current["name"] != action["name"]:
         raise ConfigError(f"created job {action['name']} missing from canonical Hermes state")
+    return current
+
+
+def _verify_created(
+    action: dict[str, Any],
+    created_id: str,
+    jobs: list[dict[str, Any]],
+    *,
+    enabled: bool,
+    desired_fields: bool,
+) -> None:
+    current = _owned_job(action, created_id, jobs)
     if snapshot_mismatch(action, current):
         raise ConfigError(f"created job {action['name']} has unexpected inference snapshots")
-    if current["enabled"] != action["enabled"]:
+    if current["enabled"] != enabled:
         raise ConfigError(f"created job {action['name']} did not preserve enabled state")
+    expected = (
+        action if desired_fields else {"schedule": STAGING_SCHEDULE, "prompt": STAGING_PROMPT}
+    )
+    fields = DESIRED_FIELDS if desired_fields else ("schedule", "prompt")
+    if any(current.get(field) != expected[field] for field in fields):
+        raise ConfigError(f"created job {action['name']} has unexpected staged or desired fields")
+
+
+def _verify_only_created(
+    before: list[dict[str, Any]], after: list[dict[str, Any]], created_id: str
+) -> None:
+    after_core = _stable_core(after)
+    created_core = after_core.pop(created_id, None)
+    if created_core is None or after_core != _stable_core(before):
+        raise ConfigError("canonical Hermes jobs changed unexpectedly during create")
+
+
+def _cleanup_created(
+    created_id: str,
+    name: str,
+    environment: dict[str, str],
+    stable_read: Callable[[], list[dict[str, Any]]],
+) -> str | None:
+    errors = []
+    try:
+        run_command(["hermes", "cron", "pause", created_id], env=environment)
+    except Exception as exc:
+        errors.append(f"pause: {exc}")
+    try:
+        current = next((job for job in stable_read() if job["id"] == created_id), None)
+        if current is None:
+            return "; ".join(errors) or None
+        if current["name"] != name:
+            errors.append(f"ownership: id {created_id} belongs to {current['name']}")
+            return "; ".join(errors)
+        run_command(["hermes", "cron", "remove", created_id], env=environment)
+        if any(job["id"] == created_id for job in stable_read()):
+            errors.append("remove verification: created ID remains")
+    except Exception as exc:
+        errors.append(f"verified remove: {exc}")
+    return "; ".join(errors) or None
 
 
 def apply_create(
@@ -69,16 +125,41 @@ def apply_create(
     before = stable_read()
     if any(job["name"] == action["name"] for job in before):
         raise ConfigError(f"job {action['name']} appeared before create; abort and replan")
-    result = run_command(action_command({**action, "action": "create"}), env=environment)
+    staged = {
+        **action,
+        "action": "create",
+        "schedule": STAGING_SCHEDULE,
+        "prompt": STAGING_PROMPT,
+        "enabled": False,
+    }
+    result = run_command(action_command(staged), env=environment)
     created_id = _created_id(result.stdout, action["name"])
-    if not action["enabled"]:
+    try:
         run_command(["hermes", "cron", "pause", created_id], env=environment)
-    after = stable_read()
-    after_core = _stable_core(after)
-    created_core = after_core.pop(created_id, None)
-    if created_core is None or after_core != _stable_core(before):
-        raise ConfigError("canonical Hermes jobs changed unexpectedly during create")
-    _verify_created(action, created_id, after)
+        staged_jobs = stable_read()
+        _verify_only_created(before, staged_jobs, created_id)
+        _verify_created(action, created_id, staged_jobs, enabled=False, desired_fields=False)
+        changes = {field: action[field] for field in DESIRED_FIELDS}
+        run_command(
+            action_command(
+                {"action": "edit", "id": created_id, "name": action["name"], "changes": changes}
+            ),
+            env=environment,
+        )
+        edited_jobs = stable_read()
+        _verify_only_created(before, edited_jobs, created_id)
+        _verify_created(action, created_id, edited_jobs, enabled=False, desired_fields=True)
+        if action["enabled"]:
+            run_command(["hermes", "cron", "resume", created_id], env=environment)
+            resumed_jobs = stable_read()
+            _verify_only_created(before, resumed_jobs, created_id)
+            _verify_created(action, created_id, resumed_jobs, enabled=True, desired_fields=True)
+    except Exception as exc:
+        cleanup_error = _cleanup_created(created_id, action["name"], environment, stable_read)
+        message = f"create transaction failed for {action['name']}: {exc}"
+        if cleanup_error:
+            message += f"; cleanup failed: {cleanup_error}"
+        raise ConfigError(message) from exc
 
 
 def apply_recreate(
