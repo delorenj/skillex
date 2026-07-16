@@ -31,7 +31,11 @@ def created_job(action: dict, *, staged: bool, enabled: bool) -> dict:
             **action,
             "id": "new-job",
             "schedule": (
-                {"kind": "at", "at": reportctl_inference.STAGING_SCHEDULE}
+                {
+                    "kind": "once",
+                    "run_at": "2099-12-31T23:59:59+00:00",
+                    "display": "once at 2099-12-31 23:59:59 UTC",
+                }
                 if staged
                 else action["schedule"]
             ),
@@ -88,6 +92,7 @@ class InferenceReconciliationTests(unittest.TestCase):
         self.assertFalse(action["enabled"])
         old = reportctl.normalize_job(target)
         staged = created_job(action, staged=True, enabled=False)
+        self.assertEqual(reportctl_inference.STAGING_SCHEDULE, staged["schedule"])
         created = created_job(action, staged=False, enabled=False)
         stable_states = [[old], [], [], [staged], [created]]
 

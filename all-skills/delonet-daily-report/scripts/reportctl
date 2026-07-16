@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import copy
+import datetime as dt
 import hashlib
 import json
 import os
@@ -137,11 +138,18 @@ def normalize_job(job: Any) -> dict[str, Any]:
     if isinstance(schedule, dict):
         schedule = (
             schedule.get("expr")
-            or schedule.get("at")
+            or schedule.get("run_at")
             or schedule.get("display")
             or schedule.get("value")
             or ""
         )
+    if isinstance(schedule, str):
+        try:
+            instant = dt.datetime.fromisoformat(schedule.replace("Z", "+00:00"))
+            if instant.tzinfo is not None:
+                schedule = instant.astimezone(dt.UTC).isoformat().replace("+00:00", "Z")
+        except ValueError:
+            pass
     deliver = job.get("deliver") or "local"
     if isinstance(deliver, list):
         deliver = deliver[0] if len(deliver) == 1 else ",".join(deliver)
