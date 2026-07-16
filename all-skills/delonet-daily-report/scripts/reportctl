@@ -226,7 +226,7 @@ def recurrence_issues(jobs: list[dict[str, Any]]) -> list[dict[str, str]]:
         }
         for job in jobs
         if managed(job["name"])
-        and (job["repeat_times"] is not None or job["repeat_completed"] != 0)
+        and job["repeat_times"] is not None
     ]
 
 
@@ -257,10 +257,7 @@ def reconciliation_plan(
         if snapshot_mismatch(wanted, current):
             actions.append({"action": "recreate", "id": current["id"], **wanted})
             continue
-        if (
-            current["repeat_times"] is not None
-            or current["repeat_completed"] != wanted["repeat_completed"]
-        ):
+        if current["repeat_times"] is not None:
             actions.append({"action": "recreate", "id": current["id"], **wanted})
             continue
         fields = ("schedule", "prompt", "deliver", "workdir", "skills", "script")

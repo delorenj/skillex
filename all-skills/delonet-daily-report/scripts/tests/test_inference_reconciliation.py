@@ -200,6 +200,15 @@ class InferenceReconciliationTests(unittest.TestCase):
         base["repeat"] = None
         self.assertIsNone(reportctl.normalize_job(base)["repeat_times"])
 
+    def test_infinite_post_run_progress_is_history_not_drift(self) -> None:
+        observed = native_jobs(self.value)
+        observed[0]["repeat"] = {"times": None, "completed": 7}
+        once = reportctl.normalize_job(observed[0])
+        twice = reportctl.normalize_job(once)
+        self.assertEqual(7, twice["repeat_completed"])
+        self.assertEqual([], reportctl.recurrence_issues([twice]))
+        self.assertEqual([], reportctl.reconciliation_plan(self.value, observed))
+
     def test_safe_prerun_scripts_are_controller_owned(self) -> None:
         value = copy.deepcopy(self.value)
         value["topics"][0]["script"] = "ddr-journal-ai-agents.py"
