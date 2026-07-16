@@ -42,7 +42,7 @@ Need to change the system?
 1. Copy `assets/example-config.json` outside the skill and customize it.
 2. Run `scripts/reportctl --config PATH validate`.
 3. Mutate topics with `topic add|update|pause|resume|remove`; writes are atomic.
-4. Run `scripts/reportctl --config PATH plan --jobs SNAPSHOT.json` or omit `--jobs` to inspect Hermes.
+4. Run `scripts/reportctl --config PATH plan --jobs SNAPSHOT.json` for offline planning, or omit `--jobs` to read canonical `$HERMES_HOME/cron/jobs.json`.
 5. Review commands, then run `scripts/reportctl --config PATH reconcile --apply`. Never use `--apply` casually.
 6. Archive validated output with `archive --report REPORT.json --markdown REPORT.md`; writes are atomic.
 7. Run `status`, `health`, and `paths --date YYYY-MM-DD` to inspect coverage and archive locations.

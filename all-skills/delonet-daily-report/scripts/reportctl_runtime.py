@@ -9,15 +9,63 @@ import os
 import re
 import subprocess
 import tempfile
+import uuid
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
-from reportctl_contracts import ConfigError
+from reportctl_contracts import ConfigError, parse_iso
+from reportctl_security import contains_secret, redact_text
 
 
 def hermes_home() -> Path:
     return Path(os.environ.get("HERMES_HOME", "~/.hermes")).expanduser().resolve()
+
+
+def profile_timezone() -> str:
+    path = hermes_home() / "config.yaml"
+    try:
+        text = path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return ""
+    except OSError as exc:
+        raise ConfigError(f"cannot inspect Hermes timezone config: {exc}") from exc
+    match = re.search(r"(?m)^timezone:\s*['\"]?([^'\"#\s]+)", text)
+    return match.group(1) if match else ""
+
+
+def timezone_state(config: dict[str, Any]) -> dict[str, Any]:
+    profile = profile_timezone()
+    environment = os.environ.get("HERMES_TIMEZONE", "").strip()
+    conflict = bool(environment and environment != profile)
+    return {
+        "profile": profile or "unset",
+        "environment": environment or "unset",
+        "conflict": conflict,
+        "valid": profile == config["timezone"] and not conflict,
+    }
+
+
+def timezone_preflight(config: dict[str, Any]) -> None:
+    state = timezone_state(config)
+    if not state["valid"]:
+        raise ConfigError(
+            f"Hermes profile timezone must be {config['timezone']} with no conflicting HERMES_TIMEZONE; profile={state['profile']} environment={state['environment']}"
+        )
+    if not (hermes_home() / "skills" / "delonet-daily-report" / "SKILL.md").is_file():
+        raise ConfigError(
+            "delonet-daily-report must be installed in the active HERMES_HOME skills directory"
+        )
+
+
+def daily_next_run_valid(value: Any, config: dict[str, Any]) -> bool:
+    try:
+        parsed = parse_iso(value, "daily_next_run_at")
+        local = parsed.astimezone(ZoneInfo(config["timezone"]))
+        return (local.hour, local.minute, local.second) == (7, 0, 0)
+    except (ConfigError, AttributeError, ValueError):
+        return False
 
 
 def archive_paths(config: dict[str, Any], date: str) -> dict[str, Any]:
@@ -26,13 +74,12 @@ def archive_paths(config: dict[str, Any], date: str) -> dict[str, Any]:
     except ValueError as exc:
         raise ConfigError("date must use YYYY-MM-DD") from exc
     base = Path(config["artifact_dir"]) / date
-    archive = Path(config["archive_dir"]) / f"{parsed.year:04d}" / f"{parsed.month:02d}"
+    archive = Path(config["archive_dir"]) / f"{parsed.year:04d}" / f"{parsed.month:02d}" / date
     return {
         "sections_dir": str(base / "sections"),
         "manifest": str(base / "run-manifest.json"),
-        "markdown": str(archive / f"{date}.md"),
-        "report_json": str(archive / f"{date}.report.json"),
-        "commit_marker": str(archive / f"{date}.committed.json"),
+        "archive_root": str(archive),
+        "commit_marker": str(archive / "current.json"),
     }
 
 
@@ -107,54 +154,62 @@ def run_command(
     except OSError as exc:
         raise ConfigError(f"command failed to start: {exc}") from exc
     except subprocess.CalledProcessError as exc:
-        message = re.sub(
-            r"(?i)(bearer\s+)\S+", r"\1[REDACTED]", exc.stderr or exc.stdout or str(exc)
-        )
-        message = re.sub(
-            r"(?i)((?:token|secret|password|api.?key)=)[^&\s]+", r"\1[REDACTED]", message
-        )
-        message = re.sub(r"(?i)(https?://)[^/@\s:]+:[^/@\s]+@", r"\1[REDACTED]@", message)
+        message = redact_text(exc.stderr or exc.stdout or str(exc))
         raise ConfigError(f"command failed: {message}") from exc
 
 
 def publish_archive_pair(
-    markdown_path: Path,
-    report_path: Path,
-    marker_path: Path,
+    archive_root: Path,
     markdown: str,
     report: dict[str, Any],
+    manifest: dict[str, Any],
     report_date: str,
 ) -> dict[str, Any]:
+    if contains_secret(markdown) or contains_secret(report) or contains_secret(manifest):
+        raise ConfigError("archive generation contains secret-like material")
+    marker_path = archive_root / "current.json"
     with file_lock(marker_path.with_suffix(".lock")):
-        directory = markdown_path.parent
-        directory.mkdir(parents=True, exist_ok=True)
-        token = f"{os.getpid()}-{id(report)}"
-        staged_markdown = directory / f".{markdown_path.name}.{token}"
-        staged_report = directory / f".{report_path.name}.{token}"
-        marker_path.unlink(missing_ok=True)
+        generations = archive_root / "generations"
+        generations.mkdir(parents=True, exist_ok=True)
+        token = uuid.uuid4().hex
+        staged = generations / f".stage-{token}"
+        generation = generations / token
+        staged.mkdir()
         try:
-            atomic_write_text(staged_markdown, markdown)
-            atomic_write(staged_report, report)
-            os.replace(staged_markdown, markdown_path)
-            os.replace(staged_report, report_path)
-            fsync_dir(directory)
+            atomic_write_text(staged / "report.md", markdown)
+            atomic_write(staged / "report.json", report)
+            atomic_write(staged / "run-manifest.json", manifest)
+            fsync_dir(staged)
+            os.replace(staged, generation)
+            fsync_dir(generations)
             atomic_write(
                 marker_path,
                 {
                     "schema_version": 1,
                     "report_date": report_date,
-                    "markdown": markdown_path.name,
-                    "report_json": report_path.name,
+                    "generation": token,
                 },
             )
         except BaseException:
-            for path in (staged_markdown, staged_report, markdown_path, report_path, marker_path):
-                path.unlink(missing_ok=True)
-            fsync_dir(directory)
+            if staged.exists():
+                for path in staged.iterdir():
+                    path.unlink(missing_ok=True)
+                staged.rmdir()
+            if generation.exists():
+                for path in generation.iterdir():
+                    path.unlink(missing_ok=True)
+                generation.rmdir()
+            fsync_dir(generations)
             raise
+    markdown_path, report_path, manifest_path = (
+        generation / "report.md",
+        generation / "report.json",
+        generation / "run-manifest.json",
+    )
     return {
         "archived": True,
         "markdown": str(markdown_path),
         "report_json": str(report_path),
+        "manifest": str(manifest_path),
         "commit_marker": str(marker_path),
     }

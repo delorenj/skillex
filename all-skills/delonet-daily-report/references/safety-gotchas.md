@@ -14,6 +14,7 @@
 - Redact token, secret, password, cookie, authorization, and API-key values before diagnostics.
 - Reject credential-bearing URLs and literal secrets in config.
 - Reject source URL userinfo and query strings; require HTTPS evidence URLs.
+- Apply the shared detector to prompts, artifacts, report bodies, Markdown, URLs, and subprocess diagnostics; reject or redact labeled secrets and common GitHub, OpenAI, Slack, and AWS token prefixes.
 - Never let reconciliation touch non-`ddr:` jobs.
 - Never write live `~/.config`, provision fleet agents, or edit Bloodbank.
 

@@ -32,8 +32,8 @@ Every mutation validates the full config and uses atomic replacement. Duplicate 
 
 ## Reconciliation
 
-Use `plan` first. Supply `--jobs snapshot.json` for read-only planning, where snapshots may be an array or native Hermes `{jobs:[...]}` with nested schedules. `reconcile --apply` rejects snapshots, takes a profile-scoped lock, refreshes `$HERMES_HOME/cron/jobs.json`, and only then computes mutations.
+Use `plan` first. With no `--jobs`, plan/status/health read canonical `$HERMES_HOME/cron/jobs.json` directly; they never scrape human CLI output. Explicit snapshots remain available for offline read-only planning. `reconcile --apply` rejects snapshots, takes a profile-scoped lock, refreshes canonical state, and uses optimistic fingerprints plus ID/name checks around mutations.
 
-The stable plan orders duplicate removals, stale removals, creates, edits, pauses, and resumes by job name and ID. Managed jobs attach `delonet-daily-report` with `--skill`; apply preflight requires that skill under the active `$HERMES_HOME/skills`. Applying also requires the active profile’s `config.yaml` (or gateway environment) to declare `America/New_York`; Hermes bridges that profile setting into its DST-aware scheduler. `reportctl` refuses an unset or different observable timezone.
+The stable plan orders duplicate removals, stale removals, creates, edits, pauses, and resumes by job name and ID. Managed jobs attach `delonet-daily-report` with `--skill`; apply preflight requires that skill under the active `$HERMES_HOME/skills`. The active profile’s `config.yaml` must authoritatively declare `America/New_York`; a conflicting `HERMES_TIMEZONE` fails preflight. Health converts observable `next_run_at` through `zoneinfo` and requires exactly 07:00 Eastern, including DST transitions.
 
 Journalist prompts name the reporting window, sources, three investigator roles, exact section path, and contract. Aggregator prompts validate every expected section, mark stale/missing manifest entries, and archive JSON plus Markdown.

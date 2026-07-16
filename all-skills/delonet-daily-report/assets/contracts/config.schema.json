@@ -15,7 +15,7 @@
     "daily": {
       "type": "object", "additionalProperties": false,
       "required": ["enabled", "schedule", "deliver"],
-      "properties": {"enabled": {"type": "boolean"}, "schedule": {"const": "0 7 * * *"}, "deliver": {"type": "string", "minLength": 1}, "workdir": {"type": "string"}}
+      "properties": {"enabled": {"type": "boolean"}, "schedule": {"const": "0 7 * * *"}, "deliver": {"type": "string", "minLength": 1}, "workdir": {"oneOf": [{"const": ""}, {"type": "string", "pattern": "^/"}]}}
     },
     "topics": {
       "type": "array",

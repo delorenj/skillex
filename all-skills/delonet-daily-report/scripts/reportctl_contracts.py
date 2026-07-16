@@ -5,7 +5,8 @@ from __future__ import annotations
 import datetime as dt
 import re
 from typing import Any
-from urllib.parse import urlsplit
+
+from reportctl_security import contains_secret, is_safe_https_url
 
 ID_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 
@@ -46,18 +47,12 @@ def parse_iso(value: Any, where: str, date_only: bool = False) -> dt.date | dt.d
 
 
 def valid_url(value: Any) -> bool:
-    if not isinstance(value, str):
-        return False
-    parsed = urlsplit(value)
-    return (
-        parsed.scheme == "https"
-        and bool(parsed.netloc)
-        and not parsed.username
-        and not parsed.password
-    )
+    return is_safe_https_url(value)
 
 
 def validate_section_artifact(value: Any, topic_id: str | None = None) -> dict[str, Any]:
+    if contains_secret(value):
+        raise ConfigError("SectionArtifact contains secret-like material")
     required = {
         "schema_version",
         "run_id",
@@ -114,6 +109,8 @@ def validate_section_artifact(value: Any, topic_id: str | None = None) -> dict[s
 
 
 def validate_daily_report(value: Any, config: dict[str, Any]) -> dict[str, Any]:
+    if contains_secret(value):
+        raise ConfigError("DailyReport contains secret-like material")
     required = {
         "schema_version",
         "run_id",
@@ -171,6 +168,8 @@ def validate_daily_report(value: Any, config: dict[str, Any]) -> dict[str, Any]:
 
 
 def validate_run_manifest(value: Any, config: dict[str, Any]) -> dict[str, Any]:
+    if contains_secret(value):
+        raise ConfigError("RunManifest contains secret-like material")
     required = {"schema_version", "run_id", "report_date", "started_at", "completed_at", "sections"}
     manifest = strict_object(value, required, required, "RunManifest")
     if manifest["schema_version"] != 1 or not nonempty(manifest["run_id"]):

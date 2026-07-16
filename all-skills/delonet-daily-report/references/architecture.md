@@ -30,12 +30,13 @@ Resolve `artifact_dir` and `archive_dir` from the operator-owned config:
 ```text
 <artifact_dir>/<YYYY-MM-DD>/sections/<topic-id>.json
 <artifact_dir>/<YYYY-MM-DD>/run-manifest.json
-<archive_dir>/<YYYY>/<MM>/<YYYY-MM-DD>.md
-<archive_dir>/<YYYY>/<MM>/<YYYY-MM-DD>.report.json
-<archive_dir>/<YYYY>/<MM>/<YYYY-MM-DD>.committed.json
+<archive_dir>/<YYYY>/<MM>/<YYYY-MM-DD>/current.json
+<archive_dir>/<YYYY>/<MM>/<YYYY-MM-DD>/generations/<generation>/report.md
+<archive_dir>/<YYYY>/<MM>/<YYYY-MM-DD>/generations/<generation>/report.json
+<archive_dir>/<YYYY>/<MM>/<YYYY-MM-DD>/generations/<generation>/run-manifest.json
 ```
 
-Treat an archive pair as published only when its `.committed.json` marker exists. `reportctl archive` serializes each date with a lock, stages and fsyncs both files, renames them, fsyncs the directory, then writes the marker; readers must ignore unmarked pairs.
+Treat only the immutable generation named by `current.json` as published. `reportctl archive` locks the date, validates matching report/manifest identity, stages and fsyncs the complete generation, renames it, then atomically switches `current.json`. A failed overwrite leaves the prior pointer and generation intact.
 
 ## Contract ownership
 

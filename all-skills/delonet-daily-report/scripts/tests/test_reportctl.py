@@ -13,6 +13,8 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+from test_fixtures import config, valid_artifact
+
 SCRIPT = Path(__file__).parents[1] / "reportctl"
 LOADER = importlib.machinery.SourceFileLoader("reportctl", str(SCRIPT))
 SPEC = importlib.util.spec_from_loader("reportctl", LOADER)
@@ -21,67 +23,10 @@ LOADER.exec_module(reportctl)
 reportctl_runtime = importlib.import_module("reportctl_runtime")
 
 
-def config(root: Path) -> dict:
-    return {
-        "version": 1,
-        "timezone": "America/New_York",
-        "artifact_dir": str(root / "artifacts"),
-        "archive_dir": str(root / "archive"),
-        "max_age_hours": 24,
-        "core_sections": [
-            {"id": "executive-brief", "title": "Executive Brief", "required": True},
-            {"id": "key-changes", "title": "Key Changes", "required": True},
-            {"id": "risks-watchlist", "title": "Risks and Watchlist", "required": True},
-            {"id": "coverage-freshness", "title": "Coverage and Freshness", "required": True},
-        ],
-        "daily": {"enabled": True, "schedule": "0 7 * * *", "deliver": "local"},
-        "topics": [
-            {
-                "id": "ai-agents",
-                "title": "AI Agents",
-                "prompt": "Track material releases",
-                "schedule": "15 6 * * *",
-                "enabled": True,
-                "sources": ["https://example.org/releases"],
-                "secret_env": ["NEWS_API_TOKEN"],
-            }
-        ],
-    }
-
-
 def observed_from_desired(value: dict) -> list[dict]:
     return [
         {"id": f"job-{index}", **job} for index, job in enumerate(reportctl.desired_jobs(value), 1)
     ]
-
-
-def valid_artifact(fresh_until: str) -> dict:
-    return {
-        "schema_version": 1,
-        "run_id": "run-1",
-        "topic_id": "ai-agents",
-        "generated_at": "2026-07-15T10:00:00Z",
-        "fresh_until": fresh_until,
-        "status": "complete",
-        "summary": "Material release found.",
-        "findings": [
-            {
-                "claim": "A release shipped.",
-                "significance": "Improves reliability.",
-                "source_urls": ["https://example.org/releases/1"],
-            }
-        ],
-        "sources": [
-            {
-                "url": "https://example.org/releases/1",
-                "title": "Release",
-                "publisher": "Example",
-                "published_at": "2026-07-15T09:00:00Z",
-                "retrieved_at": "2026-07-15T10:00:00Z",
-            }
-        ],
-        "caveats": ["Independent adoption data is unavailable."],
-    }
 
 
 class ReportctlTests(unittest.TestCase):
@@ -91,6 +36,9 @@ class ReportctlTests(unittest.TestCase):
         self.value = config(self.root)
         self.path = self.root / "report.json"
         self.path.write_text(json.dumps(self.value), encoding="utf-8")
+        manifest_path = Path(self.value["artifact_dir"]) / "2026-07-15" / "run-manifest.json"
+        manifest_path.parent.mkdir(parents=True)
+        manifest_path.write_text(json.dumps(self.valid_manifest()), encoding="utf-8")
 
     def tearDown(self) -> None:
         self.temporary.cleanup()
@@ -121,6 +69,20 @@ class ReportctlTests(unittest.TestCase):
         invalid["topics"][0]["prompt"] = "Fetch with api_key=literal-secret"
         with self.assertRaisesRegex(reportctl.ConfigError, "secret-like"):
             reportctl.validate_config(invalid)
+        for token in (
+            "ghp_abcdefghijklmnopqrstuvwxyz1234567890",
+            "github_pat_abcdefghijklmnopqrstuvwxyz123456",
+            "sk-abcdefghijklmnopqrstuvwxyz123456",
+            "xoxb-1234567890-secret",
+            "AKIAABCDEFGHIJKLMNOP",
+        ):
+            invalid = copy.deepcopy(self.value)
+            invalid["topics"][0]["prompt"] = f"Use {token}"
+            with self.assertRaisesRegex(reportctl.ConfigError, "secret-like"):
+                reportctl.validate_config(invalid)
+        safe = copy.deepcopy(self.value)
+        safe["topics"][0]["prompt"] = "Track token economy research"
+        reportctl.validate_config(safe)
 
     def test_plan_is_stable_and_idempotent(self) -> None:
         desired = observed_from_desired(self.value)
@@ -206,11 +168,19 @@ class ReportctlTests(unittest.TestCase):
         ]
         (home / "cron" / "jobs.json").write_text(json.dumps({"jobs": native}))
         with (
-            mock.patch.dict(os.environ, {"HERMES_HOME": str(home)}, clear=False),
+            mock.patch.dict(
+                os.environ, {"HERMES_HOME": str(home), "HERMES_TIMEZONE": ""}, clear=False
+            ),
             mock.patch.object(reportctl, "apply_plan") as apply,
         ):
             self.assertEqual([], reportctl.reconcile_live(self.value))
-            apply.assert_called_once_with([], "America/New_York")
+            apply.assert_not_called()
+            (home / "cron" / "jobs.json").write_text(json.dumps({"jobs": []}))
+            with mock.patch.object(
+                reportctl, "jobs_fingerprint", side_effect=["before", "changed"]
+            ):
+                with self.assertRaisesRegex(reportctl.ConfigError, "changed during"):
+                    reportctl.reconcile_live(self.value)
 
     def test_duplicate_and_stale_jobs_are_removed_without_touching_foreign_jobs(self) -> None:
         jobs = observed_from_desired(self.value)
@@ -290,6 +260,14 @@ class ReportctlTests(unittest.TestCase):
         insecure["sources"][0]["url"] = "http://example.org/release"
         with self.assertRaisesRegex(reportctl.ConfigError, "invalid"):
             reportctl.validate_section_artifact(insecure, "ai-agents")
+        insecure = valid_artifact("2099-01-01T00:00:00Z")
+        insecure["findings"][0]["source_urls"] = ["https://example.org/release?token=public"]
+        with self.assertRaisesRegex(reportctl.ConfigError, "invalid"):
+            reportctl.validate_section_artifact(insecure, "ai-agents")
+        leaked = valid_artifact("2099-01-01T00:00:00Z")
+        leaked["summary"] = "github_pat_abcdefghijklmnopqrstuvwxyz123456"
+        with self.assertRaisesRegex(reportctl.ConfigError, "secret-like"):
+            reportctl.validate_section_artifact(leaked, "ai-agents")
 
     def test_manifest_and_report_cover_active_topics_exactly(self) -> None:
         manifest = {
@@ -334,20 +312,21 @@ class ReportctlTests(unittest.TestCase):
     def test_secret_redaction_is_recursive(self) -> None:
         value = {
             "api_token": "literal",
-            "message": "Authorization: Bearer abc.def",
+            "message": "Authorization: Bearer abc.defgh",
             "nested": [{"password": "hunter2"}],
             "secret_env": ["TOKEN_NAME"],
         }
         redacted = reportctl.redact(value)
         self.assertEqual("[REDACTED]", redacted["api_token"])
-        self.assertNotIn("abc.def", redacted["message"])
+        self.assertNotIn("abc.defgh", redacted["message"])
         self.assertEqual("[REDACTED]", redacted["nested"][0]["password"])
         self.assertEqual(["TOKEN_NAME"], redacted["secret_env"])
         self.assertNotIn("literal", reportctl.redact("https://example.org/?api_key=literal"))
 
     def test_archive_paths_are_partitioned(self) -> None:
         paths = reportctl.archive_paths(self.value, "2026-07-15")
-        self.assertTrue(paths["markdown"].endswith("/2026/07/2026-07-15.md"))
+        self.assertTrue(paths["archive_root"].endswith("/2026/07/2026-07-15"))
+        self.assertTrue(paths["commit_marker"].endswith("/current.json"))
         self.assertTrue(paths["manifest"].endswith("/2026-07-15/run-manifest.json"))
 
     def test_archive_writes_validated_json_and_markdown_atomically(self) -> None:
@@ -358,8 +337,24 @@ class ReportctlTests(unittest.TestCase):
         output = reportctl.archive_report(self.value, str(report_file), str(markdown_file))
         self.assertEqual("# Daily Company Rollup\n", Path(output["markdown"]).read_text())
         archived = json.loads(Path(output["report_json"]).read_text())
-        self.assertEqual(output["markdown"], archived["markdown_path"])
+        self.assertEqual("report.md", archived["markdown_path"])
         self.assertTrue(Path(output["commit_marker"]).exists())
+        self.assertEqual("run-1", json.loads(Path(output["manifest"]).read_text())["run_id"])
+
+    def test_archive_requires_matching_manifest_and_secret_free_markdown(self) -> None:
+        report_file, markdown_file = self.root / "match.json", self.root / "match.md"
+        report_file.write_text(json.dumps(self.daily_report("Match")))
+        markdown_file.write_text("# Match\n")
+        manifest_path = Path(self.value["artifact_dir"]) / "2026-07-15" / "run-manifest.json"
+        bad = self.valid_manifest()
+        bad["run_id"] = "different"
+        manifest_path.write_text(json.dumps(bad))
+        with self.assertRaisesRegex(reportctl.ConfigError, "match exactly"):
+            reportctl.archive_report(self.value, str(report_file), str(markdown_file))
+        manifest_path.write_text(json.dumps(self.valid_manifest()))
+        markdown_file.write_text("# Match\nsk-abcdefghijklmnopqrstuvwxyz123456\n")
+        with self.assertRaisesRegex(reportctl.ConfigError, "Markdown contains"):
+            reportctl.archive_report(self.value, str(report_file), str(markdown_file))
 
     def daily_report(self, title: str) -> dict:
         return {
@@ -382,24 +377,39 @@ class ReportctlTests(unittest.TestCase):
             "markdown_path": "/pending/report.md",
         }
 
+    def valid_manifest(self) -> dict:
+        return {
+            "schema_version": 1,
+            "run_id": "run-1",
+            "report_date": "2026-07-15",
+            "started_at": "2026-07-15T10:00:00Z",
+            "completed_at": "2026-07-15T10:01:00Z",
+            "sections": [{"id": "ai-agents", "status": "complete", "path": "/tmp/ai.json"}],
+        }
+
     def test_archive_second_commit_failure_never_publishes_marker(self) -> None:
         report_file, markdown_file = self.root / "fail.json", self.root / "fail.md"
+        report_file.write_text(json.dumps(self.daily_report("Old")))
+        markdown_file.write_text("# Old\n")
+        first = reportctl.archive_report(self.value, str(report_file), str(markdown_file))
+        old_marker = json.loads(Path(first["commit_marker"]).read_text())
         report_file.write_text(json.dumps(self.daily_report("Failure")))
         markdown_file.write_text("# Failure\n")
         original = reportctl_runtime.os.replace
 
         def fail_second(source, destination):
-            if str(destination).endswith(".report.json") and ".report.json." in str(source):
-                raise OSError("forced second commit failure")
+            if str(destination).endswith("current.json"):
+                raise OSError("forced pointer failure")
             return original(source, destination)
 
         with mock.patch.object(reportctl_runtime.os, "replace", side_effect=fail_second):
             with self.assertRaises(OSError):
                 reportctl.archive_report(self.value, str(report_file), str(markdown_file))
         paths = reportctl.archive_paths(self.value, "2026-07-15")
-        self.assertFalse(Path(paths["commit_marker"]).exists())
-        self.assertFalse(Path(paths["markdown"]).exists())
-        self.assertFalse(Path(paths["report_json"]).exists())
+        self.assertEqual(old_marker, json.loads(Path(paths["commit_marker"]).read_text()))
+        old_root = Path(paths["archive_root"]) / "generations" / old_marker["generation"]
+        self.assertEqual("# Old\n", (old_root / "report.md").read_text())
+        self.assertEqual("Old", json.loads((old_root / "report.json").read_text())["title"])
 
     def test_archive_concurrency_keeps_pair_consistent(self) -> None:
         errors = []
@@ -420,8 +430,10 @@ class ReportctlTests(unittest.TestCase):
             thread.join()
         self.assertEqual([], errors)
         paths = reportctl.archive_paths(self.value, "2026-07-15")
-        archived = json.loads(Path(paths["report_json"]).read_text())
-        markdown = Path(paths["markdown"]).read_text()
+        marker = json.loads(Path(paths["commit_marker"]).read_text())
+        root = Path(paths["archive_root"]) / "generations" / marker["generation"]
+        archived = json.loads((root / "report.json").read_text())
+        markdown = (root / "report.md").read_text()
         self.assertIn(archived["title"], markdown)
 
     def test_health_skips_paused_and_rejects_traversal_date(self) -> None:
@@ -437,11 +449,20 @@ class ReportctlTests(unittest.TestCase):
         (home / "config.yaml").write_text("timezone: America/New_York\n")
         (home / "skills" / "delonet-daily-report").mkdir(parents=True)
         (home / "skills" / "delonet-daily-report" / "SKILL.md").write_text("skill")
-        with mock.patch.dict(os.environ, {"HERMES_HOME": str(home)}, clear=False):
+        with mock.patch.dict(
+            os.environ, {"HERMES_HOME": str(home), "HERMES_TIMEZONE": ""}, clear=False
+        ):
             reportctl.timezone_preflight(self.value)
-            (home / "config.yaml").write_text("timezone: UTC\n")
-            with self.assertRaisesRegex(reportctl.ConfigError, "observed UTC"):
+            os.environ["HERMES_TIMEZONE"] = "UTC"
+            with self.assertRaisesRegex(reportctl.ConfigError, "no conflicting"):
                 reportctl.timezone_preflight(self.value)
+            os.environ["HERMES_TIMEZONE"] = ""
+            (home / "config.yaml").write_text("timezone: UTC\n")
+            with self.assertRaisesRegex(reportctl.ConfigError, "profile=UTC"):
+                reportctl.timezone_preflight(self.value)
+        self.assertTrue(reportctl.daily_next_run_valid("2026-03-09T11:00:00Z", self.value))
+        self.assertTrue(reportctl.daily_next_run_valid("2026-11-02T12:00:00Z", self.value))
+        self.assertFalse(reportctl.daily_next_run_valid("2026-11-02T13:00:00Z", self.value))
 
     def test_subprocess_failures_are_structured(self) -> None:
         with mock.patch.object(
@@ -454,6 +475,13 @@ class ReportctlTests(unittest.TestCase):
         ):
             with self.assertRaisesRegex(reportctl.ConfigError, "timed out"):
                 reportctl.run_command(["hermes"])
+        error = subprocess.CalledProcessError(
+            1, ["hermes"], stderr="failed github_pat_abcdefghijklmnopqrstuvwxyz123456"
+        )
+        with mock.patch.object(reportctl_runtime.subprocess, "run", side_effect=error):
+            with self.assertRaises(reportctl.ConfigError) as raised:
+                reportctl.run_command(["hermes"])
+        self.assertNotIn("github_pat_", str(raised.exception))
 
 
 if __name__ == "__main__":

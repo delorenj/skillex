@@ -16,7 +16,7 @@
 4. Write and runtime-validate `RunManifest` with one entry per active topic; paused topics are intentionally excluded.
 5. Compose in default core section order, then configured topic order.
 6. Put required core sections first in configured order, followed by each active topic exactly once. Partition every active topic into disjoint `coverage.complete` or `coverage.degraded`; exclude paused topics.
-7. Render Markdown and structured `DailyReport`; publish the pair transactionally with `reportctl archive --report REPORT.json --markdown REPORT.md` and require its commit marker when reading.
+7. Render Markdown and structured `DailyReport`; publish it with the fully validated, identity-matched `RunManifest` using `reportctl archive --report REPORT.json --markdown REPORT.md [--manifest RUN.json]`. Read only the immutable generation referenced by `current.json`.
 
 ## Editorial rules
 
