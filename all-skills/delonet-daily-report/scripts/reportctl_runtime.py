@@ -245,6 +245,27 @@ def inference_state(config: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def profile_skill_installed(name: str) -> bool:
+    entry = hermes_home() / "skills" / name
+    if (entry / "SKILL.md").is_file():
+        return True
+    try:
+        if not entry.is_file() or entry.stat().st_size > 4096:
+            return False
+        lines = entry.read_text(encoding="utf-8").splitlines()
+    except (OSError, UnicodeError):
+        return False
+    if len(lines) != 1 or not lines[0].strip():
+        return False
+    target = Path(lines[0].strip()).expanduser()
+    if not target.is_absolute():
+        return False
+    try:
+        return (target.resolve(strict=True) / "SKILL.md").is_file()
+    except OSError:
+        return False
+
+
 def timezone_preflight(config: dict[str, Any]) -> None:
     state = timezone_state(config)
     if not state["valid"]:
@@ -254,7 +275,7 @@ def timezone_preflight(config: dict[str, Any]) -> None:
     inference = inference_state(config)
     if not inference["valid"]:
         raise ConfigError("Hermes profile inference must match configured provider/model")
-    if not (hermes_home() / "skills" / "delonet-daily-report" / "SKILL.md").is_file():
+    if not profile_skill_installed("delonet-daily-report"):
         raise ConfigError(
             "delonet-daily-report must be installed in the active HERMES_HOME skills directory"
         )
