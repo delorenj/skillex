@@ -67,9 +67,13 @@ naming:
     voice: voice-note
 
 # ───────────────────────────── Frontmatter schema ──────────────────────────────
+# `audience` (optional; deliberately NOT in defaults, so files are implicitly internal): one of
+# internal | client | shared. Only client/shared files are exported to a client-facing view
+# (`folder-curator export --audience client --to <dir>` + sync-jim-client-view.sh); internal
+# material (profile.md, qualification, hypotheses) never leaves. Label files as you see fit.
 frontmatter:
   # Key write-order.
-  order: [category, kind, title, source, captured, updated, pipeline-status, confidence, owner, tags, attendees]
+  order: [category, kind, title, source, captured, updated, pipeline-status, confidence, audience, owner, tags, attendees]
   required: [category, kind, title, captured, updated, pipeline-status]
   defaults:
     pipeline-status: [new]

@@ -727,6 +727,30 @@ def do_serve(host: str, port: int) -> None:
     srv.serve_forever()
 
 
+# ─────────────────────────────── export (client view) ──────────────────────────
+
+
+def do_export(client_root: Path, contract: dict, audience: str, to: Path) -> int:
+    """Copy content files whose frontmatter `audience` is `audience` or `shared` into `to`,
+    preserving category structure (content-only). Files with no `audience` stay internal —
+    this is what keeps profile.md and internal synthesis out of a client-facing view."""
+    import shutil
+
+    include = {audience, "shared"}
+    n = 0
+    for p in iter_content_files(client_root, contract):
+        fm, _ = read_frontmatter(p)
+        if (fm or {}).get("audience") in include:
+            dest = to / p.relative_to(client_root)
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(p, dest)
+            sc = find_sidecar(p, contract.get("sidecar_suffixes", []))
+            if sc:
+                shutil.copy2(sc, dest.parent / sc.name)
+            n += 1
+    return n
+
+
 # ─────────────────────────────── cli ───────────────────────────────────────────
 
 
@@ -749,6 +773,9 @@ def main(argv=None):
     s = sub.add_parser("serve", help="run the HTTP engine service (for the n8n custom node)")
     s.add_argument("--host", default="127.0.0.1")
     s.add_argument("--port", type=int, default=8787)
+    e = sub.add_parser("export", help="copy client-facing files (audience client/shared) to a dir")
+    e.add_argument("--audience", default="client")
+    e.add_argument("--to", required=True)
 
     args = ap.parse_args(argv)
     if args.cmd == "serve":
@@ -766,6 +793,9 @@ def main(argv=None):
     elif args.cmd == "normalize":
         changes = do_normalize(root, contract, args.apply)
         print(json.dumps({"mode": "apply" if args.apply else "dry-run", "count": len(changes), "changes": changes}, indent=2, ensure_ascii=False))
+    elif args.cmd == "export":
+        n = do_export(root, contract, args.audience, Path(args.to).resolve())
+        print(json.dumps({"exported": n, "audience": args.audience, "to": args.to}))
 
 
 if __name__ == "__main__":
