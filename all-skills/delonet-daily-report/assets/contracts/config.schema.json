@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://delonet.local/ddr/config.schema.json",
+  "title": "DeLoNET Daily Report configuration",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "timezone", "artifact_dir", "archive_dir", "daily", "topics"],
+  "properties": {
+    "version": {"const": 1},
+    "timezone": {"type": "string", "minLength": 1},
+    "artifact_dir": {"type": "string", "pattern": "^/"},
+    "archive_dir": {"type": "string", "pattern": "^/"},
+    "max_age_hours": {"type": "integer", "minimum": 1, "maximum": 168, "default": 24},
+    "daily": {
+      "type": "object", "additionalProperties": false,
+      "required": ["enabled", "schedule", "deliver"],
+      "properties": {"enabled": {"type": "boolean"}, "schedule": {"type": "string", "minLength": 1}, "deliver": {"type": "string", "minLength": 1}, "workdir": {"type": "string"}}
+    },
+    "topics": {
+      "type": "array",
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["id", "title", "prompt", "schedule", "enabled", "sources"],
+        "properties": {
+          "id": {"type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"}, "title": {"type": "string", "minLength": 1}, "prompt": {"type": "string", "minLength": 1}, "schedule": {"type": "string", "minLength": 1}, "enabled": {"type": "boolean"},
+          "sources": {"type": "array", "uniqueItems": true, "items": {"type": "string", "format": "uri", "pattern": "^https://"}},
+          "secret_env": {"type": "array", "uniqueItems": true, "items": {"type": "string", "pattern": "^[A-Z_][A-Z0-9_]*$"}}
+        }
+      }
+    }
+  }
+}
