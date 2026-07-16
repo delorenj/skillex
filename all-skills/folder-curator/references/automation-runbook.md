@@ -119,17 +119,24 @@ Use the **absolute** CLI path in Execute Command (n8n's PATH excludes `~/.local/
 workflow in place. Tags/long descriptions need a direct `PUT /api/v1/workflows/{id}` (the MCP
 tool drops them).
 
-## 5. Promotion to a custom node (target end-state)
+## 5. The custom node — `n8n-nodes-folder-curator` (service-client)
 
-Per delonet-n8n-architecture's escalation ladder, the Execute-Command-CLI rung is transitional;
-the destination is a custom node `n8n-nodes-folder-curator`:
+Per delonet-n8n-architecture's escalation ladder, the Execute-Command-CLI rung is transitional.
+The promoted node runs its logic **in-process in `execute()`** — but the engine is a non-trivial
+Python program, so reimplementing it in TypeScript would fork the source of truth and invite
+drift. Instead this uses the skill's sanctioned **service-client** pattern (the same one
+`n8n-nodes-transcribe` uses for the faster-whisper Python pipeline): the engine is exposed over
+HTTP by `folder-curator serve`, and the node is a thin in-process HTTP client
+(`this.helpers.httpRequest`) — it never shells out, and there is exactly ONE engine.
 
-- Logic runs **in-process in `execute()`** — never shells to the host CLI.
-- Cloned from the `/home/delorenj/code/n8n-nodes-hermes/` scaffold.
-- **Generated on deploy from `taxonomy.default.yaml`** (the same codegen trick
-  `n8n-nodes-bloodbank` uses against `schemas/`): the classification rules become the node's
-  compiled behaviour, so a contract change + rebuild updates the node.
-- Installed into `~/.n8n/nodes`; restart with `PM2_HOME=/home/delorenj/.pm2` + the node-dir `pm2`.
+- **Service:** `folder-curator serve --host 127.0.0.1 --port 8787` — `POST /plan`, `POST /apply`
+  with `{"file","client_root"}`, `GET /health`. Runs as systemd `curator-serve.service`.
+- **Node package:** `/home/delorenj/code/n8n-nodes-folder-curator/`, cloned from the
+  `n8n-nodes-hermes` scaffold; node `Folder Curator` with `operation` (plan/apply), `filePath`,
+  `clientRoot`, `serviceUrl` (default `http://127.0.0.1:8787`). Installed into `~/.n8n/nodes`;
+  restart n8n with `PM2_HOME=/home/delorenj/.pm2` + the node-dir `pm2` (the mise shim is broken).
+- **Cutover:** swap the workflow's two `Execute Command` nodes (plan, apply) for the Folder
+  Curator node (operation plan, then apply). The Execute-Command rung stays a valid fallback.
 
 ## 6. Gotchas
 

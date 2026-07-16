@@ -676,6 +676,57 @@ def do_normalize(client_root: Path, contract: dict, apply_changes: bool):
     return changes
 
 
+# ─────────────────────────────── serve (HTTP) ──────────────────────────────────
+
+
+def do_serve(host: str, port: int) -> None:
+    """Expose the engine over HTTP so the n8n custom node calls it in-process
+    (POST /plan, POST /apply with {"file","client_root"}; GET /health). Same engine as
+    the CLI — no reimplementation, no drift."""
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+    class Handler(BaseHTTPRequestHandler):
+        def _send(self, code, obj):
+            body = json.dumps(obj, ensure_ascii=False).encode("utf-8")
+            self.send_response(code)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def do_GET(self):
+            self._send(200, {"status": "ok"}) if self.path == "/health" else self._send(404, {"error": "not found"})
+
+        def do_POST(self):
+            length = int(self.headers.get("Content-Length", 0) or 0)
+            try:
+                req = json.loads(self.rfile.read(length) or b"{}")
+            except json.JSONDecodeError:
+                return self._send(400, {"error": "invalid JSON body"})
+            f = req.get("file") or req.get("file_path")
+            if not f:
+                return self._send(400, {"error": "'file' is required"})
+            root = Path(req.get("client_root") or req.get("curated_dir") or ".").resolve()
+            path = Path(f).resolve()
+            try:
+                contract = load_contract(root)
+                if self.path == "/plan":
+                    self._send(200, make_plan(path, root, contract))
+                elif self.path == "/apply":
+                    self._send(200, do_apply(path, root, contract))
+                else:
+                    self._send(404, {"error": "not found"})
+            except Exception as exc:  # surface as JSON to the caller
+                self._send(500, {"error": f"{type(exc).__name__}: {exc}"})
+
+        def log_message(self, *args):
+            pass
+
+    srv = ThreadingHTTPServer((host, port), Handler)
+    print(f"folder-curator serve: http://{host}:{port}  (POST /plan, POST /apply, GET /health)", flush=True)
+    srv.serve_forever()
+
+
 # ─────────────────────────────── cli ───────────────────────────────────────────
 
 
@@ -695,8 +746,13 @@ def main(argv=None):
     sub.add_parser("reindex", help="regenerate _context-stack.md + restore mtimes")
     n = sub.add_parser("normalize", help="migrate existing files to canonical name+frontmatter")
     n.add_argument("--apply", action="store_true", help="write changes (default: dry-run)")
+    s = sub.add_parser("serve", help="run the HTTP engine service (for the n8n custom node)")
+    s.add_argument("--host", default="127.0.0.1")
+    s.add_argument("--port", type=int, default=8787)
 
     args = ap.parse_args(argv)
+    if args.cmd == "serve":
+        return do_serve(args.host, args.port)
     root = resolve_root(args)
     contract = load_contract(root)
 
