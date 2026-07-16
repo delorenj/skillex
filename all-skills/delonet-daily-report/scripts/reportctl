@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import argparse
 import copy
-import datetime as dt
 import hashlib
 import json
 import os
@@ -17,13 +16,19 @@ from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from reportctl_cli import build_parser
+from reportctl_archive import archive_report, artifact_health, manifest_health, section_path
 from reportctl_config import is_bool, load_json, nonempty, validate_config
 from reportctl_contracts import (
     ConfigError,
-    parse_iso,
     validate_daily_report,
     validate_run_manifest,
     validate_section_artifact,
+)
+from reportctl_inference import (
+    apply_create,
+    apply_recreate,
+    inference_issues,
+    snapshot_mismatch,
 )
 from reportctl_runtime import (
     archive_paths,
@@ -31,12 +36,12 @@ from reportctl_runtime import (
     daily_next_run_valid,
     file_lock,
     hermes_home,
-    publish_archive_pair,
+    inference_state,
     run_command,
     timezone_preflight,
     timezone_state,
 )
-from reportctl_security import contains_secret, redact_text
+from reportctl_security import redact_text
 
 MANAGED_PREFIX = "ddr:journal:"
 DAILY_NAME = "ddr:daily"
@@ -44,10 +49,11 @@ SECRET_KEY_RE = re.compile(r"(token|secret|password|cookie|authorization|api.?ke
 ACTION_ORDER = {
     "remove-duplicate": 0,
     "remove-stale": 1,
-    "create": 2,
-    "edit": 3,
-    "pause": 4,
-    "resume": 5,
+    "recreate": 2,
+    "create": 3,
+    "edit": 4,
+    "pause": 5,
+    "resume": 6,
 }
 
 
@@ -61,10 +67,6 @@ def redact(value: Any, key: str = "") -> Any:
     if isinstance(value, str):
         value = redact_text(value)
     return value
-
-
-def section_path(config: dict[str, Any], topic_id: str, date: str = "{date}") -> str:
-    return str(Path(config["artifact_dir"]) / date / "sections" / f"{topic_id}.json")
 
 
 def journalist_prompt(config: dict[str, Any], topic: dict[str, Any]) -> str:
@@ -104,6 +106,8 @@ def desired_jobs(config: dict[str, Any]) -> list[dict[str, Any]]:
             "deliver": "local",
             "workdir": workdir,
             "skills": ["delonet-daily-report"],
+            "provider_snapshot": config["inference"]["provider"],
+            "model_snapshot": config["inference"]["model"],
         }
         for topic in config["topics"]
     ]
@@ -116,6 +120,8 @@ def desired_jobs(config: dict[str, Any]) -> list[dict[str, Any]]:
             "deliver": config["daily"]["deliver"],
             "workdir": workdir,
             "skills": ["delonet-daily-report"],
+            "provider_snapshot": config["inference"]["provider"],
+            "model_snapshot": config["inference"]["model"],
         }
     )
     return sorted(jobs, key=lambda job: job["name"])
@@ -148,6 +154,11 @@ def normalize_job(job: Any) -> dict[str, Any]:
         "workdir": job.get("workdir") or "",
         "skills": sorted(skills),
         "next_run_at": job.get("next_run_at"),
+        "provider": job.get("provider"),
+        "model": job.get("model"),
+        "provider_snapshot": job.get("provider_snapshot"),
+        "model_snapshot": job.get("model_snapshot"),
+        "base_url": job.get("base_url"),
     }
 
 
@@ -179,6 +190,9 @@ def reconciliation_plan(
     for name in desired.keys() & retained.keys():
         wanted = desired[name]
         current = retained[name]
+        if snapshot_mismatch(wanted, current):
+            actions.append({"action": "recreate", "id": current["id"], **wanted})
+            continue
         fields = ("schedule", "prompt", "deliver", "workdir", "skills")
         changes = {
             field: wanted[field] for field in fields if current.get(field, "") != wanted[field]
@@ -271,17 +285,25 @@ def action_command(action: dict[str, Any]) -> list[str]:
     return command
 
 
-def apply_plan(plan: list[dict[str, Any]], timezone: str) -> None:
-    environment = {**os.environ, "HERMES_TIMEZONE": timezone}
+def read_stable_live_jobs(expected_fingerprint: str | None = None) -> list[dict[str, Any]]:
+    before = jobs_fingerprint()
+    if expected_fingerprint is not None and before != expected_fingerprint:
+        raise ConfigError("canonical Hermes jobs changed; abort and replan")
+    jobs = read_live_jobs()
+    if jobs_fingerprint() != before:
+        raise ConfigError("canonical Hermes jobs changed during read; abort and replan")
+    return jobs
+
+
+def apply_plan(plan: list[dict[str, Any]], config: dict[str, Any]) -> None:
+    environment = {**os.environ, "HERMES_TIMEZONE": config["timezone"]}
     for action in plan:
-        result = run_command(action_command(action), env=environment)
-        if action["action"] == "create" and not action["enabled"]:
-            match = re.search(r"Created job:\s*(\S+)", result.stdout)
-            if not match:
-                raise ConfigError(
-                    f"created disabled job {action['name']} but could not read its Hermes job ID"
-                )
-            run_command(["hermes", "cron", "pause", match.group(1)], env=environment)
+        if action["action"] == "create":
+            apply_create(action, environment, action_command, read_stable_live_jobs)
+        elif action["action"] == "recreate":
+            apply_recreate(action, environment, action_command, read_stable_live_jobs)
+        else:
+            run_command(action_command(action), env=environment)
 
 
 def reconcile_live(config: dict[str, Any]) -> list[dict[str, Any]]:
@@ -298,72 +320,18 @@ def reconcile_live(config: dict[str, Any]) -> list[dict[str, Any]]:
                 raise ConfigError(
                     "canonical Hermes jobs changed during reconciliation; abort and replan"
                 )
+            stable = read_stable_live_jobs(expected_fingerprint)
             if action.get("id"):
-                current = next((job for job in read_live_jobs() if job["id"] == action["id"]), None)
+                current = next((job for job in stable if job["id"] == action["id"]), None)
                 if current is None or current["name"] != action["name"]:
                     raise ConfigError("managed Hermes job identity changed; abort and replan")
-            apply_plan([action], config["timezone"])
+            elif any(job["name"] == action["name"] for job in stable):
+                raise ConfigError("managed Hermes job appeared before create; abort and replan")
+            apply_plan([action], config)
             expected_fingerprint = jobs_fingerprint()
-        if reconciliation_plan(config, read_live_jobs()):
+        if reconciliation_plan(config, read_stable_live_jobs()):
             raise ConfigError("Hermes state changed during reconciliation; abort and replan")
         return plan
-
-
-def artifact_health(config: dict[str, Any], date: str) -> list[dict[str, str]]:
-    archive_paths(config, date)
-    now = dt.datetime.now(dt.UTC)
-    result = []
-    for topic in config["topics"]:
-        if not topic["enabled"]:
-            continue
-        path = Path(section_path(config, topic["id"], date))
-        status, reason = "missing", "file absent"
-        if path.exists():
-            try:
-                artifact = validate_section_artifact(load_json(path), topic["id"])
-                fresh = parse_iso(artifact["fresh_until"], "fresh_until")
-                status, reason = (
-                    ("stale", "fresh_until elapsed") if fresh < now else (artifact["status"], "")
-                )
-            except (ConfigError, ValueError, AttributeError) as exc:
-                status, reason = "invalid", str(exc)
-        result.append({"id": topic["id"], "status": status, "reason": reason, "path": str(path)})
-    return result
-
-
-def manifest_health(config: dict[str, Any], date: str) -> dict[str, str]:
-    path = Path(archive_paths(config, date)["manifest"])
-    if not path.exists():
-        return {"status": "missing", "path": str(path)}
-    try:
-        validate_run_manifest(load_json(path), config)
-        return {"status": "valid", "path": str(path)}
-    except ConfigError as exc:
-        return {"status": "invalid", "reason": str(exc), "path": str(path)}
-
-
-def archive_report(
-    config: dict[str, Any], report_file: str, markdown_file: str, manifest_file: str | None = None
-) -> dict[str, Any]:
-    report = validate_daily_report(load_json(Path(report_file)), config)
-    paths = archive_paths(config, report["report_date"])
-    manifest_path = Path(manifest_file) if manifest_file else Path(paths["manifest"])
-    manifest = validate_run_manifest(load_json(manifest_path), config)
-    if manifest["run_id"] != report["run_id"] or manifest["report_date"] != report["report_date"]:
-        raise ConfigError("RunManifest and DailyReport run_id/report_date must match exactly")
-    try:
-        markdown = Path(markdown_file).read_text(encoding="utf-8")
-    except OSError as exc:
-        raise ConfigError(f"cannot read Markdown {markdown_file}: {exc}") from exc
-    if not markdown.strip():
-        raise ConfigError("Markdown archive input must be non-empty")
-    if contains_secret(markdown):
-        raise ConfigError("Markdown contains secret-like material")
-    archived = copy.deepcopy(report)
-    archived["markdown_path"] = "report.md"
-    return publish_archive_pair(
-        Path(paths["archive_root"]), markdown, archived, manifest, report["report_date"]
-    )
 
 
 def mutate_topic(
@@ -456,6 +424,8 @@ def main(argv: list[str] | None = None) -> int:
                 sections = artifact_health(config, args.date)
                 manifest = manifest_health(config, args.date)
                 runtime_timezone = timezone_state(config)
+                runtime_inference = inference_state(config)
+                inference_drift = inference_issues(config, jobs, managed)
                 skill_ready = (
                     hermes_home() / "skills" / "delonet-daily-report" / "SKILL.md"
                 ).is_file()
@@ -466,6 +436,8 @@ def main(argv: list[str] | None = None) -> int:
                     and not duplicates
                     and skill_ready
                     and runtime_timezone["valid"]
+                    and runtime_inference["valid"]
+                    and not inference_drift
                     and next_run_valid
                     and manifest["status"] == "valid"
                     and all(item["status"] == "complete" for item in sections)
@@ -474,6 +446,8 @@ def main(argv: list[str] | None = None) -> int:
                     "healthy": healthy,
                     "scheduler_timezone": runtime_timezone,
                     "expected_timezone": config["timezone"],
+                    "scheduler_inference": runtime_inference,
+                    "inference_drift": inference_drift,
                     "skill_available": skill_ready,
                     "daily_next_run_at": daily.get("next_run_at"),
                     "daily_next_run_valid": next_run_valid,

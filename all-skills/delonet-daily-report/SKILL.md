@@ -10,6 +10,7 @@ Route daily-report work to the smallest necessary reference set, then use `scrip
 ## Operating principles
 
 - Keep configuration as the source of truth; treat Hermes cron as reconciled runtime state.
+- Pin `inference.provider` and `inference.model` to the authoritative active Hermes profile; recreate jobs whose native snapshots drift.
 - Use three ephemeral investigator roles per topic run when subagents are available; never make investigators durable.
 - Make journalists durable only as `ddr:journal:<id>` jobs and keep exactly one `ddr:daily` aggregator.
 - Preserve evidence lineage, timestamps, and freshness state through every contract boundary.

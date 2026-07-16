@@ -5,6 +5,7 @@ def config(root: Path) -> dict:
     return {
         "version": 1,
         "timezone": "America/New_York",
+        "inference": {"provider": "openai-codex", "model": "gpt-5.4"},
         "artifact_dir": str(root / "artifacts"),
         "archive_dir": str(root / "archive"),
         "max_age_hours": 24,

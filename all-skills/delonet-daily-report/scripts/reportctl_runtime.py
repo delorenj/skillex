@@ -24,7 +24,7 @@ def hermes_home() -> Path:
     return Path(os.environ.get("HERMES_HOME", "~/.hermes")).expanduser().resolve()
 
 
-def profile_timezone() -> str:
+def profile_setting(name: str) -> str:
     path = hermes_home() / "config.yaml"
     try:
         text = path.read_text(encoding="utf-8")
@@ -32,12 +32,12 @@ def profile_timezone() -> str:
         return ""
     except OSError as exc:
         raise ConfigError(f"cannot inspect Hermes timezone config: {exc}") from exc
-    match = re.search(r"(?m)^timezone:\s*['\"]?([^'\"#\s]+)", text)
+    match = re.search(rf"(?m)^{re.escape(name)}:\s*['\"]?([^'\"#\s]+)", text)
     return match.group(1) if match else ""
 
 
 def timezone_state(config: dict[str, Any]) -> dict[str, Any]:
-    profile = profile_timezone()
+    profile = profile_setting("timezone")
     environment = os.environ.get("HERMES_TIMEZONE", "").strip()
     conflict = bool(environment and environment != profile)
     return {
@@ -48,11 +48,31 @@ def timezone_state(config: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def inference_state(config: dict[str, Any]) -> dict[str, Any]:
+    provider = profile_setting("provider")
+    model = profile_setting("model")
+    expected = config["inference"]
+    return {
+        "profile_provider": provider or "unset",
+        "profile_model": model or "unset",
+        "expected_provider": expected["provider"],
+        "expected_model": expected["model"],
+        "valid": provider == expected["provider"] and model == expected["model"],
+    }
+
+
 def timezone_preflight(config: dict[str, Any]) -> None:
     state = timezone_state(config)
     if not state["valid"]:
         raise ConfigError(
             f"Hermes profile timezone must be {config['timezone']} with no conflicting HERMES_TIMEZONE; profile={state['profile']} environment={state['environment']}"
+        )
+    inference = inference_state(config)
+    if not inference["valid"]:
+        raise ConfigError(
+            "Hermes profile inference must match configured provider/model; "
+            f"profile={inference['profile_provider']}/{inference['profile_model']} "
+            f"configured={inference['expected_provider']}/{inference['expected_model']}"
         )
     if not (hermes_home() / "skills" / "delonet-daily-report" / "SKILL.md").is_file():
         raise ConfigError(

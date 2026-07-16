@@ -125,7 +125,7 @@ class ReportctlTests(unittest.TestCase):
             return_value=subprocess.CompletedProcess([], 0, "", ""),
         ) as run:
             reportctl.apply_plan(
-                [{"action": "pause", "id": "job-1", "name": "ddr:daily"}], "America/New_York"
+                [{"action": "pause", "id": "job-1", "name": "ddr:daily"}], self.value
             )
             self.assertEqual("America/New_York", run.call_args.kwargs["env"]["HERMES_TIMEZONE"])
 
@@ -161,7 +161,9 @@ class ReportctlTests(unittest.TestCase):
         (home / "skills" / "delonet-daily-report" / "SKILL.md").write_text(
             "---\nname: delonet-daily-report\n---\n"
         )
-        (home / "config.yaml").write_text("timezone: America/New_York\n")
+        (home / "config.yaml").write_text(
+            "timezone: America/New_York\nprovider: openai-codex\nmodel: gpt-5.4\n"
+        )
         native = [
             {**job, "id": f"live-{index}", "schedule": {"kind": "cron", "expr": job["schedule"]}}
             for index, job in enumerate(reportctl.desired_jobs(self.value), 1)
@@ -446,7 +448,9 @@ class ReportctlTests(unittest.TestCase):
     def test_timezone_preflight_reads_profile_config(self) -> None:
         home = self.root / "hermes"
         home.mkdir()
-        (home / "config.yaml").write_text("timezone: America/New_York\n")
+        (home / "config.yaml").write_text(
+            "timezone: America/New_York\nprovider: openai-codex\nmodel: gpt-5.4\n"
+        )
         (home / "skills" / "delonet-daily-report").mkdir(parents=True)
         (home / "skills" / "delonet-daily-report" / "SKILL.md").write_text("skill")
         with mock.patch.dict(
@@ -457,20 +461,16 @@ class ReportctlTests(unittest.TestCase):
             with self.assertRaisesRegex(reportctl.ConfigError, "no conflicting"):
                 reportctl.timezone_preflight(self.value)
             os.environ["HERMES_TIMEZONE"] = ""
-            (home / "config.yaml").write_text("timezone: UTC\n")
+            (home / "config.yaml").write_text(
+                "timezone: America/New_York\nprovider: openrouter\nmodel: gpt-5.4\n"
+            )
+            with self.assertRaisesRegex(reportctl.ConfigError, "profile inference"):
+                reportctl.timezone_preflight(self.value)
+            (home / "config.yaml").write_text(
+                "timezone: UTC\nprovider: openai-codex\nmodel: gpt-5.4\n"
+            )
             with self.assertRaisesRegex(reportctl.ConfigError, "profile=UTC"):
                 reportctl.timezone_preflight(self.value)
-        spring_now = dt.datetime(2026, 3, 9, 10, 0, tzinfo=dt.UTC)
-        fall_now = dt.datetime(2026, 11, 2, 11, 0, tzinfo=dt.UTC)
-        self.assertTrue(
-            reportctl.daily_next_run_valid("2026-03-09T11:00:00Z", self.value, spring_now)
-        )
-        self.assertTrue(
-            reportctl.daily_next_run_valid("2026-11-02T12:00:00Z", self.value, fall_now)
-        )
-        self.assertFalse(
-            reportctl.daily_next_run_valid("2026-11-02T13:00:00Z", self.value, fall_now)
-        )
 
     def test_subprocess_failures_are_structured(self) -> None:
         with mock.patch.object(

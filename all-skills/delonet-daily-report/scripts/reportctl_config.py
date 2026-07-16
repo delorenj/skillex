@@ -90,6 +90,7 @@ def validate_config(config: Any) -> dict[str, Any]:
         {
             "version",
             "timezone",
+            "inference",
             "artifact_dir",
             "archive_dir",
             "max_age_hours",
@@ -102,6 +103,7 @@ def validate_config(config: Any) -> dict[str, Any]:
     required = {
         "version",
         "timezone",
+        "inference",
         "artifact_dir",
         "archive_dir",
         "core_sections",
@@ -120,6 +122,12 @@ def validate_config(config: Any) -> dict[str, Any]:
         raise ConfigError(
             f"timezone must be {SUPPORTED_TIMEZONE}; Hermes cron has no per-job timezone"
         )
+    inference = config["inference"]
+    if not isinstance(inference, dict):
+        raise ConfigError("inference must be an object")
+    require_keys(inference, {"provider", "model"}, "inference")
+    if not nonempty(inference.get("provider")) or not nonempty(inference.get("model")):
+        raise ConfigError("inference.provider and inference.model must be non-empty strings")
     if (
         not Path(config["artifact_dir"]).is_absolute()
         or not Path(config["archive_dir"]).is_absolute()

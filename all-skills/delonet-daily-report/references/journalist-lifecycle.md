@@ -56,9 +56,14 @@ The stable plan orders duplicate removals, stale removals, creates, edits,
 pauses, and resumes by job name and ID. Managed jobs attach
 `delonet-daily-report` with `--skill`; apply preflight requires that skill under
 the active `$HERMES_HOME/skills`. The active profile’s `config.yaml` must
-authoritatively declare `America/New_York`; a conflicting `HERMES_TIMEZONE`
-fails preflight. Health converts observable `next_run_at` through `zoneinfo` and
-requires the exact next future 07:00 Eastern occurrence, including DST
-transitions. Stale and later-day values fail health.
+authoritatively match the configured timezone and required
+`inference.provider`/`inference.model`; a conflicting `HERMES_TIMEZONE` fails
+preflight. Hermes snapshots those profile defaults when a public cron create
+command runs. Snapshot drift triggers a remove-first recreate, immediate pause
+restoration when configured, and a canonical post-check. The controller never
+edits `jobs.json` directly and never passes unsupported provider or model flags.
+Health flags null or mismatched snapshots. It also converts observable
+`next_run_at` through `zoneinfo` and requires the exact next future 07:00 Eastern
+occurrence, including DST transitions. Stale and later-day values fail health.
 
 Journalist prompts name the reporting window, sources, three investigator roles, exact section path, and contract. Aggregator prompts validate every expected section, mark stale/missing manifest entries, and archive JSON plus Markdown.

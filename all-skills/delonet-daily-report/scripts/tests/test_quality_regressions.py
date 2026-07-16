@@ -96,7 +96,9 @@ class QualityRegressionTests(unittest.TestCase):
         (home / "cron").mkdir(parents=True)
         (home / "skills" / "delonet-daily-report").mkdir(parents=True)
         (home / "skills" / "delonet-daily-report" / "SKILL.md").write_text("skill")
-        (home / "config.yaml").write_text("timezone: America/New_York\n")
+        (home / "config.yaml").write_text(
+            "timezone: America/New_York\nprovider: openai-codex\nmodel: gpt-5.4\n"
+        )
         jobs_path = home / "cron" / "jobs.json"
         jobs_path.write_text(json.dumps({"jobs": []}))
         original_read = reportctl.read_live_jobs
