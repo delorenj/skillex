@@ -1,6 +1,6 @@
 ---
 name: delonet-daily-report
-description: Operate the DeLoNET Daily Report pipeline; configure tracked news topics and sources, batch three ephemeral investigator roles, reconcile durable Hermes cron journalists named ddr:journal:{id} and the ddr:daily aggregator, validate SectionArtifact/RunManifest/DailyReport JSON contracts, compose freshness-aware briefs, archive reports, and diagnose scheduler health. Use for reportctl, daily intelligence reports, topic add/update/pause/resume/remove, stale or duplicate sections, source policy, journalist lifecycle, cron reconciliation, and report safety. Do not use for Hermes fleet provisioning, Bloodbank changes, general news writing, or arbitrary cron administration.
+description: Operate the DeLoNET Daily Report pipeline; configure tracked news topics and sources, batch three ephemeral investigator roles, reconcile durable Hermes cron journalists named ddr:journal:{id} and the ddr:daily aggregator, validate SectionArtifact/RunManifest/DailyReport JSON contracts, compose freshness-aware briefs and a daily company rollup, archive reports, and diagnose scheduler health. Use for reportctl, daily intelligence reports, requests like "add X to my daily report", topic add/update/pause/resume/remove, stale or duplicate sections, source policy, journalist lifecycle, cron reconciliation, and report safety. Do not use for Hermes fleet provisioning, Bloodbank changes, general news writing, or arbitrary cron administration.
 ---
 
 # DeLoNET Daily Report
@@ -44,7 +44,8 @@ Need to change the system?
 3. Mutate topics with `topic add|update|pause|resume|remove`; writes are atomic.
 4. Run `scripts/reportctl --config PATH plan --jobs SNAPSHOT.json` or omit `--jobs` to inspect Hermes.
 5. Review commands, then run `scripts/reportctl --config PATH reconcile --apply`. Never use `--apply` casually.
-6. Run `status`, `health`, and `paths --date YYYY-MM-DD` to inspect coverage and archive locations.
+6. Archive validated output with `archive --report REPORT.json --markdown REPORT.md`; writes are atomic.
+7. Run `status`, `health`, and `paths --date YYYY-MM-DD` to inspect coverage and archive locations.
 
 ## Cross-cutting rules
 
