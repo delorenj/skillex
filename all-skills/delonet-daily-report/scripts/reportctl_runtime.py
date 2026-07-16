@@ -16,8 +16,6 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
-import yaml
-
 from reportctl_contracts import ConfigError, parse_iso
 from reportctl_security import contains_secret, redact_text
 
@@ -26,15 +24,191 @@ def hermes_home() -> Path:
     return Path(os.environ.get("HERMES_HOME", "~/.hermes")).expanduser().resolve()
 
 
+def _profile_error(reason: str) -> ConfigError:
+    return ConfigError(f"cannot inspect Hermes profile config: {reason}")
+
+
+def _uncomment_yaml(line: str) -> str:
+    quote = ""
+    index = 0
+    while index < len(line):
+        character = line[index]
+        if quote == "'" and character == "'" and index + 1 < len(line) and line[index + 1] == "'":
+            index += 2
+            continue
+        if character in "'\"":
+            quote = "" if quote == character else character if not quote else quote
+        elif character == "#" and not quote:
+            return line[:index]
+        elif character == "\\" and quote == '"':
+            index += 1
+        index += 1
+    if quote:
+        raise _profile_error("unterminated quoted scalar")
+    return line
+
+
+def _profile_scalar(raw: str, path: str) -> str:
+    value = raw.strip()
+    if not value:
+        raise _profile_error(f"{path} must be a scalar")
+    if value.startswith(("&", "*", "!")):
+        raise _profile_error(f"{path} uses unsupported YAML aliases, anchors, or tags")
+    if value[0] == "'":
+        if len(value) < 2 or value[-1] != "'":
+            raise _profile_error(f"{path} has an invalid quoted scalar")
+        return value[1:-1].replace("''", "'")
+    if value[0] == '"':
+        try:
+            decoded = json.loads(value)
+        except (json.JSONDecodeError, TypeError) as exc:
+            raise _profile_error(f"{path} has an invalid quoted scalar") from exc
+        if not isinstance(decoded, str):
+            raise _profile_error(f"{path} must be a string")
+        return decoded
+    if any(character in value for character in "{}[]"):
+        raise _profile_error(f"{path} uses unsupported YAML structure")
+    return value
+
+
+def _has_yaml_reference(value: str) -> bool:
+    quote = ""
+    index = 0
+    while index < len(value):
+        character = value[index]
+        if quote == "'" and character == "'" and index + 1 < len(value) and value[index + 1] == "'":
+            index += 2
+            continue
+        if character in "'\"":
+            quote = "" if quote == character else character if not quote else quote
+        elif not quote:
+            previous = value[index - 1] if index else " "
+            if character in "&*!" and (previous.isspace() or previous in "[{,:"):
+                return True
+            if value.startswith("<<:", index) and (not index or previous.isspace()):
+                return True
+        if character == "\\" and quote == '"':
+            index += 1
+        index += 1
+    return False
+
+
+def _split_flow_fields(value: str) -> list[str]:
+    fields: list[str] = []
+    quote = ""
+    start = 0
+    index = 0
+    while index < len(value):
+        character = value[index]
+        if quote == "'" and character == "'" and index + 1 < len(value) and value[index + 1] == "'":
+            index += 2
+            continue
+        if character in "'\"":
+            quote = "" if quote == character else character if not quote else quote
+        elif character == "," and not quote:
+            fields.append(value[start:index])
+            start = index + 1
+        if character == "\\" and quote == '"':
+            index += 1
+        index += 1
+    fields.append(value[start:])
+    return fields
+
+
+def _parse_model_flow(raw: str) -> dict[str, str]:
+    if not raw.endswith("}"):
+        raise _profile_error("model has an invalid flow mapping")
+    result: dict[str, str] = {}
+    for field in _split_flow_fields(raw[1:-1]):
+        if not field.strip():
+            continue
+        key, separator, value = field.partition(":")
+        key = key.strip()
+        if not separator or not re.fullmatch(r"[A-Za-z_][\w-]*", key):
+            raise _profile_error("model has an invalid flow mapping")
+        if key == "<<":
+            raise _profile_error("model uses unsupported YAML aliases")
+        if key in {"provider", "default"}:
+            if key in result:
+                raise _profile_error(f"duplicate model.{key}")
+            result[key] = _profile_scalar(value, f"model.{key}")
+    return result
+
+
+def _parse_profile_config(text: str) -> dict[str, Any]:
+    top: dict[str, str] = {}
+    nested_model: dict[str, str] | None = None
+    current_section = ""
+    model_indent: int | None = None
+    for raw_line in text.splitlines():
+        if "\t" in raw_line:
+            raise _profile_error("tabs are unsupported")
+        line = _uncomment_yaml(raw_line).rstrip()
+        if not line.strip() or line.lstrip().startswith("---"):
+            continue
+        indent = len(line) - len(line.lstrip(" "))
+        content = line.strip()
+        if _has_yaml_reference(content):
+            raise _profile_error("unsupported YAML aliases, anchors, or tags")
+        if indent == 0:
+            current_section = ""
+            model_indent = None
+            match = re.fullmatch(r"([A-Za-z_][\w-]*):\s*(.*)", content)
+            if not match:
+                continue
+            key, raw_value = match.groups()
+            if key not in {"timezone", "provider", "model"}:
+                current_section = key if not raw_value else ""
+                continue
+            if key in top or (key == "model" and nested_model is not None):
+                raise _profile_error(f"duplicate {key}")
+            if key == "model" and not raw_value:
+                nested_model = {}
+                current_section = "model"
+            elif key == "model" and raw_value.startswith("{"):
+                nested_model = _parse_model_flow(raw_value)
+            else:
+                top[key] = _profile_scalar(raw_value, key)
+            continue
+        if current_section != "model" or nested_model is None:
+            continue
+        match = re.fullmatch(r"([A-Za-z_][\w-]*):\s*(.*)", content)
+        if not match:
+            raise _profile_error("model has invalid nested syntax")
+        key, raw_value = match.groups()
+        if model_indent is None:
+            model_indent = indent
+        if indent != model_indent:
+            raise _profile_error("model nesting is unsupported")
+        if key == "<<":
+            raise _profile_error("model uses unsupported YAML aliases")
+        if key in {"provider", "default"}:
+            if key in nested_model:
+                raise _profile_error(f"duplicate model.{key}")
+            nested_model[key] = _profile_scalar(raw_value, f"model.{key}")
+
+    if nested_model is not None and "provider" in top:
+        raise _profile_error("ambiguous flat and nested inference settings")
+    if nested_model is not None:
+        model: Any = nested_model
+    else:
+        model = top.get("model", "")
+    return {
+        "timezone": top.get("timezone", ""),
+        "provider": top.get("provider", ""),
+        "model": model,
+    }
+
+
 def profile_config() -> dict[str, Any]:
     path = hermes_home() / "config.yaml"
     try:
-        value = yaml.safe_load(path.read_text(encoding="utf-8"))
+        text = path.read_text(encoding="utf-8")
     except FileNotFoundError:
         return {}
-    except (OSError, yaml.YAMLError) as exc:
+    except OSError as exc:
         raise ConfigError(f"cannot inspect Hermes profile config: {exc}") from exc
-    return value if isinstance(value, dict) else {}
+    return _parse_profile_config(text)
 
 
 def timezone_state(config: dict[str, Any]) -> dict[str, Any]:
@@ -43,24 +217,28 @@ def timezone_state(config: dict[str, Any]) -> dict[str, Any]:
     environment = os.environ.get("HERMES_TIMEZONE", "").strip()
     conflict = bool(environment and environment != profile)
     return {
-        "profile": profile or "unset",
-        "environment": environment or "unset",
+        "profile": redact_text(profile) if profile else "unset",
+        "environment": redact_text(environment) if environment else "unset",
         "conflict": conflict,
         "valid": profile == config["timezone"] and not conflict,
     }
 
 
 def inference_state(config: dict[str, Any]) -> dict[str, Any]:
-    model_config = profile_config().get("model", {})
-    model_config = model_config if isinstance(model_config, dict) else {}
-    provider = model_config.get("provider", "")
-    model = model_config.get("default", "")
+    profile = profile_config()
+    model_config = profile.get("model", {})
+    if isinstance(model_config, dict):
+        provider = model_config.get("provider", "")
+        model = model_config.get("default", "")
+    else:
+        provider = profile.get("provider", "")
+        model = model_config
     provider = provider if isinstance(provider, str) else ""
     model = model if isinstance(model, str) else ""
     expected = config["inference"]
     return {
-        "profile_provider": provider or "unset",
-        "profile_model": model or "unset",
+        "profile_provider": redact_text(provider) if provider else "unset",
+        "profile_model": redact_text(model) if model else "unset",
         "expected_provider": expected["provider"],
         "expected_model": expected["model"],
         "valid": provider == expected["provider"] and model == expected["model"],
@@ -71,15 +249,11 @@ def timezone_preflight(config: dict[str, Any]) -> None:
     state = timezone_state(config)
     if not state["valid"]:
         raise ConfigError(
-            f"Hermes profile timezone must be {config['timezone']} with no conflicting HERMES_TIMEZONE; profile={state['profile']} environment={state['environment']}"
+            f"Hermes profile timezone must be {config['timezone']} with no conflicting HERMES_TIMEZONE"
         )
     inference = inference_state(config)
     if not inference["valid"]:
-        raise ConfigError(
-            "Hermes profile inference must match configured provider/model; "
-            f"profile={inference['profile_provider']}/{inference['profile_model']} "
-            f"configured={inference['expected_provider']}/{inference['expected_model']}"
-        )
+        raise ConfigError("Hermes profile inference must match configured provider/model")
     if not (hermes_home() / "skills" / "delonet-daily-report" / "SKILL.md").is_file():
         raise ConfigError(
             "delonet-daily-report must be installed in the active HERMES_HOME skills directory"

@@ -469,7 +469,7 @@ class ReportctlTests(unittest.TestCase):
             (home / "config.yaml").write_text(
                 "timezone: UTC\nmodel:\n  provider: openai-codex\n  default: gpt-5.4\n"
             )
-            with self.assertRaisesRegex(reportctl.ConfigError, "profile=UTC"):
+            with self.assertRaisesRegex(reportctl.ConfigError, "profile timezone"):
                 reportctl.timezone_preflight(self.value)
 
     def test_subprocess_failures_are_structured(self) -> None:
