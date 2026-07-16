@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import stat
 from pathlib import Path
 
@@ -22,6 +23,23 @@ def _lexically_trusted(path: Path, home: Path, name: str) -> bool:
     profile_entry = home / "skills" / name
     canonical_entry = Path.home() / ".agents" / "skills" / name
     return path == profile_entry or path == canonical_entry or path.is_relative_to(canonical_entry)
+
+
+def _canonical_entry_trusted(path: Path, name: str) -> bool:
+    canonical_entry = Path.home() / ".agents" / "skills" / name
+    return path == canonical_entry or path.is_relative_to(canonical_entry)
+
+
+def _trusted_symlink(entry: Path, name: str) -> bool:
+    try:
+        raw_target = entry.readlink()
+    except OSError:
+        return False
+    if contains_secret(str(raw_target)):
+        return False
+    destination = raw_target if raw_target.is_absolute() else entry.parent / raw_target
+    normalized = Path(os.path.normpath(destination))
+    return _canonical_entry_trusted(normalized, name)
 
 
 def _pointer_target(entry: Path, home: Path, name: str) -> Path | None:
@@ -69,8 +87,12 @@ def skill_entry_installed(home: Path, name: str) -> bool:
         return False
     if stat.S_ISREG(metadata.st_mode):
         target = _pointer_target(entry, home, name)
-    else:
-        if not _lexically_trusted(entry, home, name):
+    elif stat.S_ISDIR(metadata.st_mode):
+        target = _resolved_directory(entry)
+    elif stat.S_ISLNK(metadata.st_mode):
+        if not _trusted_symlink(entry, name):
             return False
         target = _resolved_directory(entry)
+    else:
+        return False
     return bool(target and target.name == name and _valid_skill_marker(target))

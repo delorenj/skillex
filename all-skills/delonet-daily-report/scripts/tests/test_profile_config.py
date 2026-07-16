@@ -63,8 +63,19 @@ class ProfileConfigTests(unittest.TestCase):
         profile_skill = self.home / "skills" / "delonet-daily-report"
         (profile_skill / "SKILL.md").unlink()
         profile_skill.rmdir()
-        profile_skill.symlink_to(skill_root, target_is_directory=True)
+        relative = os.path.relpath(skill_root, profile_skill.parent)
+        profile_skill.symlink_to(relative, target_is_directory=True)
         self.assertTrue(reportctl_runtime.profile_skill_installed("delonet-daily-report"))
+
+    def test_direct_profile_symlink_to_untrusted_directory_is_rejected(self) -> None:
+        untrusted = self.root / "untrusted" / "delonet-daily-report"
+        untrusted.mkdir(parents=True)
+        (untrusted / "SKILL.md").write_text("skill", encoding="utf-8")
+        profile_skill = self.home / "skills" / "delonet-daily-report"
+        (profile_skill / "SKILL.md").unlink()
+        profile_skill.rmdir()
+        profile_skill.symlink_to(untrusted, target_is_directory=True)
+        self.assertFalse(reportctl_runtime.profile_skill_installed("delonet-daily-report"))
 
     def test_canonical_pointer_follows_multiple_symlinks(self) -> None:
         physical = self.root / "physical" / "delonet-daily-report"
