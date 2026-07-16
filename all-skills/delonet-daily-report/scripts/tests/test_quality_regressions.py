@@ -117,6 +117,24 @@ class QualityRegressionTests(unittest.TestCase):
                 reportctl.reconcile_live(self.value)
             apply.assert_not_called()
 
+    def test_each_missing_desired_job_produces_one_unique_create(self) -> None:
+        value = copy.deepcopy(self.value)
+        for topic_id, enabled in (("security", True), ("paused-topic", False)):
+            topic = copy.deepcopy(value["topics"][0])
+            topic.update({"id": topic_id, "title": topic_id.title(), "enabled": enabled})
+            value["topics"].append(topic)
+        desired_names = {job["name"] for job in reportctl.desired_jobs(value)}
+        creates = [
+            action
+            for action in reportctl.reconciliation_plan(value, [])
+            if action["action"] == "create"
+        ]
+        create_names = [action["name"] for action in creates]
+        self.assertEqual(len(desired_names), len(creates))
+        self.assertEqual(desired_names, set(create_names))
+        self.assertEqual(len(create_names), len(set(create_names)))
+        self.assertTrue(all(reportctl.managed(name) for name in create_names))
+
     def test_next_run_must_be_the_next_future_daily_occurrence(self) -> None:
         spring_now = dt.datetime(2026, 3, 9, 10, 0, tzinfo=dt.UTC)
         self.assertTrue(

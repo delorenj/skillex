@@ -174,11 +174,11 @@ def reconciliation_plan(
     for name, current in retained.items():
         if name not in desired:
             actions.append({"action": "remove-stale", "name": name, "id": current["id"]})
-    for name, wanted in desired.items():
-        current = retained.get(name)
-        if current is None:
-            actions.append({"action": "create", **wanted})
-            continue
+    for name in desired.keys() - retained.keys():
+        actions.append({"action": "create", **desired[name]})
+    for name in desired.keys() & retained.keys():
+        wanted = desired[name]
+        current = retained[name]
         fields = ("schedule", "prompt", "deliver", "workdir", "skills")
         changes = {
             field: wanted[field] for field in fields if current.get(field, "") != wanted[field]
@@ -291,9 +291,7 @@ def reconcile_live(config: dict[str, Any]) -> list[dict[str, Any]]:
         live = read_live_jobs()
         expected_fingerprint = jobs_fingerprint()
         if initial_fingerprint != expected_fingerprint:
-            raise ConfigError(
-                "canonical Hermes jobs changed during initial read; abort and replan"
-            )
+            raise ConfigError("canonical Hermes jobs changed during initial read; abort and replan")
         plan = reconciliation_plan(config, live)
         for action in plan:
             if jobs_fingerprint() != expected_fingerprint:
