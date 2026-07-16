@@ -17,6 +17,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from reportctl_contracts import ConfigError, parse_iso
+from reportctl_profile import skill_entry_installed
 from reportctl_security import contains_secret, redact_text
 
 
@@ -38,13 +39,11 @@ def _uncomment_yaml(line: str) -> str:
             continue
         if character in "'\"":
             quote = "" if quote == character else character if not quote else quote
-        elif character == "#" and not quote:
+        elif character == "#" and not quote and (index == 0 or line[index - 1].isspace()):
             return line[:index]
         elif character == "\\" and quote == '"':
             index += 1
         index += 1
-    if quote:
-        raise _profile_error("unterminated quoted scalar")
     return line
 
 
@@ -54,6 +53,8 @@ def _profile_scalar(raw: str, path: str) -> str:
         raise _profile_error(f"{path} must be a scalar")
     if value.startswith(("&", "*", "!")):
         raise _profile_error(f"{path} uses unsupported YAML aliases, anchors, or tags")
+    if value.startswith(("|", ">")):
+        raise _profile_error(f"{path} uses an unsupported block scalar")
     if value[0] == "'":
         if len(value) < 2 or value[-1] != "'":
             raise _profile_error(f"{path} has an invalid quoted scalar")
@@ -137,38 +138,58 @@ def _parse_model_flow(raw: str) -> dict[str, str]:
 
 def _parse_profile_config(text: str) -> dict[str, Any]:
     top: dict[str, str] = {}
+    seen_top: set[str] = set()
     nested_model: dict[str, str] | None = None
     current_section = ""
     model_indent: int | None = None
+    tracked_closed = False
+    document_started = False
+    saw_content = False
     for raw_line in text.splitlines():
         if "\t" in raw_line:
             raise _profile_error("tabs are unsupported")
         line = _uncomment_yaml(raw_line).rstrip()
-        if not line.strip() or line.lstrip().startswith("---"):
+        if not line.strip():
             continue
         indent = len(line) - len(line.lstrip(" "))
         content = line.strip()
+        if content.startswith("%") or content == "...":
+            raise _profile_error("YAML directives and document end markers are unsupported")
+        if content == "---":
+            if indent or document_started or saw_content:
+                raise _profile_error("multiple YAML documents are unsupported")
+            document_started = True
+            continue
         if _has_yaml_reference(content):
             raise _profile_error("unsupported YAML aliases, anchors, or tags")
+        if indent and tracked_closed:
+            raise _profile_error("tracked scalar settings cannot contain nested values")
         if indent == 0:
+            saw_content = True
+            tracked_closed = False
             current_section = ""
             model_indent = None
+            if content.startswith("-"):
+                raise _profile_error("top-level sequences are unsupported")
             match = re.fullmatch(r"([A-Za-z_][\w-]*):\s*(.*)", content)
             if not match:
-                continue
+                raise _profile_error("invalid top-level mapping syntax")
             key, raw_value = match.groups()
+            if key in seen_top:
+                raise _profile_error(f"duplicate {key}")
+            seen_top.add(key)
             if key not in {"timezone", "provider", "model"}:
                 current_section = key if not raw_value else ""
                 continue
-            if key in top or (key == "model" and nested_model is not None):
-                raise _profile_error(f"duplicate {key}")
             if key == "model" and not raw_value:
                 nested_model = {}
                 current_section = "model"
             elif key == "model" and raw_value.startswith("{"):
                 nested_model = _parse_model_flow(raw_value)
+                tracked_closed = True
             else:
                 top[key] = _profile_scalar(raw_value, key)
+                tracked_closed = True
             continue
         if current_section != "model" or nested_model is None:
             continue
@@ -246,24 +267,7 @@ def inference_state(config: dict[str, Any]) -> dict[str, Any]:
 
 
 def profile_skill_installed(name: str) -> bool:
-    entry = hermes_home() / "skills" / name
-    if (entry / "SKILL.md").is_file():
-        return True
-    try:
-        if not entry.is_file() or entry.stat().st_size > 4096:
-            return False
-        lines = entry.read_text(encoding="utf-8").splitlines()
-    except (OSError, UnicodeError):
-        return False
-    if len(lines) != 1 or not lines[0].strip():
-        return False
-    target = Path(lines[0].strip()).expanduser()
-    if not target.is_absolute():
-        return False
-    try:
-        return (target.resolve(strict=True) / "SKILL.md").is_file()
-    except OSError:
-        return False
+    return skill_entry_installed(hermes_home(), name)
 
 
 def timezone_preflight(config: dict[str, Any]) -> None:

@@ -22,7 +22,7 @@ class ProfileConfigTests(unittest.TestCase):
         self.value = config(self.root)
         self.environment = mock.patch.dict(
             os.environ,
-            {"HERMES_HOME": str(self.home), "HERMES_TIMEZONE": ""},
+            {"HOME": str(self.root), "HERMES_HOME": str(self.home), "HERMES_TIMEZONE": ""},
             clear=False,
         )
         self.environment.start()
@@ -41,7 +41,7 @@ class ProfileConfigTests(unittest.TestCase):
         reportctl.timezone_preflight(self.value)
 
     def test_canonical_skill_pointer_passes_preflight(self) -> None:
-        skill_root = self.root / "global-skills" / "delonet-daily-report"
+        skill_root = self.root / ".agents" / "skills" / "delonet-daily-report"
         skill_root.mkdir(parents=True)
         (skill_root / "SKILL.md").write_text("skill", encoding="utf-8")
         profile_skill = self.home / "skills" / "delonet-daily-report"
@@ -52,6 +52,16 @@ class ProfileConfigTests(unittest.TestCase):
             "timezone: America/New_York\nmodel:\n  provider: openai-codex\n  default: gpt-5.4\n"
         )
         reportctl.timezone_preflight(self.value)
+
+    def test_symlinked_skill_under_canonical_root_passes(self) -> None:
+        skill_root = self.root / ".agents" / "skills" / "delonet-daily-report"
+        skill_root.mkdir(parents=True)
+        (skill_root / "SKILL.md").write_text("skill", encoding="utf-8")
+        profile_skill = self.home / "skills" / "delonet-daily-report"
+        (profile_skill / "SKILL.md").unlink()
+        profile_skill.rmdir()
+        profile_skill.symlink_to(skill_root, target_is_directory=True)
+        self.assertTrue(reportctl_runtime.profile_skill_installed("delonet-daily-report"))
         self.assertTrue(reportctl_runtime.profile_skill_installed("delonet-daily-report"))
 
     def test_unsafe_or_broken_skill_pointers_fail_closed(self) -> None:
@@ -61,11 +71,68 @@ class ProfileConfigTests(unittest.TestCase):
         self.write_profile(
             "timezone: America/New_York\nmodel:\n  provider: openai-codex\n  default: gpt-5.4\n"
         )
-        for pointer in ("relative/path", "/missing/skill", "/first/path\n/second/path\n"):
+        secret = "github_pat_abcdefghijklmnopqrstuvwxyz123456"
+        unapproved = self.root / "unapproved" / "delonet-daily-report"
+        unapproved.mkdir(parents=True)
+        (unapproved / "SKILL.md").write_text("skill", encoding="utf-8")
+        approved = self.root / ".agents" / "skills" / "delonet-daily-report"
+        approved.mkdir(parents=True)
+        (approved / "SKILL.md").write_text("skill", encoding="utf-8")
+        for pointer in (
+            "relative/path",
+            "/missing/skill",
+            "/first/path\n/second/path\n",
+            str(unapproved),
+            str(approved.parent / ".." / "skills" / "delonet-daily-report"),
+            f"/tmp/{secret}",
+            f"{approved}\x00suffix",
+            "/" + ("x" * 4097),
+        ):
             with self.subTest(pointer=pointer.splitlines()[0]):
                 profile_skill.write_text(pointer, encoding="utf-8")
                 with self.assertRaisesRegex(reportctl.ConfigError, "must be installed"):
                     reportctl.timezone_preflight(self.value)
+
+    def test_looping_dangling_and_unapproved_symlinks_fail_closed(self) -> None:
+        profile_skill = self.home / "skills" / "delonet-daily-report"
+        (profile_skill / "SKILL.md").unlink()
+        profile_skill.rmdir()
+        unapproved = self.root / "unapproved" / "delonet-daily-report"
+        unapproved.mkdir(parents=True)
+        (unapproved / "SKILL.md").write_text("skill", encoding="utf-8")
+        for target in (profile_skill, self.root / "missing", unapproved):
+            with self.subTest(target=target.name):
+                profile_skill.symlink_to(target, target_is_directory=True)
+                self.assertFalse(reportctl_runtime.profile_skill_installed("delonet-daily-report"))
+                profile_skill.unlink()
+
+    def test_profile_subset_rejects_unsupported_yaml_constructs(self) -> None:
+        probes = {
+            "top-level sequences": "- timezone: America/New_York\n",
+            "directives": "%YAML 1.2\n---\ntimezone: America/New_York\n",
+            "end markers": "timezone: America/New_York\n...\n",
+            "nested values": "model: gpt-5.4\n  provider: openai-codex\n",
+            "flow nesting": "model: {provider: openai-codex, default: gpt-5.4}\n  extra: value\n",
+            "block scalars": "model: |\n  gpt-5.4\n",
+            "folded scalars": "model: >-\n  gpt-5.4\n",
+        }
+        for message, profile in probes.items():
+            with self.subTest(message=message):
+                self.write_profile(profile)
+                with self.assertRaises(reportctl.ConfigError):
+                    reportctl_runtime.profile_config()
+
+    def test_plain_hash_and_unrelated_sections_are_supported(self) -> None:
+        self.write_profile(
+            "unrelated:\n"
+            "  items:\n"
+            "    - one\n"
+            "timezone: America/New_York # comment\n"
+            "provider: openai-codex\n"
+            "model: gpt#5.4\n"
+        )
+        profile = reportctl_runtime.profile_config()
+        self.assertEqual("gpt#5.4", profile["model"])
 
     def test_flow_nested_profile_passes_preflight(self) -> None:
         self.write_profile(
