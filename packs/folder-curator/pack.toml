@@ -1,0 +1,9 @@
+[pack]
+name = "folder-curator"
+version = "0.1.0"
+description = "Agent-agnostic purpose-driven folder curation — classify, rename, enrich, route, recency stack, taxonomy evolution."
+
+[freeform]
+skills = [
+  "folder-curator",
+]
