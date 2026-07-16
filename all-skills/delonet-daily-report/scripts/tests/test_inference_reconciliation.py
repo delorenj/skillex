@@ -150,6 +150,19 @@ class InferenceReconciliationTests(unittest.TestCase):
         base["repeat"] = None
         self.assertIsNone(reportctl.normalize_job(base)["repeat_times"])
 
+    def test_safe_prerun_scripts_are_controller_owned(self) -> None:
+        value = copy.deepcopy(self.value)
+        value["topics"][0]["script"] = "ddr-journal-ai-agents.py"
+        value["daily"]["script"] = "ddr-daily-input.py"
+        reportctl.validate_config(value)
+        actions = reportctl.reconciliation_plan(value, [])
+        commands = {action["name"]: reportctl.action_command(action) for action in actions}
+        self.assertIn("ddr-journal-ai-agents.py", commands["ddr:journal:ai-agents"])
+        self.assertIn("ddr-daily-input.py", commands["ddr:daily"])
+        value["topics"][0]["script"] = "../escape.py"
+        with self.assertRaisesRegex(reportctl.ConfigError, "safe scripts-directory"):
+            reportctl.validate_config(value)
+
     def test_enabled_create_resumes_only_after_staging_and_desired_postchecks(self) -> None:
         action = reportctl.reconciliation_plan(self.value, [native_jobs(self.value)[0]])[0]
         staged = created_job(action, staged=True, enabled=False)

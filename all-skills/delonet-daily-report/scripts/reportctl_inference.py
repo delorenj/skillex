@@ -12,7 +12,15 @@ from reportctl_runtime import run_command
 SNAPSHOT_FIELDS = ("provider_snapshot", "model_snapshot")
 STAGING_SCHEDULE = "2099-12-31T23:59:59Z"
 STAGING_PROMPT = "Staged DeLoNET Daily Report job; execution is disabled until verified."
-DESIRED_FIELDS = ("schedule", "prompt", "deliver", "workdir", "skills", "repeat_times")
+DESIRED_FIELDS = (
+    "schedule",
+    "prompt",
+    "deliver",
+    "workdir",
+    "skills",
+    "script",
+    "repeat_times",
+)
 
 
 def snapshot_mismatch(wanted: dict[str, Any], current: dict[str, Any]) -> bool:

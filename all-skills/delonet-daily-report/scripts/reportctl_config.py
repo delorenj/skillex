@@ -15,6 +15,7 @@ DAILY_SCHEDULE = "0 7 * * *"
 ID_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 DAILY_CRON_RE = re.compile(r"^(\d{1,2}) (\d{1,2}) \* \* \*$")
 ENV_RE = re.compile(r"^[A-Z_][A-Z0-9_]*$")
+SCRIPT_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*\.(?:py|sh|bash)$")
 DEFAULT_SECTIONS_PATH = (
     Path(__file__).resolve().parent.parent / "assets" / "default-core-sections.json"
 )
@@ -52,7 +53,7 @@ def validate_topic(topic: Any, index: int = 0) -> None:
     if not isinstance(topic, dict):
         raise ConfigError(f"{where} must be an object")
     require_keys(
-        topic, {"id", "title", "prompt", "schedule", "enabled", "sources", "secret_env"}, where
+        topic, {"id", "title", "prompt", "schedule", "enabled", "sources", "secret_env", "script"}, where
     )
     for key in ("id", "title", "prompt", "schedule"):
         if not nonempty(topic.get(key)):
@@ -80,6 +81,11 @@ def validate_topic(topic: Any, index: int = 0) -> None:
     ):
         raise ConfigError(f"{where}.secret_env must contain environment-variable names")
     topic["secret_env"] = envs
+    if "script" in topic and (
+        not isinstance(topic["script"], str)
+        or (topic["script"] and not SCRIPT_RE.fullmatch(topic["script"]))
+    ):
+        raise ConfigError(f"{where}.script must be empty or a safe scripts-directory filename")
 
 
 def validate_config(config: Any) -> dict[str, Any]:
@@ -140,7 +146,7 @@ def validate_config(config: Any) -> dict[str, Any]:
     daily = config["daily"]
     if not isinstance(daily, dict):
         raise ConfigError("daily must be an object")
-    require_keys(daily, {"enabled", "schedule", "deliver", "workdir"}, "daily")
+    require_keys(daily, {"enabled", "schedule", "deliver", "workdir", "script"}, "daily")
     if (
         not is_bool(daily.get("enabled"))
         or not nonempty(daily.get("schedule"))
@@ -154,6 +160,11 @@ def validate_config(config: Any) -> dict[str, Any]:
         or (daily["workdir"] and not Path(daily["workdir"]).is_absolute())
     ):
         raise ConfigError("daily.workdir must be empty or absolute")
+    if "script" in daily and (
+        not isinstance(daily["script"], str)
+        or (daily["script"] and not SCRIPT_RE.fullmatch(daily["script"]))
+    ):
+        raise ConfigError("daily.script must be empty or a safe scripts-directory filename")
     sections = config["core_sections"]
     if not isinstance(sections, list) or not sections:
         raise ConfigError("core_sections must be a non-empty array")
