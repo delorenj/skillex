@@ -1,6 +1,11 @@
 # Architecture
 
+Use this reference to understand component ownership, scheduler data flow, and
+the durable filesystem contract.
+
 ## Reading order
+
+Choose the shortest reading path for the architecture task you need to perform.
 
 | Task | Read |
 |---|---|
@@ -9,6 +14,9 @@
 | Change config or artifact shapes | This file → `../assets/contracts/*.schema.json` |
 
 ## Data flow
+
+The report system derives durable jobs and artifacts from one operator-owned
+JSON configuration.
 
 ```text
 JSON config (source of truth)
@@ -25,6 +33,9 @@ Use configuration to derive desired jobs. Reconciliation compares desired jobs w
 
 ## Filesystem contract
 
+Resolve all runtime paths from `artifact_dir` and `archive_dir` in the
+operator-owned configuration.
+
 Resolve `artifact_dir` and `archive_dir` from the operator-owned config:
 
 ```text
@@ -36,9 +47,22 @@ Resolve `artifact_dir` and `archive_dir` from the operator-owned config:
 <archive_dir>/<YYYY>/<MM>/<YYYY-MM-DD>/generations/<generation>/run-manifest.json
 ```
 
-Treat only the immutable generation named by `current.json` as published. `reportctl archive` locks the date, validates matching report/manifest identity, stages and fsyncs the complete generation, renames it, then atomically switches `current.json`. A failed overwrite leaves the prior pointer and generation intact.
+Treat only the immutable generation named by `current.json` as published.
+`reportctl archive` locks the date, validates matching report/manifest identity,
+stages and fsyncs the complete generation, renames it, then atomically switches
+`current.json`. If the pointer rename succeeds but its directory fsync fails,
+the command reports failure but retains the newly referenced generation. The
+pointer therefore always names a coherent generation.
+
+Retain immutable generations by default. An operator-managed garbage collector
+may delete unreferenced generations according to a local retention policy, but
+it must take the date archive lock, read `current.json`, exclude that generation,
+and verify the pointer again immediately before deletion. Never delete the
+generation named by either pointer read.
 
 ## Contract ownership
+
+Each contract has one lifecycle owner and one durable purpose.
 
 - `SectionArtifact`: one journalist run, one topic, evidence-backed findings and explicit freshness.
 - `RunManifest`: aggregator audit trail covering every configured core section and topic.

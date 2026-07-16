@@ -460,9 +460,17 @@ class ReportctlTests(unittest.TestCase):
             (home / "config.yaml").write_text("timezone: UTC\n")
             with self.assertRaisesRegex(reportctl.ConfigError, "profile=UTC"):
                 reportctl.timezone_preflight(self.value)
-        self.assertTrue(reportctl.daily_next_run_valid("2026-03-09T11:00:00Z", self.value))
-        self.assertTrue(reportctl.daily_next_run_valid("2026-11-02T12:00:00Z", self.value))
-        self.assertFalse(reportctl.daily_next_run_valid("2026-11-02T13:00:00Z", self.value))
+        spring_now = dt.datetime(2026, 3, 9, 10, 0, tzinfo=dt.UTC)
+        fall_now = dt.datetime(2026, 11, 2, 11, 0, tzinfo=dt.UTC)
+        self.assertTrue(
+            reportctl.daily_next_run_valid("2026-03-09T11:00:00Z", self.value, spring_now)
+        )
+        self.assertTrue(
+            reportctl.daily_next_run_valid("2026-11-02T12:00:00Z", self.value, fall_now)
+        )
+        self.assertFalse(
+            reportctl.daily_next_run_valid("2026-11-02T13:00:00Z", self.value, fall_now)
+        )
 
     def test_subprocess_failures_are_structured(self) -> None:
         with mock.patch.object(

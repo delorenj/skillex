@@ -1,6 +1,11 @@
 # Sources
 
+Use this reference to select public evidence and record citations without
+credential material.
+
 ## Reading order
+
+Choose the path that matches the source task you need to perform.
 
 | Task | Read |
 |---|---|
@@ -9,6 +14,8 @@
 | Resolve weak evidence | This file → `safety-gotchas.md` |
 
 ## Source policy
+
+Prefer the strongest available evidence in the following order.
 
 Prefer evidence in this order:
 
@@ -20,6 +27,8 @@ Prefer evidence in this order:
 Store public URLs in `topics[].sources`. Store secret references only as environment-variable names in `topics[].secret_env`; never store tokens, cookies, authorization headers, or signed URLs.
 
 ## Evidence requirements
+
+Record enough metadata to audit every externally verifiable claim.
 
 - Record canonical URL, title, publisher, publication time when available, retrieval time, and supported claim.
 - Deduplicate canonical URLs and substantively identical syndications.

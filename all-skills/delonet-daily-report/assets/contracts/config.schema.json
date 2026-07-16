@@ -24,7 +24,7 @@
         "required": ["id", "title", "prompt", "schedule", "enabled", "sources"],
         "properties": {
           "id": {"type": "string", "minLength": 1, "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"}, "title": {"type": "string", "minLength": 1}, "prompt": {"type": "string", "minLength": 1}, "schedule": {"type": "string", "pattern": "^[0-9]{1,2} [0-9]{1,2} \\* \\* \\*$"}, "enabled": {"type": "boolean"},
-          "sources": {"type": "array", "uniqueItems": true, "items": {"type": "string", "format": "uri", "pattern": "^https://[^?]+$"}},
+          "sources": {"type": "array", "uniqueItems": true, "items": {"type": "string", "format": "uri", "pattern": "^https://(?![^/?#]*@)[^?]+$"}},
           "secret_env": {"type": "array", "uniqueItems": true, "items": {"type": "string", "pattern": "^[A-Z_][A-Z0-9_]*$"}}
         }
       }

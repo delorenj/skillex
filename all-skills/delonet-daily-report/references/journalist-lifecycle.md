@@ -1,6 +1,11 @@
 # Journalist lifecycle
 
+Use this reference to manage topic jobs and reconcile them against canonical
+Hermes state.
+
 ## Reading order
+
+Choose the path that matches the scheduler operation you need to perform.
 
 | Task | Read |
 |---|---|
@@ -10,6 +15,8 @@
 
 ## Owned jobs
 
+Limit lifecycle operations to the following jobs owned by this skill.
+
 - Create one `ddr:journal:<id>` Hermes cron job for every configured topic.
 - Pause jobs for disabled topics; resume them when enabled.
 - Keep exactly one `ddr:daily` aggregator, paused when `daily.enabled` is false.
@@ -17,6 +24,8 @@
 - Remove managed jobs for deleted topics. Never mutate names outside `ddr:journal:` and `ddr:daily`.
 
 ## Topic commands
+
+Use `reportctl topic` commands to mutate configuration atomically.
 
 ```bash
 scripts/reportctl --config /path/report.json topic add ai-agents "AI Agents" \
@@ -32,8 +41,24 @@ Every mutation validates the full config and uses atomic replacement. Duplicate 
 
 ## Reconciliation
 
-Use `plan` first. With no `--jobs`, plan/status/health read canonical `$HERMES_HOME/cron/jobs.json` directly; they never scrape human CLI output. Explicit snapshots remain available for offline read-only planning. `reconcile --apply` rejects snapshots, takes a profile-scoped lock, refreshes canonical state, and uses optimistic fingerprints plus ID/name checks around mutations.
+Reconciliation brackets the initial canonical jobs read with fingerprints before
+it plans or executes any action.
 
-The stable plan orders duplicate removals, stale removals, creates, edits, pauses, and resumes by job name and ID. Managed jobs attach `delonet-daily-report` with `--skill`; apply preflight requires that skill under the active `$HERMES_HOME/skills`. The active profile’s `config.yaml` must authoritatively declare `America/New_York`; a conflicting `HERMES_TIMEZONE` fails preflight. Health converts observable `next_run_at` through `zoneinfo` and requires exactly 07:00 Eastern, including DST transitions.
+Use `plan` first. With no `--jobs`, plan/status/health read canonical
+`$HERMES_HOME/cron/jobs.json` directly; they never scrape human CLI output.
+Explicit snapshots remain available for offline read-only planning. `reconcile
+--apply` rejects snapshots, takes a profile-scoped lock, fingerprints before and
+after its initial canonical read, and aborts before planning or mutation when
+those fingerprints differ. It then uses optimistic fingerprints plus ID/name
+checks around every mutation.
+
+The stable plan orders duplicate removals, stale removals, creates, edits,
+pauses, and resumes by job name and ID. Managed jobs attach
+`delonet-daily-report` with `--skill`; apply preflight requires that skill under
+the active `$HERMES_HOME/skills`. The active profile’s `config.yaml` must
+authoritatively declare `America/New_York`; a conflicting `HERMES_TIMEZONE`
+fails preflight. Health converts observable `next_run_at` through `zoneinfo` and
+requires the exact next future 07:00 Eastern occurrence, including DST
+transitions. Stale and later-day values fail health.
 
 Journalist prompts name the reporting window, sources, three investigator roles, exact section path, and contract. Aggregator prompts validate every expected section, mark stale/missing manifest entries, and archive JSON plus Markdown.

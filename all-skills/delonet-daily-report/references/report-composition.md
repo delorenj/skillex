@@ -1,6 +1,11 @@
 # Report composition
 
+Use this reference to validate journalist artifacts, compose active-topic
+coverage, and publish one coherent daily generation.
+
 ## Reading order
+
+Choose the path that matches the artifact you need to produce.
 
 | Task | Read |
 |---|---|
@@ -9,6 +14,9 @@
 | Render report | This file → `../assets/default-core-sections.json` → `../assets/contracts/daily-report.schema.json` |
 
 ## Composition lifecycle
+
+Follow these steps in order so paused topics stay excluded and published files
+share one validated run identity.
 
 1. Enumerate every configured core section and topic; never infer coverage from files on disk.
 2. Validate each `SectionArtifact` and its expected topic ID.
@@ -19,6 +27,8 @@
 7. Render Markdown and structured `DailyReport`; publish it with the fully validated, identity-matched `RunManifest` using `reportctl archive --report REPORT.json --markdown REPORT.md [--manifest RUN.json]`. Read only the immutable generation referenced by `current.json`.
 
 ## Editorial rules
+
+Apply these rules to both the structured report and rendered Markdown.
 
 - Lead with material changes and explain why they matter.
 - Cite every externally verifiable claim; preserve source metadata in structured output.

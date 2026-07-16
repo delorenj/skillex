@@ -10,6 +10,7 @@ import re
 import subprocess
 import tempfile
 import uuid
+from collections.abc import Callable
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
@@ -59,12 +60,23 @@ def timezone_preflight(config: dict[str, Any]) -> None:
         )
 
 
-def daily_next_run_valid(value: Any, config: dict[str, Any]) -> bool:
+def daily_next_run_valid(
+    value: Any, config: dict[str, Any], now: dt.datetime | None = None
+) -> bool:
     try:
         parsed = parse_iso(value, "daily_next_run_at")
-        local = parsed.astimezone(ZoneInfo(config["timezone"]))
-        return (local.hour, local.minute, local.second) == (7, 0, 0)
-    except (ConfigError, AttributeError, ValueError):
+        current = now or dt.datetime.now(dt.UTC)
+        if current.tzinfo is None:
+            return False
+        zone = ZoneInfo(config["timezone"])
+        local_now = current.astimezone(zone)
+        expected = local_now.replace(hour=7, minute=0, second=0, microsecond=0)
+        if expected <= local_now:
+            expected = (local_now + dt.timedelta(days=1)).replace(
+                hour=7, minute=0, second=0, microsecond=0
+            )
+        return parsed.astimezone(dt.UTC) == expected.astimezone(dt.UTC)
+    except (ConfigError, AttributeError, TypeError, ValueError):
         return False
 
 
@@ -91,7 +103,9 @@ def fsync_dir(path: Path) -> None:
         os.close(descriptor)
 
 
-def atomic_write(path: Path, value: Any) -> None:
+def atomic_write(
+    path: Path, value: Any, *, after_replace: Callable[[], None] | None = None
+) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, temporary = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent, text=True)
     try:
@@ -101,6 +115,8 @@ def atomic_write(path: Path, value: Any) -> None:
             handle.flush()
             os.fsync(handle.fileno())
         os.replace(temporary, path)
+        if after_replace:
+            after_replace()
         fsync_dir(path.parent)
     except BaseException:
         Path(temporary).unlink(missing_ok=True)
@@ -174,6 +190,12 @@ def publish_archive_pair(
         token = uuid.uuid4().hex
         staged = generations / f".stage-{token}"
         generation = generations / token
+        pointer_replaced = False
+
+        def record_pointer_replace() -> None:
+            nonlocal pointer_replaced
+            pointer_replaced = True
+
         staged.mkdir()
         try:
             atomic_write_text(staged / "report.md", markdown)
@@ -189,13 +211,20 @@ def publish_archive_pair(
                     "report_date": report_date,
                     "generation": token,
                 },
+                after_replace=record_pointer_replace,
             )
         except BaseException:
             if staged.exists():
                 for path in staged.iterdir():
                     path.unlink(missing_ok=True)
                 staged.rmdir()
-            if generation.exists():
+            pointer_target = None
+            try:
+                pointer = json.loads(marker_path.read_text(encoding="utf-8"))
+                pointer_target = pointer.get("generation") if isinstance(pointer, dict) else None
+            except (OSError, json.JSONDecodeError):
+                pass
+            if generation.exists() and not (pointer_replaced or pointer_target == token):
                 for path in generation.iterdir():
                     path.unlink(missing_ok=True)
                 generation.rmdir()
