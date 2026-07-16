@@ -52,6 +52,7 @@ class ProfileConfigTests(unittest.TestCase):
             "timezone: America/New_York\nmodel:\n  provider: openai-codex\n  default: gpt-5.4\n"
         )
         reportctl.timezone_preflight(self.value)
+        self.assertTrue(reportctl_runtime.profile_skill_installed("delonet-daily-report"))
 
     def test_unsafe_or_broken_skill_pointers_fail_closed(self) -> None:
         profile_skill = self.home / "skills" / "delonet-daily-report"

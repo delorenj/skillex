@@ -38,6 +38,7 @@ from reportctl_runtime import (
     file_lock,
     hermes_home,
     inference_state,
+    profile_skill_installed,
     run_command,
     timezone_preflight,
     timezone_state,
@@ -440,9 +441,7 @@ def main(argv: list[str] | None = None) -> int:
                 runtime_timezone = timezone_state(config)
                 runtime_inference = inference_state(config)
                 inference_drift = inference_issues(config, jobs, managed)
-                skill_ready = (
-                    hermes_home() / "skills" / "delonet-daily-report" / "SKILL.md"
-                ).is_file()
+                skill_ready = profile_skill_installed("delonet-daily-report")
                 daily = next((job for job in jobs if job["name"] == DAILY_NAME), {})
                 next_run_valid = daily_next_run_valid(daily.get("next_run_at"), config)
                 healthy = (
