@@ -16,6 +16,8 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
+import yaml
+
 from reportctl_contracts import ConfigError, parse_iso
 from reportctl_security import contains_secret, redact_text
 
@@ -24,20 +26,20 @@ def hermes_home() -> Path:
     return Path(os.environ.get("HERMES_HOME", "~/.hermes")).expanduser().resolve()
 
 
-def profile_setting(name: str) -> str:
+def profile_config() -> dict[str, Any]:
     path = hermes_home() / "config.yaml"
     try:
-        text = path.read_text(encoding="utf-8")
+        value = yaml.safe_load(path.read_text(encoding="utf-8"))
     except FileNotFoundError:
-        return ""
-    except OSError as exc:
-        raise ConfigError(f"cannot inspect Hermes timezone config: {exc}") from exc
-    match = re.search(rf"(?m)^{re.escape(name)}:\s*['\"]?([^'\"#\s]+)", text)
-    return match.group(1) if match else ""
+        return {}
+    except (OSError, yaml.YAMLError) as exc:
+        raise ConfigError(f"cannot inspect Hermes profile config: {exc}") from exc
+    return value if isinstance(value, dict) else {}
 
 
 def timezone_state(config: dict[str, Any]) -> dict[str, Any]:
-    profile = profile_setting("timezone")
+    profile = profile_config().get("timezone", "")
+    profile = profile if isinstance(profile, str) else ""
     environment = os.environ.get("HERMES_TIMEZONE", "").strip()
     conflict = bool(environment and environment != profile)
     return {
@@ -49,8 +51,12 @@ def timezone_state(config: dict[str, Any]) -> dict[str, Any]:
 
 
 def inference_state(config: dict[str, Any]) -> dict[str, Any]:
-    provider = profile_setting("provider")
-    model = profile_setting("model")
+    model_config = profile_config().get("model", {})
+    model_config = model_config if isinstance(model_config, dict) else {}
+    provider = model_config.get("provider", "")
+    model = model_config.get("default", "")
+    provider = provider if isinstance(provider, str) else ""
+    model = model if isinstance(model, str) else ""
     expected = config["inference"]
     return {
         "profile_provider": provider or "unset",

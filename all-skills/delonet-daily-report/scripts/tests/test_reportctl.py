@@ -162,7 +162,7 @@ class ReportctlTests(unittest.TestCase):
             "---\nname: delonet-daily-report\n---\n"
         )
         (home / "config.yaml").write_text(
-            "timezone: America/New_York\nprovider: openai-codex\nmodel: gpt-5.4\n"
+            "timezone: America/New_York\nmodel:\n  provider: openai-codex\n  default: gpt-5.4\n"
         )
         native = [
             {**job, "id": f"live-{index}", "schedule": {"kind": "cron", "expr": job["schedule"]}}
@@ -449,7 +449,7 @@ class ReportctlTests(unittest.TestCase):
         home = self.root / "hermes"
         home.mkdir()
         (home / "config.yaml").write_text(
-            "timezone: America/New_York\nprovider: openai-codex\nmodel: gpt-5.4\n"
+            "timezone: America/New_York\nmodel:\n  provider: openai-codex\n  default: gpt-5.4\n"
         )
         (home / "skills" / "delonet-daily-report").mkdir(parents=True)
         (home / "skills" / "delonet-daily-report" / "SKILL.md").write_text("skill")
@@ -462,12 +462,12 @@ class ReportctlTests(unittest.TestCase):
                 reportctl.timezone_preflight(self.value)
             os.environ["HERMES_TIMEZONE"] = ""
             (home / "config.yaml").write_text(
-                "timezone: America/New_York\nprovider: openrouter\nmodel: gpt-5.4\n"
+                "timezone: America/New_York\nmodel:\n  provider: openrouter\n  default: gpt-5.4\n"
             )
             with self.assertRaisesRegex(reportctl.ConfigError, "profile inference"):
                 reportctl.timezone_preflight(self.value)
             (home / "config.yaml").write_text(
-                "timezone: UTC\nprovider: openai-codex\nmodel: gpt-5.4\n"
+                "timezone: UTC\nmodel:\n  provider: openai-codex\n  default: gpt-5.4\n"
             )
             with self.assertRaisesRegex(reportctl.ConfigError, "profile=UTC"):
                 reportctl.timezone_preflight(self.value)
