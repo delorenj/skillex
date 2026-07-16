@@ -41,13 +41,16 @@ class ProfileConfigTests(unittest.TestCase):
         reportctl.timezone_preflight(self.value)
 
     def test_canonical_skill_pointer_passes_preflight(self) -> None:
-        skill_root = self.root / ".agents" / "skills" / "delonet-daily-report"
+        skill_root = self.root / "code" / "skillex" / "all-skills" / "delonet-daily-report"
         skill_root.mkdir(parents=True)
         (skill_root / "SKILL.md").write_text("skill", encoding="utf-8")
+        canonical = self.root / ".agents" / "skills" / "delonet-daily-report"
+        canonical.parent.mkdir(parents=True)
+        canonical.symlink_to(skill_root, target_is_directory=True)
         profile_skill = self.home / "skills" / "delonet-daily-report"
         (profile_skill / "SKILL.md").unlink()
         profile_skill.rmdir()
-        profile_skill.write_text(str(skill_root), encoding="utf-8")
+        profile_skill.write_text(str(canonical), encoding="utf-8")
         self.write_profile(
             "timezone: America/New_York\nmodel:\n  provider: openai-codex\n  default: gpt-5.4\n"
         )
@@ -62,6 +65,20 @@ class ProfileConfigTests(unittest.TestCase):
         profile_skill.rmdir()
         profile_skill.symlink_to(skill_root, target_is_directory=True)
         self.assertTrue(reportctl_runtime.profile_skill_installed("delonet-daily-report"))
+
+    def test_canonical_pointer_follows_multiple_symlinks(self) -> None:
+        physical = self.root / "physical" / "delonet-daily-report"
+        physical.mkdir(parents=True)
+        (physical / "SKILL.md").write_text("skill", encoding="utf-8")
+        hop = self.root / "hop"
+        hop.symlink_to(physical, target_is_directory=True)
+        canonical = self.root / ".agents" / "skills" / "delonet-daily-report"
+        canonical.parent.mkdir(parents=True)
+        canonical.symlink_to(hop, target_is_directory=True)
+        profile_skill = self.home / "skills" / "delonet-daily-report"
+        (profile_skill / "SKILL.md").unlink()
+        profile_skill.rmdir()
+        profile_skill.write_text(str(canonical), encoding="utf-8")
         self.assertTrue(reportctl_runtime.profile_skill_installed("delonet-daily-report"))
 
     def test_unsafe_or_broken_skill_pointers_fail_closed(self) -> None:
@@ -93,18 +110,30 @@ class ProfileConfigTests(unittest.TestCase):
                 with self.assertRaisesRegex(reportctl.ConfigError, "must be installed"):
                     reportctl.timezone_preflight(self.value)
 
-    def test_looping_dangling_and_unapproved_symlinks_fail_closed(self) -> None:
+    def test_looping_and_dangling_symlinks_fail_closed(self) -> None:
         profile_skill = self.home / "skills" / "delonet-daily-report"
         (profile_skill / "SKILL.md").unlink()
         profile_skill.rmdir()
-        unapproved = self.root / "unapproved" / "delonet-daily-report"
-        unapproved.mkdir(parents=True)
-        (unapproved / "SKILL.md").write_text("skill", encoding="utf-8")
-        for target in (profile_skill, self.root / "missing", unapproved):
+        for target in (profile_skill, self.root / "missing"):
             with self.subTest(target=target.name):
                 profile_skill.symlink_to(target, target_is_directory=True)
                 self.assertFalse(reportctl_runtime.profile_skill_installed("delonet-daily-report"))
                 profile_skill.unlink()
+
+    def test_skill_marker_symlink_cannot_escape_final_directory(self) -> None:
+        physical = self.root / "physical" / "delonet-daily-report"
+        physical.mkdir(parents=True)
+        outside = self.root / "outside-SKILL.md"
+        outside.write_text("skill", encoding="utf-8")
+        (physical / "SKILL.md").symlink_to(outside)
+        canonical = self.root / ".agents" / "skills" / "delonet-daily-report"
+        canonical.parent.mkdir(parents=True)
+        canonical.symlink_to(physical, target_is_directory=True)
+        profile_skill = self.home / "skills" / "delonet-daily-report"
+        (profile_skill / "SKILL.md").unlink()
+        profile_skill.rmdir()
+        profile_skill.write_text(str(canonical), encoding="utf-8")
+        self.assertFalse(reportctl_runtime.profile_skill_installed("delonet-daily-report"))
 
     def test_profile_subset_rejects_unsupported_yaml_constructs(self) -> None:
         probes = {
@@ -133,6 +162,29 @@ class ProfileConfigTests(unittest.TestCase):
         )
         profile = reportctl_runtime.profile_config()
         self.assertEqual("gpt#5.4", profile["model"])
+
+    def test_live_shaped_quotes_and_escapes_are_supported(self) -> None:
+        self.write_profile(
+            "unrelated:\n"
+            "  plain: it's valid YAML\n"
+            '  double: "say \\"hello\\" # still quoted" # comment\n'
+            "  single: 'it''s quoted'\n"
+            "timezone: America/New_York\n"
+            "model: {provider: openai-codex, default: gpt#5.4}\n"
+        )
+        profile = reportctl_runtime.profile_config()
+        self.assertEqual("gpt#5.4", profile["model"]["default"])
+
+    def test_unterminated_quotes_are_rejected_globally(self) -> None:
+        for profile in (
+            'unrelated: "unterminated\n',
+            "unrelated:\n  nested: 'unterminated\n",
+            'unrelated: {nested: "unterminated}\n',
+        ):
+            with self.subTest(profile=profile[:12]):
+                self.write_profile(profile)
+                with self.assertRaisesRegex(reportctl.ConfigError, "unterminated quoted"):
+                    reportctl_runtime.profile_config()
 
     def test_flow_nested_profile_passes_preflight(self) -> None:
         self.write_profile(

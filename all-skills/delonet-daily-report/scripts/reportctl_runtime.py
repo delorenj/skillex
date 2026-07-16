@@ -29,6 +29,11 @@ def _profile_error(reason: str) -> ConfigError:
     return ConfigError(f"cannot inspect Hermes profile config: {reason}")
 
 
+def _starts_yaml_quote(value: str, index: int) -> bool:
+    previous = value[:index].rstrip()[-1:] or ""
+    return not previous or previous in ":,[{-?"
+
+
 def _uncomment_yaml(line: str) -> str:
     quote = ""
     index = 0
@@ -38,12 +43,17 @@ def _uncomment_yaml(line: str) -> str:
             index += 2
             continue
         if character in "'\"":
-            quote = "" if quote == character else character if not quote else quote
+            if quote == character:
+                quote = ""
+            elif not quote and _starts_yaml_quote(line, index):
+                quote = character
         elif character == "#" and not quote and (index == 0 or line[index - 1].isspace()):
             return line[:index]
         elif character == "\\" and quote == '"':
             index += 1
         index += 1
+    if quote:
+        raise _profile_error("unterminated quoted scalar")
     return line
 
 
@@ -81,7 +91,10 @@ def _has_yaml_reference(value: str) -> bool:
             index += 2
             continue
         if character in "'\"":
-            quote = "" if quote == character else character if not quote else quote
+            if quote == character:
+                quote = ""
+            elif not quote and _starts_yaml_quote(value, index):
+                quote = character
         elif not quote:
             previous = value[index - 1] if index else " "
             if character in "&*!" and (previous.isspace() or previous in "[{,:"):
@@ -105,7 +118,10 @@ def _split_flow_fields(value: str) -> list[str]:
             index += 2
             continue
         if character in "'\"":
-            quote = "" if quote == character else character if not quote else quote
+            if quote == character:
+                quote = ""
+            elif not quote and _starts_yaml_quote(value, index):
+                quote = character
         elif character == "," and not quote:
             fields.append(value[start:index])
             start = index + 1

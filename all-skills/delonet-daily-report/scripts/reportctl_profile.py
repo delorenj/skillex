@@ -18,16 +18,13 @@ def _resolved_directory(path: Path) -> Path | None:
     return resolved if resolved.is_dir() else None
 
 
-def _approved_roots(home: Path) -> list[Path]:
-    roots = (home / "skills", Path.home() / ".agents" / "skills")
-    return [resolved for root in roots if (resolved := _resolved_directory(root)) is not None]
+def _lexically_trusted(path: Path, home: Path, name: str) -> bool:
+    profile_entry = home / "skills" / name
+    canonical_entry = Path.home() / ".agents" / "skills" / name
+    return path == profile_entry or path == canonical_entry or path.is_relative_to(canonical_entry)
 
 
-def _under_approved_root(target: Path, roots: list[Path]) -> bool:
-    return any(target == root or target.is_relative_to(root) for root in roots)
-
-
-def _pointer_target(entry: Path) -> Path | None:
+def _pointer_target(entry: Path, home: Path, name: str) -> Path | None:
     try:
         metadata = entry.lstat()
         if not stat.S_ISREG(metadata.st_mode) or not 0 < metadata.st_size <= MAX_POINTER_BYTES:
@@ -46,26 +43,34 @@ def _pointer_target(entry: Path) -> Path | None:
         return None
     value = lines[0].strip()
     target = Path(value)
-    if not target.is_absolute() or ".." in target.parts:
+    if (
+        not target.is_absolute()
+        or ".." in target.parts
+        or not _lexically_trusted(target, home, name)
+    ):
         return None
     return _resolved_directory(target)
+
+
+def _valid_skill_marker(target: Path) -> bool:
+    try:
+        marker = (target / "SKILL.md").resolve(strict=True)
+    except (OSError, RuntimeError):
+        return False
+    return marker.is_relative_to(target) and marker.is_file()
 
 
 def skill_entry_installed(home: Path, name: str) -> bool:
     """Return whether a profile skill entry resolves to an approved skill directory."""
     entry = home / "skills" / name
-    roots = _approved_roots(home)
     try:
         metadata = entry.lstat()
     except OSError:
         return False
     if stat.S_ISREG(metadata.st_mode):
-        target = _pointer_target(entry)
+        target = _pointer_target(entry, home, name)
     else:
+        if not _lexically_trusted(entry, home, name):
+            return False
         target = _resolved_directory(entry)
-    return bool(
-        target
-        and target.name == name
-        and _under_approved_root(target, roots)
-        and (target / "SKILL.md").is_file()
-    )
+    return bool(target and target.name == name and _valid_skill_marker(target))
