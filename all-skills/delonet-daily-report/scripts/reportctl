@@ -167,8 +167,14 @@ def normalize_job(job: Any) -> dict[str, Any]:
         skills = [skills]
     if not isinstance(skills, list) or not all(nonempty(skill) for skill in skills):
         raise ConfigError(f"observed job {job['name']} has invalid skills")
+    repeat_present = "repeat" in job
     repeat = job.get("repeat")
-    if repeat is None:
+    if not repeat_present and (
+        "repeat_times" in job or "repeat_completed" in job
+    ):
+        repeat_times = job.get("repeat_times")
+        repeat_completed = job.get("repeat_completed", 0)
+    elif repeat is None:
         repeat_times, repeat_completed = None, 0
     elif isinstance(repeat, dict):
         repeat_times = repeat.get("times")

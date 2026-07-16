@@ -2,8 +2,12 @@ from __future__ import annotations
 
 import copy
 import datetime as dt
+import json
+import os
 import subprocess
+import tempfile
 import unittest
+from pathlib import Path
 from unittest import mock
 
 from test_fixtures import config
@@ -140,6 +144,52 @@ class InferenceReconciliationTests(unittest.TestCase):
         repaired = copy.deepcopy(observed)
         repaired[0]["repeat"] = {"times": None, "completed": 0}
         self.assertEqual([], reportctl.reconciliation_plan(self.value, repaired))
+
+    def test_live_read_preserves_finite_repeat_and_coalesces_to_four_recreates(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            value = copy.deepcopy(self.value)
+            value["daily"]["workdir"] = str(root)
+            base = value["topics"][0]
+            value["topics"] = []
+            for topic_id in ("nightly-pr-maintenance", "hermes-fleet-health", "report-delivery-health"):
+                topic = copy.deepcopy(base)
+                topic["id"] = topic_id
+                topic["title"] = topic_id
+                value["topics"].append(topic)
+            raw_jobs = []
+            for index, desired in enumerate(reportctl.desired_jobs(value), 1):
+                raw = {
+                    **desired,
+                    "id": f"native-{index}",
+                    "schedule": {"kind": "cron", "expr": desired["schedule"]},
+                    "repeat": {"times": 1, "completed": 0},
+                    "provider": None,
+                    "model": None,
+                    "base_url": None,
+                }
+                raw.pop("repeat_times")
+                raw.pop("repeat_completed")
+                raw_jobs.append(raw)
+            (root / "cron").mkdir()
+            (root / "cron/jobs.json").write_text(json.dumps({"jobs": raw_jobs}))
+            with mock.patch.dict(os.environ, {"HERMES_HOME": str(root)}, clear=False):
+                live = reportctl.read_live_jobs()
+                self.assertEqual(live, [reportctl.normalize_job(job) for job in live])
+                self.assertTrue(all(job["repeat_times"] == 1 for job in live))
+                plan = reportctl.reconciliation_plan(value, live)
+                self.assertEqual(4, len(plan))
+                self.assertEqual({"recreate"}, {action["action"] for action in plan})
+                self.assertEqual(
+                    {job["name"] for job in live}, {action["name"] for action in plan}
+                )
+                self.assertEqual(live, reportctl.observed_jobs(None))
+
+                repaired = copy.deepcopy(raw_jobs)
+                for job in repaired:
+                    job["repeat"] = {"times": None, "completed": 0}
+                (root / "cron/jobs.json").write_text(json.dumps({"jobs": repaired}))
+                self.assertEqual([], reportctl.reconciliation_plan(value, reportctl.read_live_jobs()))
 
     def test_legacy_missing_or_null_repeat_normalizes_to_infinite(self) -> None:
         desired = reportctl.desired_jobs(self.value)[0]
