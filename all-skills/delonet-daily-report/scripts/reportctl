@@ -11,13 +11,13 @@ import os
 import re
 import subprocess
 import sys
-import tempfile
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from reportctl_contracts import ConfigError, parse_iso, validate_daily_report, validate_section_artifact
+from reportctl_contracts import ConfigError, parse_iso, validate_daily_report, validate_run_manifest, validate_section_artifact
+from reportctl_runtime import archive_paths, atomic_write, file_lock, hermes_home, publish_archive_pair, run_command
 
 MANAGED_PREFIX = "ddr:journal:"
 DAILY_NAME = "ddr:daily"
@@ -27,10 +27,9 @@ ID_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 DAILY_CRON_RE = re.compile(r"^(\d{1,2}) (\d{1,2}) \* \* \*$")
 ENV_RE = re.compile(r"^[A-Z_][A-Z0-9_]*$")
 SECRET_KEY_RE = re.compile(r"(token|secret|password|cookie|authorization|api.?key)", re.I)
+LITERAL_SECRET_RE = re.compile(r"(?i)(?:bearer\s+\S+|(?:token|secret|password|api.?key)\s*[:=]\s*\S+)")
 ACTION_ORDER = {"remove-duplicate": 0, "remove-stale": 1, "create": 2, "edit": 3, "pause": 4, "resume": 5}
 DEFAULT_SECTIONS_PATH = Path(__file__).resolve().parent.parent / "assets" / "default-core-sections.json"
-
-
 def load_json(path: Path) -> Any:
     try:
         return json.loads(path.read_text(encoding="utf-8"))
@@ -40,14 +39,10 @@ def load_json(path: Path) -> Any:
 
 def is_bool(value: Any) -> bool:
     return isinstance(value, bool)
-
-
 def require_keys(value: dict[str, Any], allowed: set[str], where: str) -> None:
     extra = set(value) - allowed
     if extra:
         raise ConfigError(f"{where}: unknown keys: {', '.join(sorted(extra))}")
-
-
 def validate_config(config: Any) -> dict[str, Any]:
     if not isinstance(config, dict):
         raise ConfigError("config must be a JSON object")
@@ -111,8 +106,6 @@ def validate_config(config: Any) -> dict[str, Any]:
 
 def nonempty(value: Any) -> bool:
     return isinstance(value, str) and bool(value.strip())
-
-
 def validate_topic(topic: Any, index: int = 0) -> None:
     where = f"topics[{index}]"
     if not isinstance(topic, dict):
@@ -133,8 +126,10 @@ def validate_topic(topic: Any, index: int = 0) -> None:
         raise ConfigError(f"{where}.sources contains duplicates")
     for source in sources:
         parsed = urlsplit(source)
-        if parsed.scheme != "https" or not parsed.netloc or parsed.username or parsed.password:
-            raise ConfigError(f"{where}.sources must contain public https URLs without credentials")
+        if parsed.scheme != "https" or not parsed.netloc or parsed.username or parsed.password or parsed.query:
+            raise ConfigError(f"{where}.sources must be public https URLs without userinfo or query strings")
+    if LITERAL_SECRET_RE.search(topic["prompt"]):
+        raise ConfigError(f"{where}.prompt contains a literal secret-like value; use secret_env")
     envs = topic.get("secret_env", [])
     if not isinstance(envs, list) or not all(isinstance(item, str) and ENV_RE.fullmatch(item) for item in envs):
         raise ConfigError(f"{where}.secret_env must contain environment-variable names")
@@ -147,38 +142,6 @@ def validate_daily_cron(schedule: str, where: str) -> None:
         raise ConfigError(f"{where} must be a simple five-field daily cron schedule")
 
 
-def atomic_write(path: Path, value: Any) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd, temporary = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent, text=True)
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as handle:
-            json.dump(value, handle, indent=2, sort_keys=False)
-            handle.write("\n")
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.replace(temporary, path)
-    except BaseException:
-        try:
-            os.unlink(temporary)
-        except FileNotFoundError:
-            pass
-        raise
-
-
-def atomic_write_text(path: Path, value: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd, temporary = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent, text=True)
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as handle:
-            handle.write(value)
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.replace(temporary, path)
-    except BaseException:
-        Path(temporary).unlink(missing_ok=True)
-        raise
-
-
 def redact(value: Any, key: str = "") -> Any:
     if SECRET_KEY_RE.search(key) and not key.endswith("_env"):
         return "[REDACTED]"
@@ -189,6 +152,7 @@ def redact(value: Any, key: str = "") -> Any:
     if isinstance(value, str):
         value = re.sub(r"(?i)(bearer\s+)[A-Za-z0-9._~+/=-]+", r"\1[REDACTED]", value)
         value = re.sub(r"(?i)(https?://)[^/@\s:]+:[^/@\s]+@", r"\1[REDACTED]@", value)
+        value = re.sub(r"(?i)((?:token|secret|password|api.?key)=)[^&\s]+", r"\1[REDACTED]", value)
     return value
 
 
@@ -222,27 +186,33 @@ def daily_prompt(config: dict[str, Any]) -> str:
 
 def desired_jobs(config: dict[str, Any]) -> list[dict[str, Any]]:
     workdir = config["daily"].get("workdir", "")
-    jobs = [{"name": f"{MANAGED_PREFIX}{topic['id']}", "schedule": topic["schedule"], "prompt": journalist_prompt(config, topic), "enabled": topic["enabled"], "deliver": "local", "workdir": workdir, "timezone": config["timezone"]} for topic in config["topics"]]
-    jobs.append({"name": DAILY_NAME, "schedule": config["daily"]["schedule"], "prompt": daily_prompt(config), "enabled": config["daily"]["enabled"], "deliver": config["daily"]["deliver"], "workdir": workdir, "timezone": config["timezone"]})
+    jobs = [{"name": f"{MANAGED_PREFIX}{topic['id']}", "schedule": topic["schedule"], "prompt": journalist_prompt(config, topic), "enabled": topic["enabled"], "deliver": "local", "workdir": workdir, "skills": ["delonet-daily-report"]} for topic in config["topics"]]
+    jobs.append({"name": DAILY_NAME, "schedule": config["daily"]["schedule"], "prompt": daily_prompt(config), "enabled": config["daily"]["enabled"], "deliver": config["daily"]["deliver"], "workdir": workdir, "skills": ["delonet-daily-report"]})
     return sorted(jobs, key=lambda job: job["name"])
 
 
 def normalize_job(job: Any) -> dict[str, Any]:
     if not isinstance(job, dict) or not nonempty(job.get("id")) or not nonempty(job.get("name")):
         raise ConfigError("each jobs snapshot entry requires string id and name")
-    enabled = job.get("enabled", True)
+    enabled = job.get("enabled", job.get("state") != "paused")
     if not is_bool(enabled):
         raise ConfigError("jobs snapshot enabled must be boolean")
-    timezone = job.get("timezone", SUPPORTED_TIMEZONE)
-    if timezone != SUPPORTED_TIMEZONE:
-        raise ConfigError(f"observed job {job['name']} uses unsupported timezone {timezone}")
-    return {"id": job["id"], "name": job["name"], "schedule": job.get("schedule", ""), "prompt": job.get("prompt", ""), "enabled": enabled, "deliver": job.get("deliver", "local"), "workdir": job.get("workdir", ""), "timezone": timezone}
+    schedule = job.get("schedule", "")
+    if isinstance(schedule, dict):
+        schedule = schedule.get("expr") or schedule.get("display") or schedule.get("value") or ""
+    deliver = job.get("deliver") or "local"
+    if isinstance(deliver, list):
+        deliver = deliver[0] if len(deliver) == 1 else ",".join(deliver)
+    skills = job.get("skills") or ([job["skill"]] if job.get("skill") else [])
+    if isinstance(skills, str):
+        skills = [skills]
+    if not isinstance(skills, list) or not all(nonempty(skill) for skill in skills):
+        raise ConfigError(f"observed job {job['name']} has invalid skills")
+    return {"id": job["id"], "name": job["name"], "schedule": schedule, "prompt": job.get("prompt", ""), "enabled": enabled, "deliver": deliver, "workdir": job.get("workdir") or "", "skills": sorted(skills), "next_run_at": job.get("next_run_at")}
 
 
 def managed(name: str) -> bool:
     return name == DAILY_NAME or name.startswith(MANAGED_PREFIX)
-
-
 def reconciliation_plan(config: dict[str, Any], observed: list[dict[str, Any]]) -> list[dict[str, Any]]:
     desired = {job["name"]: job for job in desired_jobs(config)}
     groups: dict[str, list[dict[str, Any]]] = {}
@@ -265,7 +235,7 @@ def reconciliation_plan(config: dict[str, Any], observed: list[dict[str, Any]]) 
         if current is None:
             actions.append({"action": "create", **wanted})
             continue
-        fields = ("schedule", "prompt", "deliver", "workdir")
+        fields = ("schedule", "prompt", "deliver", "workdir", "skills")
         changes = {field: wanted[field] for field in fields if current.get(field, "") != wanted[field]}
         if changes:
             actions.append({"action": "edit", "name": name, "id": current["id"], "changes": changes})
@@ -284,15 +254,49 @@ def parse_hermes_jobs(output: str) -> list[dict[str, Any]]:
     raise ConfigError("Hermes cron list output is not machine-readable; pass --jobs with a JSON snapshot")
 
 
+def read_live_jobs() -> list[dict[str, Any]]:
+    path = hermes_home() / "cron" / "jobs.json"
+    if not path.exists():
+        return []
+    value = load_json(path)
+    jobs = value.get("jobs") if isinstance(value, dict) else value
+    if not isinstance(jobs, list):
+        raise ConfigError(f"canonical Hermes jobs store has invalid shape: {path}")
+    return [normalize_job(job) for job in jobs]
+
+
+def scheduler_timezone() -> str:
+    env = os.environ.get("HERMES_TIMEZONE", "").strip()
+    if env:
+        return env
+    path = hermes_home() / "config.yaml"
+    try:
+        text = path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return ""
+    except OSError as exc:
+        raise ConfigError(f"cannot inspect Hermes timezone config: {exc}") from exc
+    match = re.search(r"(?m)^timezone:\s*['\"]?([^'\"#\s]+)", text)
+    return match.group(1) if match else ""
+
+
+def timezone_preflight(config: dict[str, Any]) -> None:
+    observed = scheduler_timezone()
+    if observed != config["timezone"]:
+        raise ConfigError(f"Hermes gateway timezone must be {config['timezone']} in HERMES_HOME/config.yaml or HERMES_TIMEZONE; observed {observed or 'unset'}")
+    if not (hermes_home() / "skills" / "delonet-daily-report" / "SKILL.md").is_file():
+        raise ConfigError("delonet-daily-report must be installed in the active HERMES_HOME skills directory")
+
+
 def observed_jobs(snapshot: str | None) -> list[dict[str, Any]]:
     if snapshot:
         value = load_json(Path(snapshot))
+        if isinstance(value, dict):
+            value = value.get("jobs")
         if not isinstance(value, list):
-            raise ConfigError("jobs snapshot must be a JSON array")
+            raise ConfigError("jobs snapshot must be an array or native {jobs:[...]} object")
         return [normalize_job(item) for item in value]
-    result = subprocess.run(["hermes", "cron", "list", "--all"], text=True, capture_output=True, check=False)
-    if result.returncode:
-        raise ConfigError(f"hermes cron list failed: {result.stderr.strip()}")
+    result = run_command(["hermes", "cron", "list", "--all"])
     return parse_hermes_jobs(result.stdout)
 
 
@@ -304,31 +308,46 @@ def action_command(action: dict[str, Any]) -> list[str]:
         return ["hermes", "cron", kind, action["id"]]
     if kind == "create":
         command = ["hermes", "cron", "create", action["schedule"], action["prompt"], "--name", action["name"], "--deliver", action["deliver"]]
+        for skill in action["skills"]:
+            command += ["--skill", skill]
         if action["workdir"]:
             command += ["--workdir", action["workdir"]]
         return command
     command = ["hermes", "cron", "edit", action["id"]]
-    flags = {"schedule": "--schedule", "prompt": "--prompt", "deliver": "--deliver", "workdir": "--workdir"}
+    flags = {"schedule": "--schedule", "prompt": "--prompt", "deliver": "--deliver", "workdir": "--workdir", "skills": "--skill"}
     for field in sorted(action["changes"]):
-        command += [flags[field], action["changes"][field]]
+        values = action["changes"][field] if field == "skills" else [action["changes"][field]]
+        for value in values:
+            command += [flags[field], value]
     return command
 
 
 def apply_plan(plan: list[dict[str, Any]], timezone: str) -> None:
     environment = {**os.environ, "HERMES_TIMEZONE": timezone}
     for action in plan:
-        result = subprocess.run(action_command(action), check=True, text=True, capture_output=True, env=environment)
+        result = run_command(action_command(action), env=environment)
         if action["action"] == "create" and not action["enabled"]:
             match = re.search(r"Created job:\s*(\S+)", result.stdout)
             if not match:
                 raise ConfigError(f"created disabled job {action['name']} but could not read its Hermes job ID")
-            subprocess.run(["hermes", "cron", "pause", match.group(1)], check=True, env=environment)
+            run_command(["hermes", "cron", "pause", match.group(1)], env=environment)
+
+
+def reconcile_live(config: dict[str, Any]) -> list[dict[str, Any]]:
+    with file_lock(hermes_home() / "cron" / ".ddr-reconcile.lock"):
+        timezone_preflight(config)
+        plan = reconciliation_plan(config, read_live_jobs())
+        apply_plan(plan, config["timezone"])
+        return plan
 
 
 def artifact_health(config: dict[str, Any], date: str) -> list[dict[str, str]]:
+    archive_paths(config, date)
     now = dt.datetime.now(dt.timezone.utc)
     result = []
     for topic in config["topics"]:
+        if not topic["enabled"]:
+            continue
         path = Path(section_path(config, topic["id"], date))
         status, reason = "missing", "file absent"
         if path.exists():
@@ -342,14 +361,15 @@ def artifact_health(config: dict[str, Any], date: str) -> list[dict[str, str]]:
     return result
 
 
-def archive_paths(config: dict[str, Any], date: str) -> dict[str, Any]:
+def manifest_health(config: dict[str, Any], date: str) -> dict[str, str]:
+    path = Path(archive_paths(config, date)["manifest"])
+    if not path.exists():
+        return {"status": "missing", "path": str(path)}
     try:
-        parsed = dt.date.fromisoformat(date)
-    except ValueError as exc:
-        raise ConfigError("date must use YYYY-MM-DD") from exc
-    base = Path(config["artifact_dir"]) / date
-    archive = Path(config["archive_dir"]) / f"{parsed.year:04d}" / f"{parsed.month:02d}"
-    return {"sections_dir": str(base / "sections"), "manifest": str(base / "run-manifest.json"), "markdown": str(archive / f"{date}.md"), "report_json": str(archive / f"{date}.report.json")}
+        validate_run_manifest(load_json(path), config)
+        return {"status": "valid", "path": str(path)}
+    except ConfigError as exc:
+        return {"status": "invalid", "reason": str(exc), "path": str(path)}
 
 
 def archive_report(config: dict[str, Any], report_file: str, markdown_file: str) -> dict[str, Any]:
@@ -363,9 +383,7 @@ def archive_report(config: dict[str, Any], report_file: str, markdown_file: str)
     paths = archive_paths(config, report["report_date"])
     archived = copy.deepcopy(report)
     archived["markdown_path"] = paths["markdown"]
-    atomic_write_text(Path(paths["markdown"]), markdown)
-    atomic_write(Path(paths["report_json"]), archived)
-    return {"archived": True, "markdown": paths["markdown"], "report_json": paths["report_json"]}
+    return publish_archive_pair(Path(paths["markdown"]), Path(paths["report_json"]), Path(paths["commit_marker"]), markdown, archived, report["report_date"])
 
 
 def mutate_topic(config_path: Path, config: dict[str, Any], args: argparse.Namespace) -> dict[str, Any]:
@@ -442,6 +460,11 @@ def main(argv: list[str] | None = None) -> int:
             output = archive_paths(config, args.date)
         elif args.command == "archive":
             output = archive_report(config, args.report, args.markdown)
+        elif args.command == "reconcile" and args.apply:
+            if args.jobs:
+                raise ConfigError("--apply rejects external --jobs snapshots; canonical HERMES_HOME is refreshed under lock")
+            plan = reconcile_live(config)
+            output = {"applied": True, "actions": plan, "count": len(plan)}
         else:
             jobs = observed_jobs(args.jobs)
             plan = reconciliation_plan(config, jobs)
@@ -449,17 +472,20 @@ def main(argv: list[str] | None = None) -> int:
             if args.command == "plan":
                 output = {"actions": plan, "count": len(plan)}
             elif args.command == "reconcile":
-                if args.apply:
-                    apply_plan(plan, config["timezone"])
-                output = {"applied": args.apply, "actions": plan, "count": len(plan)}
+                output = {"applied": False, "actions": plan, "count": len(plan)}
             elif args.command == "status":
                 output = {"configured_topics": len(config["topics"]), "managed_jobs": len([job for job in jobs if managed(job["name"])]), "drift_actions": len(plan), "duplicate_jobs": duplicates}
             else:
                 sections = artifact_health(config, args.date)
-                output = {"healthy": not plan and not duplicates and all(item["status"] == "complete" for item in sections), "drift_actions": len(plan), "duplicate_jobs": duplicates, "sections": sections}
+                manifest = manifest_health(config, args.date)
+                runtime_timezone = scheduler_timezone()
+                skill_ready = (hermes_home() / "skills" / "delonet-daily-report" / "SKILL.md").is_file()
+                daily = next((job for job in jobs if job["name"] == DAILY_NAME), {})
+                healthy = not plan and not duplicates and skill_ready and runtime_timezone == config["timezone"] and manifest["status"] == "valid" and all(item["status"] == "complete" for item in sections)
+                output = {"healthy": healthy, "scheduler_timezone": runtime_timezone or "unset", "expected_timezone": config["timezone"], "skill_available": skill_ready, "daily_next_run_at": daily.get("next_run_at"), "drift_actions": len(plan), "duplicate_jobs": duplicates, "manifest": manifest, "sections": sections}
         print(json.dumps(redact(output), indent=2, sort_keys=True))
         return 0
-    except (ConfigError, subprocess.CalledProcessError) as exc:
+    except (ConfigError, OSError, subprocess.SubprocessError) as exc:
         print(json.dumps({"error": redact(str(exc))}), file=sys.stderr)
         return 2
 

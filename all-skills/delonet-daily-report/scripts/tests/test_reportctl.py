@@ -3,15 +3,22 @@ from __future__ import annotations
 import copy
 import datetime as dt
 import importlib.machinery
+import importlib.util
 import json
+import os
 import subprocess
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 from unittest import mock
 
 SCRIPT = Path(__file__).parents[1] / "reportctl"
-reportctl = importlib.machinery.SourceFileLoader("reportctl", str(SCRIPT)).load_module()
+LOADER = importlib.machinery.SourceFileLoader("reportctl", str(SCRIPT))
+SPEC = importlib.util.spec_from_loader("reportctl", LOADER)
+reportctl = importlib.util.module_from_spec(SPEC)
+LOADER.exec_module(reportctl)
+reportctl_runtime = importlib.import_module("reportctl_runtime")
 
 
 def config(root: Path) -> dict:
@@ -103,7 +110,16 @@ class ReportctlTests(unittest.TestCase):
             reportctl.validate_config(invalid)
         invalid = copy.deepcopy(self.value)
         invalid["topics"][0]["sources"] = ["https://user:password@example.org/private"]
-        with self.assertRaisesRegex(reportctl.ConfigError, "without credentials"):
+        with self.assertRaisesRegex(reportctl.ConfigError, "without userinfo"):
+            reportctl.validate_config(invalid)
+        for source in ("https://user@example.org/news", "https://example.org/news?api_key=literal"):
+            invalid = copy.deepcopy(self.value)
+            invalid["topics"][0]["sources"] = [source]
+            with self.assertRaisesRegex(reportctl.ConfigError, "userinfo or query"):
+                reportctl.validate_config(invalid)
+        invalid = copy.deepcopy(self.value)
+        invalid["topics"][0]["prompt"] = "Fetch with api_key=literal-secret"
+        with self.assertRaisesRegex(reportctl.ConfigError, "secret-like"):
             reportctl.validate_config(invalid)
 
     def test_plan_is_stable_and_idempotent(self) -> None:
@@ -129,7 +145,6 @@ class ReportctlTests(unittest.TestCase):
         jobs = reportctl.desired_jobs(self.value)
         daily = next(job for job in jobs if job["name"] == "ddr:daily")
         self.assertEqual("0 7 * * *", daily["schedule"])
-        self.assertEqual("America/New_York", daily["timezone"])
         invalid = copy.deepcopy(self.value)
         invalid["timezone"] = "UTC"
         with self.assertRaisesRegex(reportctl.ConfigError, "America/New_York"):
@@ -143,12 +158,59 @@ class ReportctlTests(unittest.TestCase):
         with self.assertRaisesRegex(reportctl.ConfigError, "daily cron"):
             reportctl.validate_config(invalid)
         with mock.patch.object(
-            reportctl.subprocess, "run", return_value=subprocess.CompletedProcess([], 0, "", "")
+            reportctl_runtime.subprocess,
+            "run",
+            return_value=subprocess.CompletedProcess([], 0, "", ""),
         ) as run:
             reportctl.apply_plan(
                 [{"action": "pause", "id": "job-1", "name": "ddr:daily"}], "America/New_York"
             )
             self.assertEqual("America/New_York", run.call_args.kwargs["env"]["HERMES_TIMEZONE"])
+
+    def test_native_hermes_shape_and_skill_drift(self) -> None:
+        native = []
+        for index, job in enumerate(reportctl.desired_jobs(self.value), 1):
+            native.append(
+                {
+                    **job,
+                    "id": f"native-{index}",
+                    "schedule": {"kind": "cron", "expr": job["schedule"]},
+                    "workdir": None,
+                }
+            )
+        snapshot = self.root / "jobs.json"
+        snapshot.write_text(json.dumps({"jobs": native, "updated_at": "now"}))
+        observed = reportctl.observed_jobs(str(snapshot))
+        self.assertEqual([], reportctl.reconciliation_plan(self.value, observed))
+        observed[0]["skills"] = []
+        plan = reportctl.reconciliation_plan(self.value, observed)
+        self.assertEqual(["delonet-daily-report"], plan[0]["changes"]["skills"])
+        self.assertIn("--skill", reportctl.action_command(plan[0]))
+
+    def test_apply_rejects_external_snapshot_and_refreshes_canonical_store(self) -> None:
+        snapshot = self.root / "snapshot.json"
+        snapshot.write_text("[]")
+        result = self.run_cli("reconcile", "--apply", "--jobs", str(snapshot))
+        self.assertEqual(2, result.returncode)
+        self.assertIn("rejects external", result.stderr)
+        home = self.root / "hermes"
+        (home / "cron").mkdir(parents=True)
+        (home / "skills" / "delonet-daily-report").mkdir(parents=True)
+        (home / "skills" / "delonet-daily-report" / "SKILL.md").write_text(
+            "---\nname: delonet-daily-report\n---\n"
+        )
+        (home / "config.yaml").write_text("timezone: America/New_York\n")
+        native = [
+            {**job, "id": f"live-{index}", "schedule": {"kind": "cron", "expr": job["schedule"]}}
+            for index, job in enumerate(reportctl.desired_jobs(self.value), 1)
+        ]
+        (home / "cron" / "jobs.json").write_text(json.dumps({"jobs": native}))
+        with (
+            mock.patch.dict(os.environ, {"HERMES_HOME": str(home)}, clear=False),
+            mock.patch.object(reportctl, "apply_plan") as apply,
+        ):
+            self.assertEqual([], reportctl.reconcile_live(self.value))
+            apply.assert_called_once_with([], "America/New_York")
 
     def test_duplicate_and_stale_jobs_are_removed_without_touching_foreign_jobs(self) -> None:
         jobs = observed_from_desired(self.value)
@@ -224,6 +286,33 @@ class ReportctlTests(unittest.TestCase):
         section.parent.mkdir(parents=True)
         section.write_text(json.dumps(malformed), encoding="utf-8")
         self.assertEqual("invalid", reportctl.artifact_health(self.value, date)[0]["status"])
+        insecure = valid_artifact("2099-01-01T00:00:00Z")
+        insecure["sources"][0]["url"] = "http://example.org/release"
+        with self.assertRaisesRegex(reportctl.ConfigError, "invalid"):
+            reportctl.validate_section_artifact(insecure, "ai-agents")
+
+    def test_manifest_and_report_cover_active_topics_exactly(self) -> None:
+        manifest = {
+            "schema_version": 1,
+            "run_id": "run-1",
+            "report_date": "2026-07-15",
+            "started_at": "2026-07-15T10:00:00Z",
+            "completed_at": "2026-07-15T10:01:00Z",
+            "sections": [{"id": "ai-agents", "status": "complete", "path": "/tmp/ai.json"}],
+        }
+        self.assertEqual(manifest, reportctl.validate_run_manifest(manifest, self.value))
+        duplicate = copy.deepcopy(manifest)
+        duplicate["sections"].append(copy.deepcopy(duplicate["sections"][0]))
+        with self.assertRaisesRegex(reportctl.ConfigError, "exactly once"):
+            reportctl.validate_run_manifest(duplicate, self.value)
+        report = self.daily_report("Coverage")
+        report["coverage"] = {"complete": ["ai-agents"], "degraded": ["ai-agents"]}
+        with self.assertRaisesRegex(reportctl.ConfigError, "partition"):
+            reportctl.validate_daily_report(report, self.value)
+        report = self.daily_report("Unknown")
+        report["coverage"]["complete"] = ["unknown"]
+        with self.assertRaisesRegex(reportctl.ConfigError, "partition"):
+            reportctl.validate_daily_report(report, self.value)
 
     def test_core_sections_feed_aggregator_prompt(self) -> None:
         defaults = json.loads(
@@ -254,6 +343,7 @@ class ReportctlTests(unittest.TestCase):
         self.assertNotIn("abc.def", redacted["message"])
         self.assertEqual("[REDACTED]", redacted["nested"][0]["password"])
         self.assertEqual(["TOKEN_NAME"], redacted["secret_env"])
+        self.assertNotIn("literal", reportctl.redact("https://example.org/?api_key=literal"))
 
     def test_archive_paths_are_partitioned(self) -> None:
         paths = reportctl.archive_paths(self.value, "2026-07-15")
@@ -261,11 +351,22 @@ class ReportctlTests(unittest.TestCase):
         self.assertTrue(paths["manifest"].endswith("/2026-07-15/run-manifest.json"))
 
     def test_archive_writes_validated_json_and_markdown_atomically(self) -> None:
-        report = {
+        report = self.daily_report("Daily Company Rollup")
+        report_file, markdown_file = self.root / "input.json", self.root / "input.md"
+        report_file.write_text(json.dumps(report), encoding="utf-8")
+        markdown_file.write_text("# Daily Company Rollup\n", encoding="utf-8")
+        output = reportctl.archive_report(self.value, str(report_file), str(markdown_file))
+        self.assertEqual("# Daily Company Rollup\n", Path(output["markdown"]).read_text())
+        archived = json.loads(Path(output["report_json"]).read_text())
+        self.assertEqual(output["markdown"], archived["markdown_path"])
+        self.assertTrue(Path(output["commit_marker"]).exists())
+
+    def daily_report(self, title: str) -> dict:
+        return {
             "schema_version": 1,
             "run_id": "run-1",
             "report_date": "2026-07-15",
-            "title": "Daily Company Rollup",
+            "title": title,
             "generated_at": "2026-07-15T11:00:00Z",
             "sections": [
                 {
@@ -275,18 +376,84 @@ class ReportctlTests(unittest.TestCase):
                     "source_urls": [],
                 }
                 for section in self.value["core_sections"]
-            ],
+            ]
+            + [{"id": "ai-agents", "title": "AI Agents", "body": "Topic body", "source_urls": []}],
             "coverage": {"complete": ["ai-agents"], "degraded": []},
             "markdown_path": "/pending/report.md",
         }
-        report_file, markdown_file = self.root / "input.json", self.root / "input.md"
-        report_file.write_text(json.dumps(report), encoding="utf-8")
-        markdown_file.write_text("# Daily Company Rollup\n", encoding="utf-8")
-        output = reportctl.archive_report(self.value, str(report_file), str(markdown_file))
-        self.assertEqual("# Daily Company Rollup\n", Path(output["markdown"]).read_text())
-        archived = json.loads(Path(output["report_json"]).read_text())
-        self.assertEqual(output["markdown"], archived["markdown_path"])
-        self.assertFalse(list(Path(output["markdown"]).parent.glob(".*.md.*")))
+
+    def test_archive_second_commit_failure_never_publishes_marker(self) -> None:
+        report_file, markdown_file = self.root / "fail.json", self.root / "fail.md"
+        report_file.write_text(json.dumps(self.daily_report("Failure")))
+        markdown_file.write_text("# Failure\n")
+        original = reportctl_runtime.os.replace
+
+        def fail_second(source, destination):
+            if str(destination).endswith(".report.json") and ".report.json." in str(source):
+                raise OSError("forced second commit failure")
+            return original(source, destination)
+
+        with mock.patch.object(reportctl_runtime.os, "replace", side_effect=fail_second):
+            with self.assertRaises(OSError):
+                reportctl.archive_report(self.value, str(report_file), str(markdown_file))
+        paths = reportctl.archive_paths(self.value, "2026-07-15")
+        self.assertFalse(Path(paths["commit_marker"]).exists())
+        self.assertFalse(Path(paths["markdown"]).exists())
+        self.assertFalse(Path(paths["report_json"]).exists())
+
+    def test_archive_concurrency_keeps_pair_consistent(self) -> None:
+        errors = []
+
+        def worker(title):
+            try:
+                report_file, markdown_file = self.root / f"{title}.json", self.root / f"{title}.md"
+                report_file.write_text(json.dumps(self.daily_report(title)))
+                markdown_file.write_text(f"# {title}\n")
+                reportctl.archive_report(self.value, str(report_file), str(markdown_file))
+            except Exception as exc:
+                errors.append(exc)
+
+        threads = [threading.Thread(target=worker, args=(title,)) for title in ("Alpha", "Beta")]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+        self.assertEqual([], errors)
+        paths = reportctl.archive_paths(self.value, "2026-07-15")
+        archived = json.loads(Path(paths["report_json"]).read_text())
+        markdown = Path(paths["markdown"]).read_text()
+        self.assertIn(archived["title"], markdown)
+
+    def test_health_skips_paused_and_rejects_traversal_date(self) -> None:
+        paused = copy.deepcopy(self.value)
+        paused["topics"][0]["enabled"] = False
+        self.assertEqual([], reportctl.artifact_health(paused, "2026-07-15"))
+        with self.assertRaisesRegex(reportctl.ConfigError, "YYYY-MM-DD"):
+            reportctl.artifact_health(self.value, "../../etc")
+
+    def test_timezone_preflight_reads_profile_config(self) -> None:
+        home = self.root / "hermes"
+        home.mkdir()
+        (home / "config.yaml").write_text("timezone: America/New_York\n")
+        (home / "skills" / "delonet-daily-report").mkdir(parents=True)
+        (home / "skills" / "delonet-daily-report" / "SKILL.md").write_text("skill")
+        with mock.patch.dict(os.environ, {"HERMES_HOME": str(home)}, clear=False):
+            reportctl.timezone_preflight(self.value)
+            (home / "config.yaml").write_text("timezone: UTC\n")
+            with self.assertRaisesRegex(reportctl.ConfigError, "observed UTC"):
+                reportctl.timezone_preflight(self.value)
+
+    def test_subprocess_failures_are_structured(self) -> None:
+        with mock.patch.object(
+            reportctl_runtime.subprocess, "run", side_effect=FileNotFoundError()
+        ):
+            with self.assertRaisesRegex(reportctl.ConfigError, "missing executable"):
+                reportctl.run_command(["hermes"])
+        with mock.patch.object(
+            reportctl_runtime.subprocess, "run", side_effect=subprocess.TimeoutExpired("hermes", 30)
+        ):
+            with self.assertRaisesRegex(reportctl.ConfigError, "timed out"):
+                reportctl.run_command(["hermes"])
 
 
 if __name__ == "__main__":

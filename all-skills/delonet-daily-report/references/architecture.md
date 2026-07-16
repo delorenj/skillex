@@ -32,9 +32,10 @@ Resolve `artifact_dir` and `archive_dir` from the operator-owned config:
 <artifact_dir>/<YYYY-MM-DD>/run-manifest.json
 <archive_dir>/<YYYY>/<MM>/<YYYY-MM-DD>.md
 <archive_dir>/<YYYY>/<MM>/<YYYY-MM-DD>.report.json
+<archive_dir>/<YYYY>/<MM>/<YYYY-MM-DD>.committed.json
 ```
 
-Write producer artifacts atomically. A partially written artifact is invalid, never best effort.
+Treat an archive pair as published only when its `.committed.json` marker exists. `reportctl archive` serializes each date with a lock, stages and fsyncs both files, renames them, fsyncs the directory, then writes the marker; readers must ignore unmarked pairs.
 
 ## Contract ownership
 

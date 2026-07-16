@@ -46,7 +46,15 @@ def parse_iso(value: Any, where: str, date_only: bool = False) -> dt.date | dt.d
 
 
 def valid_url(value: Any) -> bool:
-    return isinstance(value, str) and bool(urlsplit(value).scheme and urlsplit(value).netloc)
+    if not isinstance(value, str):
+        return False
+    parsed = urlsplit(value)
+    return (
+        parsed.scheme == "https"
+        and bool(parsed.netloc)
+        and not parsed.username
+        and not parsed.password
+    )
 
 
 def validate_section_artifact(value: Any, topic_id: str | None = None) -> dict[str, Any]:
@@ -125,7 +133,9 @@ def validate_daily_report(value: Any, config: dict[str, Any]) -> dict[str, Any]:
     parse_iso(report["generated_at"], "generated_at")
     if not isinstance(report["sections"], list):
         raise ConfigError("DailyReport.sections must be an array")
-    expected, actual = [item["id"] for item in config["core_sections"]], []
+    active = [item["id"] for item in config["topics"] if item["enabled"]]
+    expected = [item["id"] for item in config["core_sections"]] + active
+    actual = []
     for index, section in enumerate(report["sections"]):
         section = strict_object(
             section,
@@ -140,8 +150,10 @@ def validate_daily_report(value: Any, config: dict[str, Any]) -> dict[str, Any]:
         ):
             raise ConfigError(f"sections[{index}] is invalid")
         actual.append(section["id"])
-    if actual[: len(expected)] != expected:
-        raise ConfigError("DailyReport sections do not begin with configured core_sections order")
+    if actual != expected or len(actual) != len(set(actual)):
+        raise ConfigError(
+            "DailyReport sections must exactly match core_sections then active topics"
+        )
     coverage = strict_object(
         report["coverage"], {"complete", "degraded"}, {"complete", "degraded"}, "coverage"
     )
@@ -150,4 +162,47 @@ def validate_daily_report(value: Any, config: dict[str, Any]) -> dict[str, Any]:
         for key in coverage
     ):
         raise ConfigError("DailyReport coverage arrays are invalid")
+    complete, degraded = coverage["complete"], coverage["degraded"]
+    if len(complete) != len(set(complete)) or len(degraded) != len(set(degraded)):
+        raise ConfigError("DailyReport coverage IDs must be unique")
+    if set(complete) & set(degraded) or set(complete) | set(degraded) != set(active):
+        raise ConfigError("DailyReport coverage must partition every active topic exactly once")
     return report
+
+
+def validate_run_manifest(value: Any, config: dict[str, Any]) -> dict[str, Any]:
+    required = {"schema_version", "run_id", "report_date", "started_at", "completed_at", "sections"}
+    manifest = strict_object(value, required, required, "RunManifest")
+    if manifest["schema_version"] != 1 or not nonempty(manifest["run_id"]):
+        raise ConfigError("RunManifest version/run_id is invalid")
+    parse_iso(manifest["report_date"], "report_date", True)
+    parse_iso(manifest["started_at"], "started_at")
+    parse_iso(manifest["completed_at"], "completed_at")
+    if not isinstance(manifest["sections"], list):
+        raise ConfigError("RunManifest.sections must be an array")
+    expected = [item["id"] for item in config["topics"] if item["enabled"]]
+    actual = []
+    for index, section in enumerate(manifest["sections"]):
+        section = strict_object(
+            section,
+            {"id", "status", "path"},
+            {"id", "status", "path", "reason"},
+            f"manifest.sections[{index}]",
+        )
+        if not nonempty(section["id"]) or section["status"] not in {
+            "complete",
+            "partial",
+            "missing",
+            "invalid",
+            "stale",
+            "failed",
+        }:
+            raise ConfigError(f"manifest.sections[{index}] is invalid")
+        if section["path"] is not None and not nonempty(section["path"]):
+            raise ConfigError(f"manifest.sections[{index}].path is invalid")
+        if "reason" in section and not nonempty(section["reason"]):
+            raise ConfigError(f"manifest.sections[{index}].reason is invalid")
+        actual.append(section["id"])
+    if actual != expected or len(actual) != len(set(actual)):
+        raise ConfigError("RunManifest must cover active topics exactly once in config order")
+    return manifest

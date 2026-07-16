@@ -32,8 +32,8 @@ Every mutation validates the full config and uses atomic replacement. Duplicate 
 
 ## Reconciliation
 
-Use `plan` first. Supply `--jobs snapshot.json` in automation/tests, where the snapshot is an array of `{id,name,schedule,prompt,enabled,deliver,workdir}` objects. Without it, `reportctl` reads `hermes cron list --all`; if the installed output cannot be parsed safely, export a JSON snapshot rather than guessing.
+Use `plan` first. Supply `--jobs snapshot.json` for read-only planning, where snapshots may be an array or native Hermes `{jobs:[...]}` with nested schedules. `reconcile --apply` rejects snapshots, takes a profile-scoped lock, refreshes `$HERMES_HOME/cron/jobs.json`, and only then computes mutations.
 
-The stable plan orders duplicate removals, stale removals, creates, edits, pauses, and resumes by job name and ID. `reconcile --apply` maps actions to `hermes cron create|edit|pause|resume|remove` and sets `HERMES_TIMEZONE=America/New_York` for every Hermes invocation. Re-running against resulting state must produce an empty plan.
+The stable plan orders duplicate removals, stale removals, creates, edits, pauses, and resumes by job name and ID. Managed jobs attach `delonet-daily-report` with `--skill`; apply preflight requires that skill under the active `$HERMES_HOME/skills`. Applying also requires the active profile’s `config.yaml` (or gateway environment) to declare `America/New_York`; Hermes bridges that profile setting into its DST-aware scheduler. `reportctl` refuses an unset or different observable timezone.
 
 Journalist prompts name the reporting window, sources, three investigator roles, exact section path, and contract. Aggregator prompts validate every expected section, mark stale/missing manifest entries, and archive JSON plus Markdown.

@@ -13,9 +13,10 @@
 1. Enumerate every configured core section and topic; never infer coverage from files on disk.
 2. Validate each `SectionArtifact` and its expected topic ID.
 3. Mark stale when `fresh_until` precedes aggregation time, the window is wrong, or the file belongs to another run date.
-4. Write `RunManifest` with an entry for each expected section, including missing, invalid, stale, partial, and complete states.
+4. Write and runtime-validate `RunManifest` with one entry per active topic; paused topics are intentionally excluded.
 5. Compose in default core section order, then configured topic order.
-6. Render Markdown and structured `DailyReport`; archive both atomically with `reportctl archive --report REPORT.json --markdown REPORT.md`.
+6. Put required core sections first in configured order, followed by each active topic exactly once. Partition every active topic into disjoint `coverage.complete` or `coverage.degraded`; exclude paused topics.
+7. Render Markdown and structured `DailyReport`; publish the pair transactionally with `reportctl archive --report REPORT.json --markdown REPORT.md` and require its commit marker when reading.
 
 ## Editorial rules
 
