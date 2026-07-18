@@ -1,0 +1,9 @@
+[pack]
+name = "hindsight-maintenance"
+version = "0.1.0"
+description = "Scheduled upkeep for the self-hosted Hindsight memory system — tune-up (health/dead-job reaping), optimization (prune/consolidate/pollinate/synthesize), and nightly Karpathy memory-wiki."
+
+[freeform]
+skills = [
+  "hindsight-maintenance",
+]
