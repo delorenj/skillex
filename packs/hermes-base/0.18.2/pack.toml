@@ -1,0 +1,57 @@
+[pack]
+name = "hermes-base"
+version = "0.18.2"
+description = "Version-pinned, read-only base skill set harvested from hermes-agent 0.18.2 (~/.hermes/hermes-agent/skills). Shared by every Hermes PM runtime via config.yaml skills.external_dirs. The local runtime skills/ dir is the writable OVERLAY and WINS on name collision."
+
+# Provenance of this snapshot — verify the pack matches upstream before pinning.
+[source]
+upstream        = "hermes-agent"
+upstream_version = "0.18.2"                  # pyproject version at harvest
+upstream_git    = "e5afc0d93"                # git describe: v2026.7.7.2-1222-ge5afc0d93
+harvested_from  = "/home/delorenj/.hermes/hermes-agent/skills"
+excluded        = ["index-cache"]            # runtime cache artifact (lobehub_index.json etc.), NOT a skill
+
+# The 18 pristine upstream skills this pack ships. Each is a directory with a
+# SKILL.md at its root (+ references/, assets/, scripts/ as applicable).
+# Referenced directly by version dir in config.yaml, mirroring the bmad/6.10.2 pin.
+[freeform]
+skills = [
+  "apple",
+  "autonomous-ai-agents",
+  "computer-use",
+  "creative",
+  "data-science",
+  "dogfood",
+  "email",
+  "github",
+  "hermes-desktop-plugins",
+  "media",
+  "mlops",
+  "note-taking",
+  "productivity",
+  "research",
+  "smart-home",
+  "social-media",
+  "software-development",
+  "yuanbao",
+]
+
+# Skills that are byte-identical shared additions across every agent that has
+# them but are NOT yet upstream. Staged for promotion into 0.18.2+build.1 after
+# curator review. Kept out of `skills` until blessed so the base stays a
+# verifiable mirror of upstream.
+[promote_candidates]
+skills = [
+  "diagramming",
+  "domain",
+  "gaming",
+  "gifs",
+  "inference-sh",
+  "mcp",          # voxxy/skillex identical; 33god carries a variant to reconcile first
+  "red-teaming",
+]
+
+# Collision policy consumed by the curator guard.
+[policy]
+overlay_wins = true          # local runtime skills/<name> shadows pack/<name>
+base_readonly = true         # pack dirs must never be edited in place by an agent
