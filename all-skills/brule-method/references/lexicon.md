@@ -1,3 +1,6 @@
+---
+pipeline-status: new
+---
 # The Grubbs Lexicon: Phonetic Distortion Rules
 
 How Dr. Grubbs talks. The impediment follows rules — it's a system, not random typos. Random typos read as errors; systematic distortion reads as a person.

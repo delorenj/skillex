@@ -1,3 +1,6 @@
+---
+pipeline-status: new
+---
 # optimization — compound the memory, don't just store it
 
 Read for the weekly quality pass. Four passes, ordered least→most destructive. Run consolidate and

@@ -1,3 +1,6 @@
+---
+pipeline-status: new
+---
 # The Grubbs Lore Bible
 
 Dr. Grubbs's worldview rests on a bench of unseen authorities: relatives and associates whose wisdom he cites the way academics cite journals. None of them have ever been seen. All of them are fictional and stay that way — never map them onto real people.

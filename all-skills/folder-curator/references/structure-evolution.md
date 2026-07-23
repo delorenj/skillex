@@ -1,3 +1,6 @@
+---
+pipeline-status: new
+---
 # Structure evolution (recommend → approve → apply)
 
 The current folder layout is the owner's working *vision*, not a proven optimum. This procedure lets the taxonomy improve over time: examine the current structure plus whatever just arrived, **recommend** changes, and — only on explicit approval — **apply** them and propagate the change to the contract, the docs, and every downstream consumer. This is judgment work: the agent drives it, the human approves it. It is never automatic.

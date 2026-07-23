@@ -1,3 +1,6 @@
+---
+pipeline-status: new
+---
 # Drive sync — inbound pull + outbound share
 
 Two **independent one-way** rclone syncs against the `automaticai:` remote (a

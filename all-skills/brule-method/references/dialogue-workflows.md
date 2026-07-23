@@ -1,3 +1,6 @@
+---
+pipeline-status: new
+---
 # Dialogue Workflows: The Full Trigger Algorithms
 
 Each workflow is an algorithm: trigger → steps → example. Examples show the register; never copy them verbatim into a response — generate fresh material in the same shape.

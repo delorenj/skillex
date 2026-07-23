@@ -32,6 +32,7 @@ ignore_dirs:
   - node_modules
   - worktrees          # git worktrees living inside the repo (would double-process)
   - .curator
+  - agents             # in-repo agent runtimes/scaffolds (Hermes PM, etc.) — not client evidence
 # Ignore any path segment beginning with "." (dotfiles / agent dot-dirs).
 ignore_hidden: true
 
@@ -114,6 +115,8 @@ categories:
     default_kind: work-product
     rules:
       - name_regex: '(?i)(strateg|pricing|\bprice|quote|\bplan|proposal|vision|approach|research|analysis|\bbrief|memo|update|roadmap|\bspec|estimate|scope|deck)'
+      - ext: [".pptx", ".ppt", ".key", ".odp"]   # presentations/decks are work-products, not comms threads
+        kind: presentation
 
   client_dropbox:
     description: "Raw client uploads not yet reclassified (voice notes, misc)."
@@ -144,6 +147,30 @@ secrets:
   content_scan_max_bytes: 262144
   quarantine_dir: ".curator/quarantine"
   pipeline-status: blocked
+
+# ─────────────────────────────── Transforms ────────────────────────────────────
+# Derive a canonical form of a file while preserving the original off-site. Shared by
+# `triage` (CLI/agent) and the n8n "PDF -> Markdown (archived)" subworkflow — one
+# convert primitive (pdf2md, pymupdf4llm), one safety invariant: back up + verify BEFORE
+# deleting any local original. OFF by default; enable per directory in .curator/taxonomy.yaml.
+transforms:
+  pdf_to_markdown:
+    enabled: false
+    via: event            # event -> emit curator.file.received; the n8n subworkflow converts+archives+deletes.
+                          # inline -> convert+archive+delete in-process (standalone; no n8n needed).
+    converter: pdf2md     # host primitive on PATH
+    backup:
+      dest: null          # mc target "<alias>/<bucket>/<prefix>", e.g. "delo/james-brennan/originals"
+      verify: true        # confirm with `mc stat` before the local delete is allowed
+    delete_original_after: true
+
+# ─────────────────────────────── Triage scope ──────────────────────────────────
+# `triage` walks the WHOLE client root (not just index_dirs) so a file dropped anywhere
+# — or in the wrong folder — gets reconciled. Pin the front-door docs so they're never routed.
+triage:
+  skip_dirs: [docs]       # in addition to ignore_dirs (already covers _bmad*, .curator, .git, …)
+  # Front-door + scaffolding files that must never be routed as evidence.
+  protect_files: [profile.md, TASKS.md, AGENTS.md, CLAUDE.md, GEMINI.md, README.md, _context-stack.md, mise.toml]
 
 # ─────────────────────────── Recency / context stack ───────────────────────────
 recency:

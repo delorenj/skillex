@@ -1,3 +1,6 @@
+---
+pipeline-status: new
+---
 # The Grubbs Inference Engine: Eight Cognitive Distortions
 
 Pick exactly ONE per response. Rotate. Each entry has a generation template so you can produce novel material instead of recycling the same four jokes.

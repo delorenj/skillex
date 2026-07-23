@@ -13,6 +13,8 @@ Subcommands
   apply <file>     Execute the plan (move + rename + enrich); idempotent via the ledger.
   reindex          Regenerate <root>/_context-stack.md and restore mtimes from `updated`.
   normalize        Bring existing category files into canonical name + frontmatter (--dry-run default).
+  triage           Recursively reconcile the whole tree: relocate misfiled files, rename, enrich, and
+                   run transforms (e.g. PDF->markdown + S3 archive). --apply to write; dry-run default.
 
 Contract resolution: assets/taxonomy.default.yaml (resolved from this script's realpath),
 deep-merged with <client-root>/.curator/taxonomy.yaml when present.
@@ -24,8 +26,10 @@ import hashlib
 import json
 import os
 import re
+import shutil
+import subprocess
 import sys
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from pathlib import Path
 
 import yaml
@@ -76,6 +80,13 @@ def read_frontmatter(path: Path):
         fm = yaml.safe_load(m.group(1)) or {}
     except yaml.YAMLError:
         fm = {}
+    if isinstance(fm, dict):
+        # Formatters may unquote ISO dates, which YAML then parses into
+        # date/datetime objects; downstream slicing expects strings.
+        fm = {
+            k: (v.isoformat() if isinstance(v, date) else v)
+            for k, v in fm.items()
+        }
     return (fm if isinstance(fm, dict) else {}), m.group(2)
 
 
@@ -342,6 +353,17 @@ def build_frontmatter(path, fm, body, category, kind, dt, contract, *, bump_upda
             out[k] = v.date().isoformat()
         elif isinstance(v, date):
             out[k] = v.isoformat()
+    # Catch-all: any OTHER frontmatter key PyYAML auto-parsed into a date/datetime
+    # (arbitrary fields not declared in datetime_keys/date_only_keys, e.g.
+    # `interview_date:`, `start:`) must be canonicalized to a string here — otherwise
+    # it stays a date object and blows up every json.dumps boundary (CLI plan/apply/
+    # triage, HTTP serve, bloodbank emit) with "Object of type date is not JSON
+    # serializable". datetime is a subclass of date, so test datetime first.
+    for k, v in list(out.items()):
+        if isinstance(v, datetime):
+            out[k] = v.isoformat(timespec="seconds")
+        elif isinstance(v, date):
+            out[k] = v.isoformat()
     return out
 
 
@@ -470,11 +492,14 @@ def set_mtime(path: Path, updated):
 # ─────────────────────────────── apply ─────────────────────────────────────────
 
 
-def do_apply(path: Path, client_root: Path, contract: dict) -> dict:
+def do_apply(path: Path, client_root: Path, contract: dict, *, reconcile: bool = False) -> dict:
     plan = make_plan(path, client_root, contract)
     ledger = load_ledger(client_root, contract)
     chash = content_hash(path)
-    if chash in ledger and ledger[chash].get("status") == "done":
+    # The content-hash short-circuit keeps the intake/event path idempotent (never process the
+    # same bytes twice). `triage` sets reconcile=True so a file you MOVED by hand (same bytes,
+    # wrong folder) still gets relocated — it only ever calls apply on non-"keep" plans.
+    if not reconcile and chash in ledger and ledger[chash].get("status") == "done":
         plan["action"] = "skip"
         plan["note"] = "already in ledger"
         return plan
@@ -571,10 +596,16 @@ def do_reindex(client_root: Path, contract: dict) -> int:
     records = [file_record(p, client_root, contract, ledger) for p in iter_content_files(client_root, contract)]
 
     def sort_key(r):
+        # Always return a timezone-AWARE datetime. A single naive value (e.g. a date-only
+        # `updated: 2026-07-18`) must never make the sort throw and take the whole pipeline
+        # down — coerce naive -> UTC, and sink unparseable values to an aware minimum.
         try:
-            return datetime.fromisoformat(r["updated"].replace("Z", "+00:00"))
-        except (ValueError, AttributeError):
-            return datetime.min
+            dt = datetime.fromisoformat(str(r["updated"]).replace("Z", "+00:00"))
+        except (ValueError, AttributeError, TypeError):
+            return datetime.min.replace(tzinfo=timezone.utc)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt
     records.sort(key=sort_key, reverse=True)
 
     if rec.get("restore_mtime"):
@@ -687,7 +718,7 @@ def do_serve(host: str, port: int) -> None:
 
     class Handler(BaseHTTPRequestHandler):
         def _send(self, code, obj):
-            body = json.dumps(obj, ensure_ascii=False).encode("utf-8")
+            body = json.dumps(obj, ensure_ascii=False, default=str).encode("utf-8")
             self.send_response(code)
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(body)))
@@ -751,6 +782,205 @@ def do_export(client_root: Path, contract: dict, audience: str, to: Path) -> int
     return n
 
 
+# ─────────────────────────── transforms & triage ───────────────────────────────
+# `triage` is the recursive reconcile driver: walk the tree, and for every file that
+# isn't already correctly filed (make_plan action != "keep"), route/rename/enrich it —
+# fixing anything you dropped in the wrong folder by hand. Correctly-filed files are
+# skipped whether or not you've edited them ("ignore edits"). PDFs additionally run the
+# pdf_to_markdown transform, whose convert+archive+delete lives once and is shared with
+# the n8n subworkflow (safety invariant: back up + verify BEFORE any local delete).
+
+
+def _bin(name: str) -> str:
+    """Resolve a host CLI, falling back to ~/.local/bin (minimal-PATH callers)."""
+    return shutil.which(name) or str(Path.home() / ".local" / "bin" / name)
+
+
+def emit_event(event_type: str, data: dict) -> bool:
+    """Fire a Bloodbank event via bb-emit (NATS-direct). Best-effort; never raises."""
+    try:
+        r = subprocess.run([_bin("bb-emit"), "--type", event_type, "--source", "folder-curator"],
+                           input=json.dumps(data, default=str), text=True, capture_output=True, timeout=20)
+        return r.returncode == 0
+    except (OSError, subprocess.SubprocessError, TypeError, ValueError):
+        return False
+
+
+def s3_archive(src: Path, dest_spec: str, verify: bool) -> bool:
+    """`mc cp` src to <alias/bucket/prefix>/<name>, then confirm with `mc stat`.
+    Returns True ONLY on a verified REMOTE upload — the gate for deleting a local original.
+
+    Guards mc's dangerous footgun: an UNKNOWN alias is silently treated as a local path, so a
+    misconfigured dest would `cp` locally and `stat` would "verify" that local file — greenlighting
+    a delete with no real backup. We therefore require the first path segment to be a configured
+    mc alias before trusting any cp/stat."""
+    mc = _bin("mc")
+    alias = dest_spec.split("/", 1)[0]
+    try:
+        a = subprocess.run([mc, "alias", "ls", alias], capture_output=True, text=True, timeout=30)
+        if a.returncode != 0:
+            return False  # not a real remote — refuse (never fall back to a local copy)
+        key = f"{dest_spec.rstrip('/')}/{src.name}"
+        r = subprocess.run([mc, "cp", "--quiet", str(src), key], capture_output=True, text=True, timeout=300)
+        if r.returncode != 0:
+            return False
+        if verify:
+            v = subprocess.run([mc, "stat", key], capture_output=True, text=True, timeout=60)
+            return v.returncode == 0
+        return True
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
+def convert_pdf(path: Path) -> str | None:
+    """Convert a PDF to markdown via the pdf2md primitive. None on failure."""
+    try:
+        r = subprocess.run([_bin("pdf2md"), str(path)], capture_output=True, text=True, timeout=600)
+        return r.stdout if r.returncode == 0 else None
+    except (OSError, subprocess.SubprocessError):
+        return None
+
+
+def _git_tracked_files(root: Path):
+    """Files git would consider: tracked + untracked, MINUS .gitignore. None if not a git repo.
+    This is what keeps triage out of generated trees (runtime/, .curator/, node_modules/, …)
+    without having to enumerate them — the repo's own .gitignore is the source of truth."""
+    try:
+        r = subprocess.run(
+            ["git", "-C", str(root), "ls-files", "--cached", "--others", "--exclude-standard", "-z"],
+            capture_output=True, text=True, timeout=60)
+        if r.returncode != 0:
+            return None
+        return [root / p for p in r.stdout.split("\0") if p]
+    except (OSError, subprocess.SubprocessError):
+        return None
+
+
+def iter_triage_files(client_root: Path, contract: dict):
+    """Yield candidate files under client_root. In a git repo, start from what git tracks
+    (honoring .gitignore), then prune ignored/hidden dirs, generated files, sidecars, and
+    protected front-door files (profile.md, AGENTS.md, …). Falls back to os.walk otherwise."""
+    tconf = contract.get("triage", {})
+    ignore_dirs = set(contract.get("ignore_dirs", [])) | set(tconf.get("skip_dirs", []))
+    ignore_hidden = contract.get("ignore_hidden", True)
+    protect = set(tconf.get("protect_files", []))
+    generated = set(contract.get("generated_files", []))
+    sidecars = contract.get("sidecar_suffixes", [])
+
+    def keep(p: Path) -> bool:
+        rel = p.relative_to(client_root)
+        if any(seg in ignore_dirs for seg in rel.parts):
+            return False
+        if ignore_hidden and any(seg.startswith(".") for seg in rel.parts):
+            return False
+        if p.name in protect or p.name in generated or is_sidecar(p, sidecars):
+            return False
+        return p.is_file()
+
+    tracked = _git_tracked_files(client_root)
+    if tracked is not None:
+        for p in sorted(tracked):
+            if keep(p):
+                yield p
+        return
+    for dirpath, dirnames, filenames in os.walk(client_root):
+        dirnames[:] = [d for d in dirnames if d not in ignore_dirs and not (ignore_hidden and d.startswith("."))]
+        for fn in sorted(filenames):
+            p = Path(dirpath) / fn
+            if keep(p):
+                yield p
+
+
+def transform_pdf(path: Path, client_root: Path, contract: dict, tconf: dict, via: str, apply: bool) -> dict:
+    """Handle a PDF per the pdf_to_markdown contract. `via=event` delegates to the n8n
+    subworkflow (emit curator.file.received); `via=inline` converts+archives+deletes here."""
+    rel = str(path.relative_to(client_root))
+    if via == "event":
+        entry = {"file": rel, "action": "pdf->md (delegate to n8n)", "status": "planned"}
+        if apply:
+            ok = emit_event("bloodbank.v1.curator.file.received", {
+                "file": str(path.resolve()), "client_root": str(client_root),
+                "content_type": "application/pdf", "transform": "pdf_to_markdown"})
+            entry["status"] = "emitted" if ok else "emit-failed"
+        return entry
+
+    # inline: convert -> archive+verify -> route md -> delete original (strict order)
+    backup = tconf.get("backup", {})
+    dest_spec = backup.get("dest")
+    verify = backup.get("verify", True)
+    delete_after = tconf.get("delete_original_after", True)
+    entry = {"file": rel, "action": "pdf->md (inline)",
+             "archive_to": f"{dest_spec}/{path.name}" if dest_spec else None,
+             "delete_local": delete_after, "status": "planned"}
+    if not apply:
+        return entry
+    md = convert_pdf(path)
+    if md is None:
+        entry["status"] = "failed"; entry["error"] = "conversion failed"
+        emit_event("bloodbank.v1.curator.file.failed", {"file": rel, "stage": "convert"})
+        return entry
+    if not dest_spec or not s3_archive(path, dest_spec, verify):
+        entry["status"] = "failed"; entry["error"] = "s3 archive/verify failed — original kept"
+        emit_event("bloodbank.v1.curator.file.failed", {"file": rel, "stage": "archive"})
+        return entry
+    md_path = path.with_suffix(".md")
+    if md_path.exists():
+        md_path = path.with_name(path.stem + "-converted.md")
+    md_path.write_text(md, encoding="utf-8")
+    plan = do_apply(md_path, client_root, contract, reconcile=True)
+    if delete_after:
+        path.unlink()
+    entry.update(status="done", markdown=plan.get("destination"), deleted_local=delete_after)
+    emit_event("bloodbank.v1.curator.file.routed", {
+        "file": rel, "destination": plan.get("destination"), "kind": plan.get("kind"),
+        "transformed_from": "pdf", "archived": f"{dest_spec}/{path.name}"})
+    return entry
+
+
+def do_triage(client_root: Path, contract: dict, apply: bool, via_override: str | None = None) -> dict:
+    tconf = contract.get("triage", {})
+    pdf_conf = contract.get("transforms", {}).get("pdf_to_markdown", {})
+    pdf_enabled = bool(pdf_conf.get("enabled", False))
+    via = via_override or pdf_conf.get("via", "event")
+    results = []
+    touched = False
+    for path in iter_triage_files(client_root, contract):
+        if path.suffix.lower() == ".pdf" and pdf_enabled:
+            results.append(transform_pdf(path, client_root, contract, pdf_conf, via, apply))
+            touched = touched or apply
+            continue
+        plan = make_plan(path, client_root, contract)
+        act = plan["action"]
+        if act == "keep":
+            continue  # already correctly filed — leave it (ignores content edits)
+        # Secrets always act (high confidence, non-negotiable guardrail).
+        if act == "quarantine":
+            results.append({"file": plan["source"], "action": "quarantine",
+                            "destination": plan.get("destination"), "reason": plan.get("reason")})
+            if apply:
+                do_apply(path, client_root, contract, reconcile=True)
+                touched = True
+            continue
+        # act == "route": relocate/rename/enrich ONLY on a confident match. A low-confidence
+        # plan means no rule matched — reconcile must NOT yank a file you placed deliberately
+        # into the review queue. Flag it and leave it exactly where it is.
+        if plan.get("confidence") == "low":
+            results.append({"file": plan["source"], "action": "review (left in place)",
+                            "would_have_suggested": plan.get("destination"), "confidence": "low"})
+            continue
+        results.append({"file": plan["source"], "action": "route",
+                        "destination": plan.get("destination"), "category": plan.get("category"),
+                        "confidence": plan.get("confidence")})
+        if apply:
+            do_apply(path, client_root, contract, reconcile=True)
+            touched = True
+    if apply and touched:
+        do_reindex(client_root, contract)
+    return {"mode": "apply" if apply else "dry-run",
+            "transform_via": via if pdf_enabled else None,
+            "count": len(results), "changes": results}
+
+
 # ─────────────────────────────── cli ───────────────────────────────────────────
 
 
@@ -770,6 +1000,9 @@ def main(argv=None):
     sub.add_parser("reindex", help="regenerate _context-stack.md + restore mtimes")
     n = sub.add_parser("normalize", help="migrate existing files to canonical name+frontmatter")
     n.add_argument("--apply", action="store_true", help="write changes (default: dry-run)")
+    tr = sub.add_parser("triage", help="recursively reconcile the tree: route misfiles, rename, enrich, run transforms")
+    tr.add_argument("--apply", action="store_true", help="write changes (default: dry-run)")
+    tr.add_argument("--via", choices=["event", "inline"], help="override the PDF transform mode for this run")
     s = sub.add_parser("serve", help="run the HTTP engine service (for the n8n custom node)")
     s.add_argument("--host", default="127.0.0.1")
     s.add_argument("--port", type=int, default=8787)
@@ -784,15 +1017,17 @@ def main(argv=None):
     contract = load_contract(root)
 
     if args.cmd == "plan":
-        print(json.dumps(make_plan(Path(args.file).resolve(), root, contract), indent=2, ensure_ascii=False))
+        print(json.dumps(make_plan(Path(args.file).resolve(), root, contract), indent=2, ensure_ascii=False, default=str))
     elif args.cmd == "apply":
-        print(json.dumps(do_apply(Path(args.file).resolve(), root, contract), indent=2, ensure_ascii=False))
+        print(json.dumps(do_apply(Path(args.file).resolve(), root, contract), indent=2, ensure_ascii=False, default=str))
     elif args.cmd == "reindex":
         n = do_reindex(root, contract)
         print(f"reindexed {n} files -> {contract['recency']['index_file']}")
     elif args.cmd == "normalize":
         changes = do_normalize(root, contract, args.apply)
-        print(json.dumps({"mode": "apply" if args.apply else "dry-run", "count": len(changes), "changes": changes}, indent=2, ensure_ascii=False))
+        print(json.dumps({"mode": "apply" if args.apply else "dry-run", "count": len(changes), "changes": changes}, indent=2, ensure_ascii=False, default=str))
+    elif args.cmd == "triage":
+        print(json.dumps(do_triage(root, contract, args.apply, args.via), indent=2, ensure_ascii=False, default=str))
     elif args.cmd == "export":
         n = do_export(root, contract, args.audience, Path(args.to).resolve())
         print(json.dumps({"exported": n, "audience": args.audience, "to": args.to}))

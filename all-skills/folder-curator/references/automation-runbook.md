@@ -1,3 +1,6 @@
+---
+pipeline-status: new
+---
 # Automation runbook — the hands-off curation pipeline
 
 Wire the hands-off path: a file lands in a curated directory → it's announced on Bloodbank →

@@ -2,6 +2,7 @@
 name: agent-config-fanout
 description: |
   Keep one hand-edited master config and generate per-agent CLI configs from it. Covers SSOT fan-out for agent hooks and skills: master-to-dialect propagation, ambiguity lock files, drift checks, and the Bloodbank services/agent-hooks reference implementation. Use for hooks.master.json, hooks.mappings.lock.json, generated-config drift, fan-out, SSOT, agent hooks, defer_to_global, .agents/local.json, sync.py, project-scoped hooks, skill fan-out, and new agent CLI dialects. Do NOT use for using pjangler to create projects or adoption checklists (33god-projects), event schemas or Bloodbank topology (bloodbank-integration), versioning (mise-versioning), or single-target config.
+pipeline-status: new
 ---
 
 # Agent Config Fan-out

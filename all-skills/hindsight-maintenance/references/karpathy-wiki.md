@@ -1,3 +1,6 @@
+---
+pipeline-status: new
+---
 # karpathy-wiki — nightly memory → compounding wiki
 
 Read for the nightly job that compiles newly-retained memories into a Karpathy LLM wiki, so the

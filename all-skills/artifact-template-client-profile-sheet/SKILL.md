@@ -1,6 +1,7 @@
 ---
 name: artifact-template-client-profile-sheet
-description: "Create a document using the Client Profile Sheet template and its retained reference file. Use when the user selects this template, names Client Profile Sheet, or explicitly invokes $artifact-template-client-profile-sheet. Create an evidence-first prospect or client profile with qualification, source confidence, systems, stakeholders, opportunity boundaries, risks, next actions, and engagement history."
+description: Create a document using the Client Profile Sheet template and its retained reference file. Use when the user selects this template, names Client Profile Sheet, or explicitly invokes $artifact-template-client-profile-sheet. Create an evidence-first prospect or client profile with qualification, source confidence, systems, stakeholders, opportunity boundaries, risks, next actions, and engagement history.
+pipeline-status: new
 ---
 
 # Client Profile Sheet

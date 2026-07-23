@@ -1,6 +1,7 @@
 ---
 name: folder-curator
 description: Curate any watched directory with a purpose-bound ruleset — classify, rename (datetime prefix), enrich (YAML frontmatter), and route each incoming file to its home; keep a cross-medium recency/context stack (newest on top); and evolve the ruleset itself. Driven by a per-directory contract (.curator/taxonomy.yaml) declaring the directory's purpose and categories; ships with an Automatic AI client/prospect profile (threads/, workshop/, client_dropbox/). Use when a file lands in a curated or watched directory and needs naming, frontmatter, or placement; to organize, file, sort, triage, or curate documents, transcripts, emails, voice notes, or work products; to normalize filenames/frontmatter; to regenerate the context stack (_context-stack.md); to quarantine an uploaded credential; or to propose and apply a taxonomy change. Do NOT use to author the n8n workflow or node (use delonet-n8n-architecture), define Bloodbank schemas (bloodbank-integration), or for BMAD artifacts under _bmad-output/.
+pipeline-status: new
 ---
 
 # Folder Curator
@@ -49,6 +50,26 @@ To migrate a repo's existing files to the standard in one pass, dry-run first, t
 folder-curator --client-root . normalize            # dry-run: prints the rename+enrich plan
 folder-curator --client-root . normalize --apply    # writes it
 ```
+
+### Triage — recursively reconcile the whole tree
+
+`triage` walks the entire directory (git-aware: it honors `.gitignore`, so generated trees like `runtime/`, `.curator/`, `node_modules/` are never touched) and reconciles everything at once — relocating files you dropped in the wrong folder, renaming to canonical form, enriching, and quarantining secrets. **Always dry-run first.**
+
+```bash
+folder-curator --client-root . triage            # dry-run: what it WOULD do
+folder-curator --client-root . triage --apply    # execute
+```
+
+Two safety rules keep it conservative: it only **relocates on a confident (medium+) match** — a low-confidence file is flagged `review (left in place)` and never yanked into the ingest folder — and it skips `triage.protect_files` (`profile.md`, `AGENTS.md`, `mise.toml`, …). Files already correctly filed return `keep` and are untouched **even if you've edited their contents** (edits ≠ re-triage).
+
+### Transforms — PDF → Markdown, original archived to S3
+
+When the contract enables `transforms.pdf_to_markdown`, `triage` derives a markdown copy of each PDF (via the `pdf2md` primitive, pymupdf4llm) and preserves the original off-site. The invariant is **back up + verify, THEN delete the local original** — never the reverse; a failed/unverified backup keeps the PDF and emits `curator.file.failed`. Two modes (`via`):
+
+- `event` (default) — emit `curator.file.received`; the n8n "PDF → Markdown (archived)" subworkflow does convert + S3 put + verify + delete as visible canvas topology.
+- `inline` — do it in-process (standalone, no n8n). Requires a valid `mc` alias in `backup.dest` (an unknown alias is refused — mc would otherwise silently copy locally and greenlight a bad delete).
+
+Enable per directory in `.curator/taxonomy.yaml`; it ships **off**.
 
 ## Point it at a new directory
 

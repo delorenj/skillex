@@ -1,3 +1,6 @@
+---
+pipeline-status: new
+---
 # tune-up — "check the brakes"
 
 Read before any health/cleanup run (nightly first step, or reactively when the queue looks stuck).

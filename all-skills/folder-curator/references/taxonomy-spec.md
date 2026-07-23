@@ -1,3 +1,6 @@
+---
+pipeline-status: new
+---
 # Taxonomy spec
 
 The exhaustive rules the CLI interprets. All of this is data in `assets/taxonomy.default.yaml` (the shipped **default profile** — Automatic AI client folders); a per-directory `<dir>/.curator/taxonomy.yaml` deep-merges over it, so a new directory only declares what differs. Edit the contract, not the code — and when a rule needs to change structurally, use [structure-evolution.md](./structure-evolution.md).

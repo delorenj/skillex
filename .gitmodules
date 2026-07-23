@@ -1,9 +1,3 @@
 [submodule "all-skills"]
 	path = all-skills
 	url = git@github.com:delorenj/skills.git
-[submodule "packs/google-agent-skills"]
-	path = packs/google-agent-skills
-	url = git@github.com:delorenj/google-agent-skills.git
-[submodule "packs/n8n-skills"]
-	path = packs/n8n-skills
-	url = https://github.com/czlonkowski/n8n-skills.git

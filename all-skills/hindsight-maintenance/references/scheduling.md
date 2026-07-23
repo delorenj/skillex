@@ -1,3 +1,6 @@
+---
+pipeline-status: new
+---
 # scheduling — nightly / weekly / reactive
 
 Read when wiring the cadences to run unattended. Two execution tiers:

@@ -1,3 +1,6 @@
+---
+pipeline-status: new
+---
 # CLI & SQL reference
 
 The verified command and query surface the maintenance workflows call. Read this when you need

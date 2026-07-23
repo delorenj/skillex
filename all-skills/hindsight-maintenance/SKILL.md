@@ -1,18 +1,8 @@
 ---
 name: hindsight-maintenance
-description: >
-  Keep the self-hosted Hindsight memory system healthy across all banks on a schedule.
-  Runs three families of upkeep workflows — tune-up (system health: reap orphaned/stuck
-  async jobs, repair missing public.* maintenance functions, clear failed operations,
-  flag per-bank anomalies), optimization (prune stale/low-value memories, trigger
-  consolidation, cross-bank pollination, novel synthesis of emergent insights), and
-  karpathy-wiki (nightly compile of newly-retained memories into a Karpathy LLM wiki).
-  Use when scheduling or running Hindsight memory upkeep — "nightly/weekly memory
-  maintenance", "prune memory", "consolidate banks", "memory wiki", "hindsight health
-  check", "dead/stuck jobs", "reap orphans", "queue is stuck", "cross-bank synthesis",
-  or wiring cron/systemd timers for memory maintenance. Do NOT use for one-off
-  recall/retain during normal work (use the hindsight skill), for infra-level debugging
-  of the Hindsight container/host (use server-maintenance), or for non-Hindsight datastores.
+description: |
+  Keep the self-hosted Hindsight memory system healthy across all banks on a schedule. Runs three families of upkeep workflows — tune-up (system health: reap orphaned/stuck async jobs, repair missing public.* maintenance functions, clear failed operations, flag per-bank anomalies), optimization (prune stale/low-value memories, trigger consolidation, cross-bank pollination, novel synthesis of emergent insights), and karpathy-wiki (nightly compile of newly-retained memories into a Karpathy LLM wiki). Use when scheduling or running Hindsight memory upkeep — "nightly/weekly memory maintenance", "prune memory", "consolidate banks", "memory wiki", "hindsight health check", "dead/stuck jobs", "reap orphans", "queue is stuck", "cross-bank synthesis", or wiring cron/systemd timers for memory maintenance. Do NOT use for one-off recall/retain during normal work (use the hindsight skill), for infra-level debugging of the Hindsight container/host (use server-maintenance), or for non-Hindsight datastores.
+pipeline-status: new
 ---
 
 # Hindsight Maintenance
