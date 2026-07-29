@@ -1,0 +1,6 @@
+{
+  "$schema": "https://raw.githubusercontent.com/skillex/schemas/main/skills.schema.json",
+  "inherit_global": true,
+  "registry": "https://github.com/delorenj/skillex.git",
+  "skills": []
+}
