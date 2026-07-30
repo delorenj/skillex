@@ -1,0 +1,6 @@
+# Provenance for this skill. Managed by skill_ssot.py.
+origin:
+  type: adhoc
+  extracted_at: 2026-07-29T14:39:52+00:00
+  rescued_from: "/home/delorenj/code/skillex/skill-sets/global/pjangler-parity-rules"
+modified_locally: false
