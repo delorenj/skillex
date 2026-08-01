@@ -92,3 +92,95 @@ def test_rejects_skill_set_drift(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="differs from manifest"):
         build_bmad_pack.validate_source(source, "6.10.1-next.31")
+
+
+def test_rejects_unauthenticated_empty_directory(tmp_path: Path) -> None:
+    source = source_fixture(tmp_path)
+    (source / ".agent" / "skills" / "bmad-one" / "empty").mkdir()
+
+    with pytest.raises(ValueError, match="empty directories"):
+        build_bmad_pack.build_or_check(source, tmp_path / "skillex", "6.10.1-next.31", check=False)
+
+
+def test_rejects_source_mutation_during_copy(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = source_fixture(tmp_path)
+    repo = tmp_path / "skillex"
+    source_skill = source / ".agent" / "skills" / "bmad-one" / "SKILL.md"
+    original_copy2 = build_bmad_pack.shutil.copy2
+    mutated = False
+
+    def mutating_copy(source_path: Path, target_path: Path, **kwargs: object) -> Path:
+        nonlocal mutated
+        if Path(source_path) == source_skill and not mutated:
+            source_skill.write_text("mutated during copy\n", encoding="utf-8")
+            mutated = True
+        return original_copy2(source_path, target_path, **kwargs)
+
+    monkeypatch.setattr(build_bmad_pack.shutil, "copy2", mutating_copy)
+    with pytest.raises(ValueError, match="not path-and-hash attested"):
+        build_bmad_pack.build_or_check(source, repo, "6.10.1-next.31", check=False)
+    assert not (repo / "packs" / "bmad" / "6.10.1-next.31").exists()
+
+
+def test_rejects_symlink_substitution(tmp_path: Path) -> None:
+    source = source_fixture(tmp_path)
+    skill_file = source / ".agent" / "skills" / "bmad-one" / "SKILL.md"
+    real_file = source / "real-skill.md"
+    real_file.write_bytes(skill_file.read_bytes())
+    skill_file.unlink()
+    skill_file.symlink_to(real_file)
+
+    with pytest.raises(ValueError, match="regular files/directories"):
+        build_bmad_pack.build_or_check(source, tmp_path / "skillex", "6.10.1-next.31", check=False)
+
+
+def test_rejects_mode_mutation_during_copy(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    source = source_fixture(tmp_path)
+    source_skill = source / ".agent" / "skills" / "bmad-one" / "SKILL.md"
+    original_copy2 = build_bmad_pack.shutil.copy2
+    mutated = False
+
+    def mutating_copy(source_path: Path, target_path: Path, **kwargs: object) -> Path:
+        nonlocal mutated
+        if Path(source_path) == source_skill and not mutated:
+            source_skill.chmod(0o755)
+            mutated = True
+        return original_copy2(source_path, target_path, **kwargs)
+
+    monkeypatch.setattr(build_bmad_pack.shutil, "copy2", mutating_copy)
+    with pytest.raises(ValueError, match="mode changed while staging"):
+        build_bmad_pack.build_or_check(source, tmp_path / "skillex", "6.10.1-next.31", check=False)
+
+
+def test_compare_trees_detects_symlinks_and_mode_drift(tmp_path: Path) -> None:
+    expected = tmp_path / "expected"
+    actual = tmp_path / "actual"
+    expected.mkdir()
+    actual.mkdir()
+    expected_file = expected / "tool.py"
+    actual_file = actual / "tool.py"
+    expected_file.write_text("print('ok')\n", encoding="utf-8")
+    actual_file.write_text("print('ok')\n", encoding="utf-8")
+    expected_file.chmod(0o755)
+    actual_file.chmod(0o644)
+
+    assert build_bmad_pack.compare_trees(expected, actual) == ["mode differs: tool.py"]
+
+    actual_file.unlink()
+    actual_file.symlink_to(expected_file)
+    assert build_bmad_pack.compare_trees(expected, actual) == ["type differs: tool.py"]
+
+
+def test_tree_manifest_excludes_only_root_checksum_file(tmp_path: Path) -> None:
+    root = tmp_path / "pack"
+    nested = root / "bmad-one"
+    nested.mkdir(parents=True)
+    (root / "SHA256SUMS").write_text("old\n", encoding="utf-8")
+    (nested / "SHA256SUMS").write_text("payload\n", encoding="utf-8")
+
+    manifest = build_bmad_pack.tree_manifest(root)
+
+    assert "bmad-one/SHA256SUMS" in manifest
+    assert "  SHA256SUMS\n" not in manifest
