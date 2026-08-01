@@ -1,0 +1,97 @@
+[pack]
+name = "bmad"
+version = "6.10.1-next.31"
+description = "Immutable BMAD agent-skill payload, shared through symlink projections."
+
+[source]
+upstream = "bmad-method"
+upstream_version = "6.10.1-next.31"
+rendered_from = ".agent/skills"
+payload_files = 1072
+installation_manifest_sha256 = "5332e5b0ebb48e3113d893650d8477b91e38badd49bb88a057b7293e01678c9e"
+files_manifest_sha256 = "26af441be534b78e4d5e4193a2481a77bbd798b0f169704d05156324f03eab01"
+skill_manifest_sha256 = "e31ebb7780eb707525b758f1a1e6fa1c062c4e997b5703db1ec0f91324e8df04"
+
+[freeform]
+skills = [
+  "bmad-advanced-elicitation",
+  "bmad-agent-analyst",
+  "bmad-agent-architect",
+  "bmad-agent-builder",
+  "bmad-agent-dev",
+  "bmad-agent-pm",
+  "bmad-agent-tech-writer",
+  "bmad-agent-ux-designer",
+  "bmad-architecture",
+  "bmad-bmb-setup",
+  "bmad-brainstorming",
+  "bmad-check-implementation-readiness",
+  "bmad-checkpoint-preview",
+  "bmad-cis-agent-brainstorming-coach",
+  "bmad-cis-agent-creative-problem-solver",
+  "bmad-cis-agent-design-thinking-coach",
+  "bmad-cis-agent-innovation-strategist",
+  "bmad-cis-agent-presentation-master",
+  "bmad-cis-agent-storyteller",
+  "bmad-cis-design-thinking",
+  "bmad-cis-innovation-strategy",
+  "bmad-cis-problem-solving",
+  "bmad-cis-storytelling",
+  "bmad-code-review",
+  "bmad-correct-course",
+  "bmad-create-architecture",
+  "bmad-create-epics-and-stories",
+  "bmad-create-prd",
+  "bmad-create-story",
+  "bmad-customize",
+  "bmad-deep-recon",
+  "bmad-dev-auto",
+  "bmad-dev-story",
+  "bmad-document-project",
+  "bmad-domain-research",
+  "bmad-edit-prd",
+  "bmad-editorial-review",
+  "bmad-editorial-review-prose",
+  "bmad-editorial-review-structure",
+  "bmad-eval-runner",
+  "bmad-forge-idea",
+  "bmad-generate-project-context",
+  "bmad-help",
+  "bmad-loop-resolve",
+  "bmad-loop-setup",
+  "bmad-loop-sweep",
+  "bmad-market-research",
+  "bmad-module-builder",
+  "bmad-party-mode",
+  "bmad-prd",
+  "bmad-prfaq",
+  "bmad-product-brief",
+  "bmad-qa-generate-e2e-tests",
+  "bmad-quick-dev",
+  "bmad-retrospective",
+  "bmad-review",
+  "bmad-review-adversarial-general",
+  "bmad-review-edge-case-hunter",
+  "bmad-review-verification-gap",
+  "bmad-spec",
+  "bmad-sprint-planning",
+  "bmad-sprint-status",
+  "bmad-tea",
+  "bmad-teach-me-testing",
+  "bmad-technical-research",
+  "bmad-testarch-atdd",
+  "bmad-testarch-automate",
+  "bmad-testarch-ci",
+  "bmad-testarch-framework",
+  "bmad-testarch-nfr",
+  "bmad-testarch-test-design",
+  "bmad-testarch-test-review",
+  "bmad-testarch-trace",
+  "bmad-ux",
+  "bmad-validate-prd",
+  "bmad-workflow-builder",
+]
+
+[policy]
+immutable = true
+project_projection = "symlink"
