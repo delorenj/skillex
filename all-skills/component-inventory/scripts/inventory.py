@@ -267,14 +267,14 @@ class Aws:
         self.ok = True
 
     def cli(self, args: list[str], timeout: int = 120) -> tuple[int, str, str]:
-        cmd = ["aws"] + args + ["--output", "json"]
+        cmd = ["aws", *args, "--output", "json"]
         return run(cmd, env=dict(self._env), timeout=timeout, unset=self._unset)
 
     def env_for_child(self) -> tuple[dict[str, str], tuple[str, ...]]:
         return dict(self._env), self._unset
 
     def j(self, args: list[str], timeout: int = 120) -> Any:
-        rc, out, err = self.cli(args, timeout=timeout)
+        rc, out, _err = self.cli(args, timeout=timeout)
         if rc != 0:
             return None
         try:
@@ -454,8 +454,9 @@ def verify_aws(rows: list[dict[str, str]], aws: Aws, stamp: str) -> list[str]:
             rc, out, _ = run(["aws", "s3", "ls", f"s3://{rid}", "--recursive", "--summarize"],
                              env=cenv, unset=cunset, timeout=300)
             if rc == 0 and "Total Size:" in out:
-                size = int([l for l in out.splitlines() if "Total Size:" in l][0].split(":")[1])
-                objs = int([l for l in out.splitlines() if "Total Objects:" in l][0].split(":")[1])
+                lines = out.splitlines()
+                size = int(next(x for x in lines if "Total Size:" in x).split(":")[1])
+                objs = int(next(x for x in lines if "Total Objects:" in x).split(":")[1])
                 gb = size / 1e9
                 r["unit_rate"] = f"$0.023/GB-month x {gb:.6f} GB ({objs} objects)"
                 log.append(f"{r['component_id']}: {objs} objects, {size} bytes")
@@ -508,14 +509,14 @@ def aws_rds_instance_rate(aws: Aws, cls: str) -> float | None:
 
 def aws_metric(aws: Aws, ns: str, name: str, dims: list[tuple[str, str]],
                stat: str, hours: int = 24) -> float | None:
-    end = _dt.datetime.now(_dt.timezone.utc)
+    end = _dt.datetime.now(_dt.UTC)
     start = end - _dt.timedelta(hours=hours)
     args = ["cloudwatch", "get-metric-statistics", "--namespace", ns,
             "--metric-name", name, "--start-time", start.strftime("%Y-%m-%dT%H:%M:%SZ"),
             "--end-time", end.strftime("%Y-%m-%dT%H:%M:%SZ"),
             "--period", str(hours * 3600), "--statistics", stat]
     if dims:
-        args += ["--dimensions"] + [f"Name={k},Value={v}" for k, v in dims]
+        args += ["--dimensions", *[f"Name={k},Value={v}" for k, v in dims]]
     out = aws.j(args)
     if not out or not out.get("Datapoints"):
         return None
@@ -533,7 +534,7 @@ def verify_cloudflare(rows: list[dict[str, str]], stamp: str) -> list[str]:
 
     def cf(path: str) -> Any:
         rc, out, _ = run(["curl", "-s", "--max-time", "30",
-                          f"https://api.cloudflare.com/client/v4/{path}"] + hdr, timeout=45)
+                          f"https://api.cloudflare.com/client/v4/{path}", *hdr], timeout=45)
         if rc != 0:
             return None
         try:
@@ -873,7 +874,7 @@ def cmd_list(args) -> int:
 
 def cmd_add(args) -> int:
     rows = read_ledger(args.csv)
-    new = {c: "" for c in COLUMNS}
+    new = dict.fromkeys(COLUMNS, "")
     for c in COLUMNS:
         v = getattr(args, c.replace("-", "_"), None)
         if v is not None:
