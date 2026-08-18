@@ -55,3 +55,31 @@ skills = [
 [policy]
 overlay_wins = true          # local runtime skills/<name> shadows pack/<name>
 base_readonly = true         # pack dirs must never be edited in place by an agent
+
+# Upstream Hermes groups skills under CONTAINER directories, each carrying a
+# DESCRIPTION.md.  The container level is real upstream: agent/skill_utils.py's
+# iter_skill_index_files() walks a skills tree to ARBITRARY depth, and
+# agent/prompt_builder.py calls it twice over the same tree -- once for "SKILL.md" to find
+# the skills, once for "DESCRIPTION.md" to attach each container's group description.
+# That nesting is upstream's data model, so it is preserved here verbatim -- this pack
+# stays a faithful mirror.  (Not to be confused with agent/skill_bundles.py, which globs
+# YAML out of <HERMES_HOME>/skill-bundles and never walks a skill directory.)
+#
+# The other five agent CLIs have no container concept, so the mismatch is resolved at
+# PROJECTION time: the 18 entries in [freeform].skills are expanded by DESCENT, not by a
+# fixed one-level step.  Descend while a directory has no SKILL.md; a directory that has
+# one IS a skill and is never descended into (so a skill's own references/, scripts/ and
+# assets/ can never contribute a second member).
+#
+# For this pack that yields 73 leaf skills with zero duplicate basenames: 4 declared
+# entries are already skills (computer-use, dogfood, hermes-desktop-plugins, yuanbao) and
+# 14 are containers.  67 leaves sit one level down; the remaining 6 sit TWO levels down
+# under mlops/{evaluation,inference,models}/ -- which is exactly why the rule is a descent.
+# An implementation capped at one level resolves 67 and silently drops vllm, llama-cpp,
+# audiocraft, segment-anything, lm-evaluation-harness and weights-and-biases.  73 is what
+# upstream's own iter_skill_index_files() returns for this tree.
+#
+# 13 of the 14 containers carry a DESCRIPTION.md; software-development does not, which is
+# why SKILL.md -- never DESCRIPTION.md -- is the discriminator.
+# See PACKS-CONTRACT section 3b.
+flatten = true

@@ -1,48 +1,55 @@
 installation:
-  version: 6.5.0
+  version: 6.11.1-next.1
   installDate: 2026-04-26T11:56:50.244Z
-  lastUpdated: 2026-04-26T11:56:50.244Z
+  lastUpdated: 2026-08-11T13:49:22.579Z
 modules:
   - name: core
-    version: 6.5.0
+    version: 6.11.1-next.1
     installDate: 2026-04-26T11:56:50.011Z
-    lastUpdated: 2026-04-26T11:56:50.164Z
+    lastUpdated: 2026-08-11T13:49:22.558Z
     source: built-in
     npmPackage: null
     repoUrl: null
   - name: bmm
-    version: 6.5.0
+    version: 6.11.1-next.1
     installDate: 2026-04-26T11:56:50.002Z
-    lastUpdated: 2026-04-26T11:56:50.164Z
+    lastUpdated: 2026-08-11T13:49:22.559Z
     source: built-in
     npmPackage: null
     repoUrl: null
   - name: bmb
     version: v1.7.0
     installDate: 2026-04-26T11:56:50.071Z
-    lastUpdated: 2026-04-26T11:56:50.183Z
+    lastUpdated: 2026-08-11T13:49:22.564Z
     source: external
     npmPackage: bmad-builder
     repoUrl: https://github.com/bmad-code-org/bmad-builder
-    channel: stable
+    channel: pinned
     sha: 86033fc9aeae2ca6d52c7cdb675c1f4bf17fc1c1
   - name: cis
-    version: v0.2.0
+    version: v0.2.1
     installDate: 2026-04-26T11:56:50.099Z
-    lastUpdated: 2026-04-26T11:56:50.202Z
+    lastUpdated: 2026-08-11T13:49:22.566Z
     source: external
     npmPackage: bmad-creative-intelligence-suite
     repoUrl: https://github.com/bmad-code-org/bmad-module-creative-intelligence-suite
     channel: stable
-    sha: 14a63b893c07173b7a6cfe0fb6a9a72ba51d3cf1
+    sha: 07a8dd03d196a762f21c241d985293fe5b0f90e7
   - name: bmp
-    version: main
+    version: null
     installDate: 2026-04-26T11:56:50.103Z
-    lastUpdated: 2026-04-26T11:56:50.244Z
-    source: custom
+    lastUpdated: 2026-08-11T13:49:22.571Z
+    source: unknown
     npmPackage: null
-    repoUrl: https://github.com/delorenj/bmad-module-autopilot
+    repoUrl: null
     channel: next
+  - name: skf
+    version: null
+    installDate: 2026-08-11T13:49:22.579Z
+    lastUpdated: 2026-08-11T13:49:22.579Z
+    source: unknown
+    npmPackage: null
+    repoUrl: null
 ides:
   - claude-code
   - codex
