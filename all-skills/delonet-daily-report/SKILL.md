@@ -24,7 +24,7 @@ Every status in this package is derived from a file that was actually read:
 
 | Rule | Where it lives |
 |---|---|
-| A section's `status` describes the **collection**, never the news it found | every collector; `collectors/report_delivery.py` |
+| A section's `status` describes the **collection**, never the news it found | `collectors/*.py`, most visibly `collectors/report_delivery.py` |
 | `complete` when every enabled section completed; `failed` when none did, or when a **required** section did not run at all (`failed` / `missing` / `stale` / `invalid`); `partial` otherwise | `reportctl_archive.derive_status` |
 | A non-complete section must carry a `reason` | `validate_section_artifact` |
 | Coverage is enumerated from config, never from disk | `artifact_health`, `validate_run_manifest` |
@@ -49,9 +49,11 @@ backwards latched this pipeline into a failure it could not leave.
 | `failed` | it could not do its job at all |
 
 `report-delivery` finding a missed run is therefore a **complete** collection
-reporting bad news. The bad news goes in `summary` (which leads with
-`DELIVERY FAILED: …`), in `metrics.delivery_health`, in `caveats` (first, so the
-"Risks and Watchlist" section renders it), and in `detail` — never in `status`.
+reporting bad news. The bad news goes in `summary` (`report-delivery: DELIVERY
+FAILED -- 6 of 6 due day(s) … have no valid published report (6 missing).`), in
+`metrics.delivery_health` (`ok` / `degraded` / `failed` / `unknown`), in
+`caveats` (as `DELIVERY FAILED: …`, placed first so the "Risks and Watchlist"
+section renders it), and in `detail` — never in `status`.
 
 That matters because `derive_status` fails a run when a **required** section did
 not run, and `report-delivery` is required. Putting the verdict in `status` made

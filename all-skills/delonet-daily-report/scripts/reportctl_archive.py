@@ -5,6 +5,9 @@ from __future__ import annotations
 import copy
 import datetime as dt
 import json
+import os
+import uuid
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -18,7 +21,14 @@ from reportctl_contracts import (
     validate_run_manifest,
     validate_section_artifact,
 )
-from reportctl_runtime import archive_paths, publish_archive_pair
+from reportctl_runtime import (
+    archive_paths,
+    atomic_write,
+    atomic_write_text,
+    file_lock,
+    fsync_dir,
+    publish_archive_pair,
+)
 
 GENERATION_FILES = ("report.md", "report.json", "run-manifest.json")
 
@@ -188,71 +198,54 @@ def derive_status(config: dict[str, Any], section_statuses: dict[str, str]) -> s
     return "partial"
 
 
-def verify_published(
-    config: dict[str, Any], date: str, expect_generation: str | None = None
+def inspect_generation(
+    config: dict[str, Any],
+    date: str,
+    generation: Path,
+    *,
+    problems: list[str] | None = None,
+    extra: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Prove a published report exists for ``date`` and is internally coherent.
+    """Everything knowable about one generation directory, on its own terms.
 
-    Returns ``ok: False`` with the concrete reasons when it does not. This is the
-    check that would have caught the silent 2026-08-18 failure, where a cron job
-    logged success over a command that never ran.
+    This asks nothing about ``current.json``. It reads the three files in the
+    directory, checks they are valid and agree with each other, derives the
+    report's status from the manifest inside it, and says whether the run it
+    records is one this package will stand behind.
 
-    ``expect_generation`` names the generation the caller believes it published.
-    Without it this function resolves whatever ``current.json`` points at *now*,
-    so a concurrent ``reportctl archive`` landing between publish and verify made
-    a run report ``verified: true`` about a generation it had never written. With
-    it, a pointer naming anything else is a problem, not a silent substitution.
+    Split out of ``verify_published`` so the same proof can be applied *before*
+    the pointer moves as well as after. ``publish_generation`` runs it on a
+    staged generation nothing points at yet, which is what stops a failed re-run
+    from replacing a good day. See that function.
+
+    ``problems`` may be pre-seeded by a caller that already found something (the
+    pointer naming an unexpected generation, say); those problems count against
+    ``coherent`` exactly like the ones found here.
 
     Two booleans, because they answer different questions:
 
     ``coherent``
-        The generation named by ``current.json`` is the expected one, exists, is
-        readable, and its three files agree with each other. This is a statement
-        about the *artifact*.
+        The generation exists, is readable, and its three files agree with each
+        other. This is a statement about the *artifact*.
     ``ok``
         ``coherent`` **and** the report it contains is not ``failed``. This is a
-        statement about the *run*, and it is what the gate and the git mirror
-        are allowed to act on.
+        statement about the *run*, and it is what the publication gate, the
+        ``verify`` command and the git mirror are allowed to act on.
     """
-    paths = archive_paths(config, date)
-    marker_path = Path(paths["commit_marker"])
-    problems: list[str] = []
+    problems = problems if problems is not None else []
     outcome: dict[str, Any] = {
         "ok": False,
         "coherent": False,
         "date": date,
-        "generation": None,
-        "expected_generation": expect_generation,
+        "generation": str(generation),
+        "generation_id": generation.name,
         "status": None,
         "degraded": [],
         "required_gaps": [],
         "required_failures": [],
         "problems": problems,
-        "commit_marker": str(marker_path),
     }
-    if not marker_path.exists():
-        problems.append(f"no published report for {date}: {marker_path} is absent")
-        return outcome
-    try:
-        marker = json.loads(marker_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
-        problems.append(f"current.json is unreadable: {exc}")
-        return outcome
-    if not isinstance(marker, dict) or not isinstance(marker.get("generation"), str):
-        problems.append("current.json does not name a generation")
-        return outcome
-    if marker.get("report_date") != date:
-        problems.append(
-            f"current.json points at report_date {marker.get('report_date')!r}, expected {date!r}"
-        )
-    if expect_generation is not None and marker["generation"] != expect_generation:
-        problems.append(
-            f"current.json names generation {marker['generation']!r}, but this run published "
-            f"{expect_generation!r}; the published generation was replaced under it"
-        )
-    generation = Path(paths["archive_root"]) / "generations" / marker["generation"]
-    outcome["generation"] = str(generation)
-    outcome["generation_id"] = marker["generation"]
+    outcome.update(extra or {})
     for name in GENERATION_FILES:
         if not (generation / name).is_file():
             problems.append(f"published generation is missing {name}")
@@ -323,12 +316,95 @@ def verify_published(
     return outcome
 
 
-def archive_report(
+def verify_generation(config: dict[str, Any], date: str, generation: Path) -> dict[str, Any]:
+    """``inspect_generation`` under the name a gate reads well as."""
+    return inspect_generation(config, date, Path(generation))
+
+
+def verify_published(
+    config: dict[str, Any], date: str, expect_generation: str | None = None
+) -> dict[str, Any]:
+    """Prove a published report exists for ``date`` and is internally coherent.
+
+    Returns ``ok: False`` with the concrete reasons when it does not. This is the
+    check that would have caught the silent 2026-08-18 failure, where a cron job
+    logged success over a command that never ran.
+
+    ``expect_generation`` names the generation the caller believes it published.
+    Without it this function resolves whatever ``current.json`` points at *now*,
+    so a concurrent ``reportctl archive`` landing between publish and verify made
+    a run report ``verified: true`` about a generation it had never written. With
+    it, a pointer naming anything else is a problem, not a silent substitution.
+
+    The proof itself lives in ``inspect_generation``; this function only resolves
+    which generation to apply it to.
+    """
+    paths = archive_paths(config, date)
+    marker_path = Path(paths["commit_marker"])
+    problems: list[str] = []
+    outcome: dict[str, Any] = {
+        "ok": False,
+        "coherent": False,
+        "date": date,
+        "generation": None,
+        "expected_generation": expect_generation,
+        "status": None,
+        "degraded": [],
+        "required_gaps": [],
+        "required_failures": [],
+        "problems": problems,
+        "commit_marker": str(marker_path),
+    }
+    if not marker_path.exists():
+        problems.append(f"no published report for {date}: {marker_path} is absent")
+        return outcome
+    try:
+        marker = json.loads(marker_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        problems.append(f"current.json is unreadable: {exc}")
+        return outcome
+    if not isinstance(marker, dict) or not isinstance(marker.get("generation"), str):
+        problems.append("current.json does not name a generation")
+        return outcome
+    if marker.get("report_date") != date:
+        problems.append(
+            f"current.json points at report_date {marker.get('report_date')!r}, expected {date!r}"
+        )
+    if expect_generation is not None and marker["generation"] != expect_generation:
+        problems.append(
+            f"current.json names generation {marker['generation']!r}, but this run published "
+            f"{expect_generation!r}; the published generation was replaced under it"
+        )
+    generation = Path(paths["archive_root"]) / "generations" / marker["generation"]
+    return inspect_generation(
+        config,
+        date,
+        generation,
+        problems=problems,
+        extra={
+            "expected_generation": expect_generation,
+            "commit_marker": str(marker_path),
+        },
+    )
+
+
+def _pointer_generation(marker_path: Path) -> str | None:
+    """The generation ``current.json`` names right now, or None."""
+    try:
+        marker = json.loads(marker_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    generation = marker.get("generation") if isinstance(marker, dict) else None
+    return generation if isinstance(generation, str) else None
+
+
+def _prepare_generation(
     config: dict[str, Any],
     report_file: str,
     markdown_file: str,
-    manifest_file: str | None = None,
-) -> dict[str, Any]:
+    manifest_file: str | None,
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], str]:
+    """Validate the three inputs. Raises rather than archiving something broken."""
     report = validate_daily_report(load_json(Path(report_file)), config)
     paths = archive_paths(config, report["report_date"])
     manifest_path = Path(manifest_file) if manifest_file else Path(paths["manifest"])
@@ -343,10 +419,150 @@ def archive_report(
         raise ConfigError("Markdown archive input must be non-empty")
     archived = copy.deepcopy(report)
     archived["markdown_path"] = "report.md"
-    published = publish_archive_pair(
-        Path(paths["archive_root"]), markdown, archived, manifest, report["report_date"]
+    return paths, archived, manifest, markdown
+
+
+def archive_report(
+    config: dict[str, Any],
+    report_file: str,
+    markdown_file: str,
+    manifest_file: str | None = None,
+    *,
+    gate: Callable[[Path], dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Publish a validated report as a new archive generation.
+
+    Without ``gate`` this is the historical transaction: stage, fsync, rename
+    into ``generations/<id>``, swap ``current.json``. ``reportctl archive`` uses
+    it that way on purpose -- it is the low-level command, it publishes what it
+    is handed, and ``reportctl verify`` is what refuses to certify a bad
+    generation afterwards.
+
+    With ``gate`` the pointer swap is *conditional*: see
+    ``publish_gated_generation``. The run path passes one; nothing else does.
+    """
+    paths, archived, manifest, markdown = _prepare_generation(
+        config, report_file, markdown_file, manifest_file
     )
-    # The generation id, named rather than re-parsed by every caller. A caller
-    # that has to guess which generation it just wrote cannot verify that one.
-    published["generation"] = Path(published["markdown"]).parent.name
-    return published
+    date = archived["report_date"]
+    archive_root = Path(paths["archive_root"])
+    if gate is None:
+        published = publish_archive_pair(archive_root, markdown, archived, manifest, date)
+        # The generation id, named rather than re-parsed by every caller. A
+        # caller that has to guess which generation it just wrote cannot verify
+        # that one.
+        published["generation"] = Path(published["markdown"]).parent.name
+        published["current"] = True
+        published["previous_generation"] = None
+        published["gate"] = None
+        return published
+    return publish_gated_generation(archive_root, markdown, archived, manifest, date, gate)
+
+
+def publish_gated_generation(
+    archive_root: Path,
+    markdown: str,
+    report: dict[str, Any],
+    manifest: dict[str, Any],
+    report_date: str,
+    gate: Callable[[Path], dict[str, Any]],
+) -> dict[str, Any]:
+    """Stage a generation, prove it, and only then let ``current.json`` name it.
+
+    The order is the whole point, and it used to be the other way round.
+    ``publish_archive_pair`` swaps the pointer as the last step of staging, so
+    the pointer moved *before* anything verified the thing it now named. Measured
+    on 2026-08-17: a healthy run published generation ``b9102fee`` and verified
+    clean; one re-run with the required source dead published ``49f3caea``,
+    failed verification with exit 3 -- and ``current.json`` was already pointing
+    at it. The intact good generation was still on disk and no longer referenced
+    by anything, so the next day's ``report-delivery`` read 2026-08-17 as invalid
+    and manufactured a delivery gap that had not happened. One bad re-run was a
+    one-way door out of a good day.
+
+    Here the generation is fully materialised in ``generations/<id>`` first --
+    fsynced, renamed, readable, pointed at by nothing -- and only then does the
+    pointer move. The rule it moves by:
+
+        A run may replace the day's published report with its own.
+        It may never DOWNGRADE the day from a report that verifies to one
+        that does not.
+
+    So the pointer swaps when this generation passes the gate, and also when
+    whatever is currently published does not pass it either -- a failed run is
+    still the best record the day has when there is nothing better, and it is
+    published as itself, failed status and all. The one case that is refused is
+    the one that was measured: an accepted generation being replaced by a
+    refused one.
+
+    That refusal is not a way to hide a failure:
+
+    * the refused generation is *retained*, unreferenced, for debugging, because
+      losing the evidence is the other way to lie about it;
+    * the run reports its own failure honestly. That is the caller's job and
+      ``run.py`` does it: failed status, non-zero exit, the gate's problems and
+      the surviving pointer named in the run's caveats.
+
+    A previously verified published report for a date is a fact this pipeline
+    derived. Nothing gets to remove it -- least of all a later run that proved
+    nothing.
+
+    The whole transaction holds the archive lock, so a concurrent ``reportctl
+    archive`` cannot interleave with the stage/verify/swap sequence.
+    """
+    marker_path = archive_root / "current.json"
+    with file_lock(marker_path.with_suffix(".lock")):
+        generations = archive_root / "generations"
+        generations.mkdir(parents=True, exist_ok=True)
+        previous = _pointer_generation(marker_path)
+        token = uuid.uuid4().hex
+        staged = generations / f".stage-{token}"
+        generation = generations / token
+        staged.mkdir()
+        try:
+            atomic_write_text(staged / "report.md", markdown)
+            atomic_write(staged / "report.json", report)
+            atomic_write(staged / "run-manifest.json", manifest)
+            fsync_dir(staged)
+            os.replace(staged, generation)
+            fsync_dir(generations)
+        except BaseException:
+            # Nothing was renamed in, so nothing is referable: clean the corpse.
+            if staged.exists():
+                for path in staged.iterdir():
+                    path.unlink(missing_ok=True)
+                staged.rmdir()
+                fsync_dir(generations)
+            raise
+        # The generation is real and complete, and NOTHING points at it yet.
+        verdict = gate(generation)
+        published = {
+            "archived": True,
+            "markdown": str(generation / "report.md"),
+            "report_json": str(generation / "report.json"),
+            "manifest": str(generation / "run-manifest.json"),
+            "commit_marker": str(marker_path),
+            "generation": token,
+            "previous_generation": previous,
+            "gate": verdict,
+            "current": False,
+            "displaced_verified_generation": False,
+        }
+        if not verdict.get("ok"):
+            # The incumbent is asked the same question, by the same gate. Only a
+            # verified incumbent is protected; an absent or already-refused one
+            # is not something this run can make worse.
+            incumbent_ok = bool(previous) and bool(
+                gate(generations / previous).get("ok")
+            )
+            if incumbent_ok:
+                # Deliberately retained and deliberately unreferenced. The
+                # previous pointer is untouched.
+                published["displaced_verified_generation"] = True
+                return published
+        atomic_write(
+            marker_path,
+            {"schema_version": 1, "report_date": report_date, "generation": token},
+        )
+        published["current"] = True
+        return published
