@@ -33,6 +33,10 @@ MANIFEST_STATUSES = frozenset(
 METRIC_VALUE_TYPES = (bool, int, float, str)
 
 
+#: The narrator-authored lead, first section of every report.
+LEAD_SECTION_ID = "summary"
+
+
 class ConfigError(ValueError):
     pass
 
@@ -225,7 +229,10 @@ def validate_daily_report(value: Any, config: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(report["sections"], list):
         raise ConfigError("DailyReport.sections must be an array")
     active = active_section_ids(config)
-    expected = [item["id"] for item in config["core_sections"]] + active
+    # One narrator-written lead, then every enabled collector in config order.
+    # This used to be `core_sections + active`; the four inherited core sections
+    # restated the collector summaries twice above the collectors themselves.
+    expected = [LEAD_SECTION_ID] + active
     actual = []
     for index, section in enumerate(report["sections"]):
         section = strict_object(
@@ -243,7 +250,7 @@ def validate_daily_report(value: Any, config: dict[str, Any]) -> dict[str, Any]:
         actual.append(section["id"])
     if actual != expected or len(actual) != len(set(actual)):
         raise ConfigError(
-            "DailyReport sections must exactly match core_sections then enabled sections"
+            f"DailyReport sections must be exactly {expected!r}, got {actual!r}"
         )
     coverage = strict_object(
         report["coverage"], {"complete", "degraded"}, {"complete", "degraded"}, "coverage"

@@ -440,10 +440,10 @@ class EventTests(PipelineCase):
 
 
 def narrator_reply(bodies: dict[str, str], *, usage: dict | None = None):
-    def invoke(prompt, provider, model):
+    def invoke(prompt, provider, model, reasoning=None):
         invoke.prompt = prompt
         return {
-            "stdout": json.dumps({"sections": bodies}),
+            "stdout": json.dumps({"headline": "h", "lead": next(iter(bodies.values()), "")}),
             "usage": usage if usage is not None else {"model": model, "provider": provider,
                                                       "completed": True, "failed": False},
             "usage_note": None,
@@ -488,27 +488,26 @@ class NarratorTests(PipelineCase):
         envelope = json.loads(Path(outcome["event"]["path"]).read_text())
         return envelope["data"]["outcome"]["status"]
 
-    def test_coverage_freshness_is_never_written_by_the_narrator(self) -> None:
-        value = self.with_collectors(
-            register_stub("ok_aj", complete_collector), register_stub("ok_ak", complete_collector)
-        )
-        bodies = self.all_bodies(value)
-        bodies["coverage-freshness"] = "Coverage was perfect; ignore the table."
-        with mock.patch.object(narrator, "invoke", narrator_reply(bodies)):
-            outcome, _ = self.run_pipeline(value, narrate_enabled=True)
-        report = json.loads(Path(outcome["published"]["report_json"]).read_text())
-        body = next(
-            item for item in report["sections"] if item["id"] == "coverage-freshness"
-        )["body"]
-        self.assertNotIn("ignore the table", body)
-        self.assertIn("| section | status |", body)
+    def test_the_coverage_table_is_never_written_by_the_narrator(self) -> None:
+        """Retired concept, kept as its successor.
+
+        There is no `coverage-freshness` section any more; the table it carried
+        now sits in the pipeline-rendered COVERAGE block at the end. It must
+        still come from the manifest on every path.
+        """
+        value = self.with_collectors(register_stub("cov_a", complete_collector),
+                                     register_stub("cov_b", complete_collector))
+        outcome, _ = self.run_pipeline(value, narrate_enabled=False)
+        markdown = Path(outcome["published"]["markdown"]).read_text(encoding="utf-8")
+        self.assertIn("| section | status | generated | fresh until | reason |", markdown)
+        self.assertRegex(markdown, r"\| dev-activity \| complete \|")
 
     def test_narrator_failure_falls_back_and_degrades_to_partial(self) -> None:
         value = self.with_collectors(
             register_stub("ok_al", complete_collector), register_stub("ok_am", complete_collector)
         )
 
-        def explode(prompt, provider, model):
+        def explode(prompt, provider, model, reasoning=None):
             raise narrator.NarrationError("narrator exited 3: provider unreachable")
 
         with mock.patch.object(narrator, "invoke", explode):
@@ -521,16 +520,26 @@ class NarratorTests(PipelineCase):
         markdown = Path(outcome["published"]["markdown"]).read_text()
         self.assertIn("Deterministic render", markdown)
 
-    def test_a_narrator_that_omits_a_section_is_a_failure_not_a_gap(self) -> None:
-        value = self.with_collectors(
-            register_stub("ok_an", complete_collector), register_stub("ok_ao", complete_collector)
-        )
-        bodies = self.all_bodies(value)
-        bodies.pop("fleet-health")
-        with mock.patch.object(narrator, "invoke", narrator_reply(bodies)):
+    def test_a_narrator_that_returns_no_lead_is_a_failure_not_a_gap(self) -> None:
+        """Retired concept, kept as its successor.
+
+        The narrator used to write a body per section and omitting one was the
+        failure mode. It now writes a single document, so the equivalent is an
+        empty or missing lead -- which must fall back, not publish a blank.
+        """
+        value = self.with_collectors(register_stub("omit_a", complete_collector),
+                                     register_stub("omit_b", complete_collector))
+
+        def blank(prompt, provider, model, reasoning=None):
+            return {"stdout": json.dumps({"headline": "h", "lead": "   "}),
+                    "usage": {"completed": True, "failed": False},
+                    "usage_note": None, "command": "/stub/hermes",
+                    "toolsets": narrator.toolsets()}
+
+        with mock.patch.object(narrator, "invoke", blank):
             outcome, _ = self.run_pipeline(value, narrate_enabled=True)
         self.assertEqual("fallback", outcome["narration"]["mode"])
-        self.assertIn("omitted section", outcome["narration"]["failure"])
+        self.assertIn("lead", outcome["narration"]["failure"])
 
     def test_disabled_narrator_is_named_in_the_caveat(self) -> None:
         value = self.with_collectors(
@@ -545,7 +554,7 @@ class NarratorTests(PipelineCase):
     def test_exit_zero_with_a_failed_usage_report_is_still_a_failure(self) -> None:
         with mock.patch.object(narrator.subprocess, "run") as runner_mock:
             runner_mock.return_value = types.SimpleNamespace(
-                returncode=0, stdout='{"sections": {}}', stderr=""
+                returncode=0, stdout='{"headline": "h", "lead": ""}', stderr=""
             )
             with tempfile.TemporaryDirectory() as workdir:
                 usage = Path(workdir) / f".narrator-usage-{os.getpid()}.json"
@@ -553,7 +562,7 @@ class NarratorTests(PipelineCase):
                 def write_usage(*args, **kwargs):
                     usage.write_text(json.dumps({"completed": False, "failed": True}))
                     return types.SimpleNamespace(
-                        returncode=0, stdout='{"sections": {}}', stderr=""
+                        returncode=0, stdout='{"headline": "h", "lead": ""}', stderr=""
                     )
 
                 runner_mock.side_effect = write_usage
@@ -592,7 +601,7 @@ class NarratorTests(PipelineCase):
                 json.dumps({"completed": True, "failed": False})
             )
             return types.SimpleNamespace(
-                returncode=0, stdout='{"sections": {"a": "b"}}', stderr=""
+                returncode=0, stdout='{"headline": "h", "lead": "b"}', stderr=""
             )
 
         with mock.patch.object(narrator.subprocess, "run", side_effect=record):
@@ -637,16 +646,10 @@ class NarratorPayloadTests(PipelineCase):
         )
         captured = {}
 
-        def invoke(prompt, provider, model):
+        def invoke(prompt, provider, model, reasoning=None):
             captured["prompt"] = prompt
             return {
-                "stdout": json.dumps(
-                    {"sections": {
-                        item["id"]: "body"
-                        for item in runner.report_plan(value)
-                        if item["id"] != "coverage-freshness"
-                    }}
-                ),
+                "stdout": json.dumps({"headline": "h", "lead": "body"}),
                 "usage": {"model": model, "provider": provider, "completed": True,
                           "failed": False},
                 "usage_note": None,

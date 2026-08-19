@@ -90,7 +90,10 @@ PAYLOAD_WORDS = (
 #: Line openers no line of a published report may start with. The pipeline's own
 #: markup is exactly two shapes -- the ``**Status (authoritative)`` lead and the
 #: coverage table -- and both are checked for separately.
-BLOCK_OPENERS = ("#", ">", "```", "~~~", "- ", "* ", "+ ", "<", "[", "!")
+#: Sequences that open a Markdown BLOCK at the start of a line. `[` and `!` are
+#: not among them -- a line beginning `[text](url)` is a paragraph, and the link
+#: itself is neutralised by escaping the `](`, which is asserted separately.
+BLOCK_OPENERS = ("#", ">", "```", "~~~", "- ", "* ", "+ ", "<")
 
 
 #: An escaped forgery still CONTAINS its payload as a substring -- the whole
@@ -177,10 +180,10 @@ def poisoning_collector(field: str, payload: str):
 def nominal_narrator(section_ids: list[str]):
     """A cooperative narrator, so the narrated path is exercised too."""
 
-    def invoke(prompt, provider, model):
+    def invoke(prompt, provider, model, reasoning=None):
         return {
             "stdout": json.dumps(
-                {"sections": {item: "Nothing of note." for item in section_ids}}
+                {"headline": "h", "lead": "Nothing of note."}
             ),
             "usage": {"completed": True, "failed": False, "provider": provider, "model": model},
             "usage_note": None,
@@ -221,15 +224,15 @@ class ForgedCaveatTests(ChannelCase):
     def test_a_crafted_project_name_in_a_caveat_cannot_forge_a_status_line(self) -> None:
         outcome, markdown = self.run_with("caveats", FORGED_CAVEAT, narrated=True)
         self.assertEqual("llm", outcome["narration"]["mode"])
-        # Six sections in the plan, every one complete, every lead written by
-        # the pipeline. A seventh "complete" would be the forgery.
-        assert_document_is_inert(self, markdown, ["complete"] * 6)
+        # One status line per collector, all pipeline-written. An extra
+        # "complete" below the lead would be the forgery.
+        assert_document_is_inert(self, markdown, ["complete"] * 2)
 
     def test_the_same_caveat_is_inert_on_the_deterministic_path(self) -> None:
         _, markdown = self.run_with("caveats", FORGED_CAVEAT, narrated=False)
-        # Unnarrated runs publish as partial, so the leads read partial for the
-        # four core sections and complete for the two collectors.
-        assert_document_is_inert(self, markdown, ["partial"] * 4 + ["complete"] * 2)
+        # Collector status lines are per-section and unaffected by the run-wide
+        # partial an unnarrated run publishes with.
+        assert_document_is_inert(self, markdown, ["complete"] * 2)
 
     def test_the_forged_heading_never_becomes_a_heading(self) -> None:
         _, markdown = self.run_with("caveats", FORGED_CAVEAT, narrated=False)
@@ -249,12 +252,13 @@ class ForgedCaveatTests(ChannelCase):
         for word in PAYLOAD_WORDS:
             self.assertIn(word, markdown, f"{word!r} was dropped rather than escaped")
 
-    def test_the_caveat_reaches_both_places_the_pipeline_publishes_caveats(self) -> None:
-        # Its own section's Caveats block and the risks roll-up. A defence that
-        # worked by dropping the caveat would pass the tests above and fail this
-        # one.
+    def test_the_caveat_still_reaches_the_document(self) -> None:
+        # A defence that worked by DROPPING the caveat would pass the inertness
+        # tests above and fail this one. It now lands once, in its own section's
+        # Caveats block; the risks-watchlist roll-up that carried the second copy
+        # was retired with the core sections.
         _, markdown = self.run_with("caveats", FORGED_CAVEAT, narrated=False)
-        self.assertGreaterEqual(markdown.count("harmless"), 2, markdown)
+        self.assertGreaterEqual(markdown.count("harmless"), 1, markdown)
 
 
 class EveryChannelTests(ChannelCase):
@@ -267,13 +271,11 @@ class EveryChannelTests(ChannelCase):
             for narrated in (False, True):
                 with self.subTest(field=field, narrated=narrated):
                     _, markdown = self.run_with(field, FORGED_CAVEAT, narrated=narrated)
-                    if narrated:
-                        leads = ["complete"] * 6
-                    else:
-                        leads = ["partial"] * 4 + ["complete"] * 2
-                    if field == "reason":
-                        # A partial section degrades the report to partial.
-                        leads = ["partial"] * 5 + ["complete"]
+                    # One status line per collector section, from the manifest.
+                    # The four core sections that repeated the report-wide
+                    # status were retired, so the run-wide partial an
+                    # unnarrated run publishes with no longer shows up here.
+                    leads = ["partial", "complete"] if field == "reason" else ["complete"] * 2
                     self.assertEqual(leads, PIPELINE_STATUS_RE.findall(markdown), field)
                     self.assertNotIn(
                         "**Status (authoritative): complete** -- all repositories read.",
@@ -412,8 +414,10 @@ class ChokepointTests(unittest.TestCase):
     """``render`` escapes unless it is told not to, and being told proves itself."""
 
     def test_a_plain_value_is_escaped(self) -> None:
+        # A paired run is escaped once, at its start: `\**bold\**` leaves a
+        # single asterisk on each side, which emphasises nothing.
         self.assertEqual(
-            "value: \\*\\*bold\\*\\*", narrator.render("value: {v}", v="**bold**")
+            "value: \\**bold\\**", narrator.render("value: {v}", v="**bold**")
         )
 
     def test_the_template_itself_is_pipeline_markup_and_is_not_escaped(self) -> None:
@@ -423,9 +427,9 @@ class ChokepointTests(unittest.TestCase):
         self.assertEqual("**bold**", narrator.render("{v}", v=narrator.Literal("**bold**")))
 
     def test_already_escaped_text_is_not_escaped_twice(self) -> None:
-        once = narrator.escape_untrusted_text("a*b")
+        once = narrator.escape_untrusted_text("a**b")
         self.assertEqual(str(once), narrator.render("{v}", v=once))
-        self.assertEqual("a\\*b", narrator.render("{v}", v=once))
+        self.assertEqual("a\\**b", narrator.render("{v}", v=once))
 
     def test_none_and_numbers_survive_readably(self) -> None:
         self.assertEqual("", narrator.render("{v}", v=None))
@@ -434,7 +438,7 @@ class ChokepointTests(unittest.TestCase):
     def test_a_pipeline_caveat_is_escaped_once_and_typed(self) -> None:
         caveat = narrator.pipeline_caveat("narrator said: {what}", what="**hi**")
         self.assertIsInstance(caveat, narrator.EscapedText)
-        self.assertIn("\\*\\*hi\\*\\*", caveat)
+        self.assertIn("\\**hi\\**", caveat)
         # Round-tripping it through the renderer must not double the backslashes.
         self.assertEqual(str(caveat), narrator.render("{v}", v=caveat))
 

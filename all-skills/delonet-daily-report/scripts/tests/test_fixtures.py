@@ -104,14 +104,15 @@ def report(value: dict, title: str = "Daily Developer Report", degraded: list | 
         for section in value["sections"]
         if section["enabled"] and section["id"] not in degraded
     ]
+    # One narrator-written lead, then each enabled collector. The four
+    # core_sections are still validated in config and no longer projected.
     sections = [
         {
-            "id": section["id"],
-            "title": section["title"],
-            "body": f"Body for {section['title']}",
+            "id": "summary",
+            "title": "Summary",
+            "body": "Body for Summary",
             "source_urls": [],
         }
-        for section in value["core_sections"]
     ] + [
         {
             "id": section["id"],

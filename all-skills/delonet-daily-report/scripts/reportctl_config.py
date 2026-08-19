@@ -288,7 +288,7 @@ def _looks_like_secret(value: str) -> bool:
 def validate_narrator(narrator: Any) -> dict[str, Any]:
     if not isinstance(narrator, dict):
         raise ConfigError("narrator must be an object")
-    require_keys(narrator, {"enabled", "provider", "model"}, "narrator")
+    require_keys(narrator, {"enabled", "provider", "model", "reasoning"}, "narrator")
     missing = {"enabled", "provider", "model"} - set(narrator)
     if missing:
         raise ConfigError(f"narrator: missing keys: {', '.join(sorted(missing))}")
@@ -296,6 +296,13 @@ def validate_narrator(narrator: Any) -> dict[str, Any]:
         raise ConfigError("narrator.enabled must be boolean")
     if not nonempty(narrator["provider"]) or not nonempty(narrator["model"]):
         raise ConfigError("narrator.provider and narrator.model must be non-empty strings")
+    # Optional. This report runs once a day and is read by a human, so the
+    # effort knob is exposed rather than left at whatever the provider defaults
+    # to -- it is the cheapest quality lever in the pipeline.
+    if "reasoning" in narrator:
+        levels = {"none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"}
+        if narrator["reasoning"] not in levels:
+            raise ConfigError(f"narrator.reasoning must be one of {sorted(levels)}")
     return narrator
 
 

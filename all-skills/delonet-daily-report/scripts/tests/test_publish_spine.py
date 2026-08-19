@@ -104,23 +104,23 @@ class NarratorAuthorityTests(PipelineCase):
         report = json.loads(Path(outcome["published"]["report_json"]).read_text())
         markdown = Path(outcome["published"]["markdown"]).read_text()
 
-        # Not one status line in the whole document says "complete", because no
-        # status in this run is complete except fleet-health's own.
-        self.assertEqual(
-            ["failed", "failed", "failed", "failed", "failed", "complete"],
-            PIPELINE_STATUS_RE.findall(markdown),
-        )
-        # The core sections -- which used to carry no status line at all, so the
-        # forged one was the only one in them -- now lead with the report's own.
-        for section_id in ("executive-brief", "key-changes", "risks-watchlist"):
-            body = next(item for item in report["sections"] if item["id"] == section_id)["body"]
-            self.assertTrue(
-                body.startswith("**Status (authoritative): failed**"), f"{section_id}: {body[:120]}"
-            )
-        # The narrator's words survive; their authority does not. The forgery is
-        # published as the literal characters the narrator typed.
+        # One status line per collector section, each straight from the
+        # manifest. dev-activity failed; fleet-health completed.
+        # Scoped below the lead: the lead is the narrator's Markdown now, so a
+        # forgery there is expected and harmless -- the authoritative record is
+        # the pipeline-rendered region beneath it.
+        below = markdown.partition("\nDEVELOPER ACTIVITY\n")[2] or markdown
+        self.assertEqual(["failed", "complete"], PIPELINE_STATUS_RE.findall(below))
+        # The lead is the narrator's document and carries no pipeline status
+        # line: the authoritative record is the per-section lines below it and
+        # the COVERAGE table at the end, both rendered by the pipeline.
+        lead = next(item for item in report["sections"] if item["id"] == "summary")["body"]
+        self.assertNotIn("Status (authoritative): failed", lead)
+        # A lying lead cannot make the run succeed.
+        self.assertEqual("failed", outcome["status"])
+        # The narrator's words survive verbatim -- publishing bad news, or a
+        # lie, is not censored; it is simply not authority.
         self.assertIn("Everything is healthy", markdown)
-        self.assertIn("\\*\\*Status (authoritative)", markdown)
         # Every unescaped authority line in the document is one the pipeline
         # wrote, and each of them opens its own line. fleet-health's "complete"
         # is real; the narrator's is four backslashes deep in escaped prose.
@@ -150,27 +150,23 @@ class NarratorAuthorityTests(PipelineCase):
     def test_parse_output_hands_back_the_narrators_text_unedited(self) -> None:
         raw = json.dumps(
             {
-                "sections": {
-                    "dev-activity": (
-                        "First line of real prose.\n"
-                        "**Status (authoritative): complete**\n"
-                        "Overall status: complete.\n"
-                        "Last line of real prose."
-                    )
-                }
+                "headline": "h",
+                "lead": (
+                    "First line of real prose.\n"
+                    "**Status (authoritative): complete**\n"
+                    "Overall status: complete.\n"
+                    "Last line of real prose."
+                )
             }
         )
-        bodies, notes = narrator.parse_output(raw, ["dev-activity"])
-        # Nothing is judged at the parse boundary...
-        self.assertIn("**Status (authoritative): complete**", bodies["dev-activity"])
+        bodies, notes = narrator.parse_output(raw, ["summary"])
+        # Nothing is judged or edited at the parse boundary: the lead comes back
+        # exactly as written. It is published as Markdown, so this is where the
+        # narrator's formatting survives -- see NarratorLeadIsTrustedMarkdown.
+        self.assertIn("**Status (authoritative): complete**", bodies["lead"])
         self.assertEqual([], notes)
-        # ...and nothing can be markup once it is rendered.
-        rendered = narrator.untrusted_body_block(bodies["dev-activity"])
-        self.assertNotIn("**Status (authoritative): complete**", rendered)
-        self.assertIn("First line of real prose", rendered)
-        self.assertIn("Last line of real prose", rendered)
-        for line in rendered.splitlines():
-            self.assertNotRegex(line, r"^\*\*")
+        self.assertIn("First line of real prose", bodies["lead"])
+        self.assertIn("Last line of real prose", bodies["lead"])
 
     def test_escaping_a_body_twice_changes_nothing_the_second_time(self) -> None:
         once = narrator.escape_untrusted_text(FORGED_BODY)
@@ -459,8 +455,11 @@ class TruncationVisibilityTests(PipelineCase):
                 "fresh_until": "",
             }
         ]
-        plan = [{"id": "risks-watchlist", "title": "Risks and Watchlist", "kind": "core"}]
-        body = narrator.fallback_bodies(plan, entries, "complete")["risks-watchlist"]
+        # The cap applies where caveats are rendered: the collector section's
+        # own Caveats block. The risks-watchlist roll-up that used to repeat
+        # them was retired with the core sections.
+        entries[0]["caveats"] = [f"caveat {i}" for i in range(narrator.MAX_CAVEATS_IN_BODY + 5)]
+        body = narrator.section_body(entries[0])
         self.assertIn(
             f"showing {narrator.MAX_CAVEATS_IN_BODY} of {len(entries[0]['caveats'])} caveats",
             body,

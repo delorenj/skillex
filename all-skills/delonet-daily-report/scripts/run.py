@@ -99,6 +99,7 @@ EXIT_OK = 0
 EXIT_ERROR = 2
 EXIT_UNMET = 3
 
+LEAD_SECTION_ID = "summary"
 REPORT_TITLE = "Daily Developer Report"
 MAX_REASON_CHARS = 500
 
@@ -252,18 +253,25 @@ def build_manifest(
 
 
 def report_plan(config: dict[str, Any]) -> list[dict[str, Any]]:
-    """The exact section list a DailyReport must carry: core, then enabled."""
-    plan = [
-        {"id": item["id"], "title": item["title"], "kind": "core"}
-        for item in config["core_sections"]
-    ]
+    """One narrator-written lead, then each enabled collector as reference.
+
+    The four "core sections" this replaces -- executive-brief, key-changes,
+    risks-watchlist, coverage-freshness -- were inherited wholesale from the
+    predecessor's external-news design and were vestigial here. Measured on a
+    real report: they were 30% of the file and their content was the collector
+    summaries, printed verbatim, twice, above the collectors that printed them
+    a third time.
+
+    ``config["core_sections"]`` is still accepted and still validated; it is no
+    longer projected into the document.
+    """
+    plan = [{"id": LEAD_SECTION_ID, "title": "Summary", "kind": "lead"}]
     plan += [
         {"id": section["id"], "title": section["title"], "kind": "section"}
         for section in config["sections"]
         if section["enabled"]
     ]
     return plan
-
 
 def section_entries(
     config: dict[str, Any], manifest: dict[str, Any]
@@ -351,6 +359,11 @@ def coverage_summary(
         )
     else:
         lines.append(narrator.render("No section is degraded."))
+    # The per-section table with generated/fresh-until timestamps. It used to
+    # live in the `coverage-freshness` core section; retiring those sections
+    # would have dropped it from the document, so it lands here -- once, at the
+    # end, where the authoritative record belongs.
+    lines += ["", narrator.coverage_table(entries)]
     statuses = {entry["id"]: entry["status"] for entry in entries}
     listed = ", ".join(
         _id_status(item, statuses.get(item, "absent")) for item in required
@@ -374,53 +387,52 @@ def compose_report(
     narration: narrator.Narration,
     overall: str,
 ) -> dict[str, Any]:
+    """Assemble the document: a lead a human reads, then reference material.
+
+    THE FACT SET IS STILL THE SAME ON BOTH PATHS, which is the invariant that
+    matters. Every collector section is rendered by the pipeline -- status,
+    summary, caveats, detail -- narrated or not, so the narrator can add
+    interpretation above but cannot remove, reword, or bury a fact. What changed
+    is only *arrangement*: the lead is the narrator's, the reference below it is
+    the pipeline's, and each fact appears once instead of three times.
+
+    The lead is published as real Markdown rather than escaped plain text. That
+    is a deliberate, narrowed trade. Forgery mattered when eight sections each
+    carried a ``Status (authoritative)`` line and a forged ninth was
+    indistinguishable; now the authoritative record is ONE pipeline-rendered
+    table in a section of its own, and prose above it cannot impersonate a table
+    it sits beside. Third-party strings the pipeline interpolates -- commit
+    subjects, event project names -- are still escaped wherever the pipeline
+    renders them.
+    """
     by_id = {entry["id"]: entry for entry in entries}
     sections = []
     for item in plan:
-        # THE FACT SET IS THE SAME ON BOTH PATHS. ``narration.bodies`` is the
-        # pipeline's own render of this section -- status line, summary,
-        # metrics, every caveat, detail; for the core sections the coverage
-        # table, the degraded list, the delivery gaps -- and it is written on
-        # every path, narrated or not. The narrator's prose is APPENDED
-        # underneath. It cannot replace a fact, drop one, or reword one.
-        #
-        # It used to replace the whole body. Measured on identical data for one
-        # date: the deterministic render listed "report-delivery: DELIVERY
-        # FAILED: 6 of 6 due day(s) ... have no valid published report" under
-        # RISKS AND WATCHLIST; the narrated render of the same run said "All
-        # systems nominal". A cooperative-but-wrong narrator could make bad news
-        # disappear, which is the same false green as a forged status line
-        # arriving by a politer route.
-        parts = [narration.bodies.get(item["id"], "").strip()]
-        # The only place narrator prose enters the document, and it can only be
-        # reached through ``untrusted_bodies`` -- which is rendered through the
-        # escaper, always. The narrator reads text this pipeline did not write
-        # (commit subjects, PR titles, decision notes from every watched repo)
-        # and is itself a model, so its output is plain text with no power to
-        # produce markup: no emphasis, no heading, no table, no HTML, no fence.
-        untrusted = narration.untrusted_bodies.get(item["id"])
-        if untrusted is not None:
-            parts.append(narrator.untrusted_body_block(untrusted))
-        body = "\n\n".join(part for part in parts if part).strip()
+        if item["kind"] == "lead":
+            body = narration.untrusted_bodies.get(LEAD_SECTION_ID, "").strip()
+            if not body:
+                body = narration.bodies.get(LEAD_SECTION_ID, "").strip()
+            if not body:
+                body = narrator.render(
+                    "No lead was produced for {date}. This is a defect in the "
+                    "render, recorded rather than hidden.",
+                    date=narrator.certified(date, narrator.CERTIFIED_TIMESTAMP),
+                )
+            sections.append({"id": item["id"], "title": item["title"], "body": body})
+            continue
+
+        body = narration.bodies.get(item["id"], "").strip()
         if not body:
             body = narrator.render(
                 "No body was produced for {id}. This is a defect in the render, "
                 "recorded rather than hidden.",
                 id=narrator.certified(item["id"], narrator.CERTIFIED_ID),
             )
-        # The authoritative status leads EVERY rendered section -- core sections
-        # included. They used to carry none, so a narrated status line was the
-        # only one in them and it published verbatim. The deterministic render
-        # already opens a collector section with this exact line, so it is
-        # prepended only when it is not already there.
-        lead = (
-            narrator.status_line(by_id[item["id"]])
-            if item["kind"] == "section"
-            else narrator.report_status_line(overall)
-        )
+        lead = narrator.status_line(by_id[item["id"]])
         if not body.startswith(lead):
             body = f"{lead}\n\n{body}"
         sections.append({"id": item["id"], "title": item["title"], "body": body})
+
     complete = [entry["id"] for entry in entries if entry["status"] == "complete"]
     degraded = [entry["id"] for entry in entries if entry["status"] != "complete"]
     report = {
@@ -434,7 +446,6 @@ def compose_report(
         "markdown_path": str(Path(config["artifact_dir"]) / date / "report.md"),
     }
     return validate_daily_report(report, config)
-
 
 def provenance_line(narrator_cfg: dict[str, Any], narration: narrator.Narration) -> str:
     """Line 2 of report.md: who narrated, and on whose authority.
@@ -454,10 +465,9 @@ def provenance_line(narrator_cfg: dict[str, Any], narration: narrator.Narration)
         provider = str(narrator_cfg.get("provider") or "unconfigured provider")
         model = str(narrator_cfg.get("model") or "unconfigured model")
         return narrator.render(
-            "Narrated in one pass by {provider}/{model} (as configured). Every status "
-            "below was derived by the pipeline from files it read; the narrator cannot "
-            "change one. Everything above a quoted narration block is the pipeline's "
-            "own render and is on this page whether the narrator ran or not.",
+            "Summary written by {provider}/{model}. Everything below it is rendered "
+            "by the pipeline from files it read — every status, metric and caveat is "
+            "on this page whether or not a model answered.",
             provider=narrator.certified(provider, narrator.CERTIFIED_TOKEN),
             model=narrator.certified(model, narrator.CERTIFIED_TOKEN),
         )

@@ -67,9 +67,9 @@ def gap_collector(section_cfg, report_date, config_value=None):
 
 
 def nominal_narrator(section_ids: list[str]):
-    def invoke(prompt, provider, model):
+    def invoke(prompt, provider, model, reasoning=None):
         return {
-            "stdout": json.dumps({"sections": {item: NOMINAL for item in section_ids}}),
+            "stdout": json.dumps({"headline": "h", "lead": NOMINAL}),
             "usage": {"completed": True, "failed": False, "provider": provider, "model": model},
             "usage_note": None,
             "command": "/stub/hermes",
@@ -122,9 +122,16 @@ class BadNewsSurvivesNarrationTests(FactParityCase):
         deterministic, narrated = self.render_both("gap")
         for label, outcome in (("deterministic", deterministic), ("narrated", narrated)):
             with self.subTest(path=label):
-                risks = self.bodies_of(outcome)["risks-watchlist"]
-                self.assertIn("DELIVERY FAILED", risks)
-                self.assertIn("6 of 6 due day", risks)
+                # The delivery gap now lands in the report-delivery section's
+                # own body; the risks-watchlist roll-up was retired with the
+                # core sections.
+                # The gap lands in the collector section that found it; the
+                # risks-watchlist roll-up was retired with the core sections.
+                # Asserted against the whole document so the test does not
+                # depend on which stub id the fixture happened to register.
+                markdown = self.markdown_of(outcome)
+                self.assertIn("DELIVERY FAILED", markdown)
+                self.assertIn("6 of 6 due day", markdown)
 
     def test_the_narrator_saying_nominal_does_not_remove_the_gap(self) -> None:
         _, narrated = self.render_both("nominal")
@@ -177,6 +184,8 @@ class IdenticalFactSetTests(FactParityCase):
         left, right = self.compose_both("bodies")
         self.assertEqual(sorted(left), sorted(right))
         for section_id, body in left.items():
+            if section_id == "summary":
+                continue  # the lead IS the narrator's; parity is for the rest
             with self.subTest(section=section_id):
                 for line in body.splitlines():
                     if not line.strip():
@@ -186,16 +195,29 @@ class IdenticalFactSetTests(FactParityCase):
                         f"{section_id} lost a derived line under narration: {line!r}",
                     )
 
-    def test_the_coverage_table_is_byte_identical(self) -> None:
+    def test_every_collector_section_is_byte_identical(self) -> None:
+        """Narration is additive: it may prepend a lead, never alter a section.
+
+        This replaces a check on `coverage-freshness`, which was retired with
+        the core sections; the table it held is now rendered once in the
+        pipeline's COVERAGE block, outside the section list entirely.
+        """
         left, right = self.compose_both("coverage")
-        self.assertEqual(left["coverage-freshness"], right["coverage-freshness"])
+        for section_id, body in left.items():
+            if section_id == "summary":
+                continue  # the lead is the one section narration authors
+            with self.subTest(section=section_id):
+                self.assertEqual(body, right[section_id])
 
     def test_narration_is_additive_and_says_where_it_starts(self) -> None:
         left, right = self.compose_both("additive")
         for section_id, body in right.items():
+            if section_id == "summary":
+                continue  # the lead is narrator prose, not an additive block
             with self.subTest(section=section_id):
-                if section_id == "coverage-freshness":
-                    # Never narrated at all: it is the record of what happened.
+                if section_id != "summary":
+                    # Only the lead is narrated; collector sections are the
+                    # pipeline's own record on every path.
                     self.assertNotIn(narrator.NARRATOR_PROSE_LEAD, body)
                     continue
                 self.assertIn(narrator.NARRATOR_PROSE_LEAD, body)
@@ -206,13 +228,21 @@ class IdenticalFactSetTests(FactParityCase):
                 self.assertIn("All systems nominal", prose)
                 self.assertEqual(left[section_id], facts.strip())
 
-    def test_the_narrated_document_is_a_superset_of_the_deterministic_one(self) -> None:
-        deterministic, narrated = self.render_both("superset")
-        left = self.markdown_of(deterministic)
-        right = self.markdown_of(narrated)
-        self.assertGreater(len(right), len(left))
-        self.assertIn("All systems nominal", right)
-        self.assertNotIn("All systems nominal", left)
+    def test_every_deterministic_fact_survives_narration(self) -> None:
+        """Supersetness is about FACTS, not bytes.
+
+        The narrated document can be shorter than the deterministic one now --
+        a terse lead replaces a longer generated stand-in -- so length proves
+        nothing. What must hold is that no line the pipeline derived is missing
+        once a narrator has run.
+        """
+        left, right = self.compose_both("superset")
+        for section_id, body in left.items():
+            if section_id == "summary":
+                continue
+            for line in body.splitlines():
+                if line.strip():
+                    self.assertIn(line, right[section_id])
 
 
 class NarratorOmissionTests(FactParityCase):
@@ -226,9 +256,9 @@ class NarratorOmissionTests(FactParityCase):
             if item["id"] != "coverage-freshness"
         ]
 
-        def blank(prompt, provider, model):
+        def blank(prompt, provider, model, reasoning=None):
             return {
-                "stdout": json.dumps({"sections": {item: "   " for item in ids}}),
+                "stdout": json.dumps({"headline": "h", "lead": "   "}),
                 "usage": {"completed": True, "failed": False},
                 "usage_note": None,
                 "command": "/stub/hermes",
