@@ -502,10 +502,25 @@ PY
 # ── deploy & tests ───────────────────────────────────────────────────────────
 chk_unit_matches_repo() {
   local tpl="$REPO/components/wax/deploy/systemd/user/waxd.service"
-  [ -f "$tpl" ] || return 3
-  diff -q <(sed 's/[[:space:]]*$//' "$tpl") \
-          <(sed 's/[[:space:]]*$//' "$HOME/.config/systemd/user/waxd.service") >/dev/null 2>&1 && return 0
-  echo "installed waxd.service differs from the repo template — hand-edited live, or the template changed without reinstalling."
+  local inst="$HOME/.config/systemd/user/waxd.service"
+  [ -f "$tpl" ] && [ -f "$inst" ] || return 3
+  # Compare only what systemd acts on — comments drift constantly and that is
+  # not drift worth alarming on. The template carries @WAX_*@ tokens that
+  # install-systemd-user renders, so RENDER them here rather than dropping
+  # those lines: dropping them hid exactly the two directives (ExecStart and
+  # WAX_TRANSCRIBE) that matter most, and made the check report them as
+  # installed-only noise. (--dry-run cannot be diffed against one file either:
+  # it emits waxd.service and wax-alert.service concatenated.)
+  local norm='s/^[[:space:]]*//; s/[[:space:]]*$//; s/="/=/; s/"$//'
+  local keep='^(ExecStart|Environment|Type|Restart|RestartSec|KillMode|TimeoutStopSec|OnFailure|WantedBy|After|PartOf)='
+  local a b
+  a="$(sed -e "s|@WAX_EXEC_START@|\"$REPO/bin/waxd\"|" \
+           -e "s|@WAX_TRANSCRIBE_ENV@|\"WAX_TRANSCRIBE=$REPO/bin/transcribe\"|" \
+           -e "/@WAX_DOCUMENTATION_URI@/d" "$tpl" |
+        grep -E "$keep" | sed "$norm" | sort)"
+  b="$(grep -E "$keep" "$inst" | sed "$norm" | sort)"
+  [ "$a" = "$b" ] && return 0
+  echo "installed waxd.service differs on: $(diff <(printf '%s\n' "$a") <(printf '%s\n' "$b") | grep -E '^[<>]' | tr '\n' ' ' | head -c 170). Reinstall: components/wax/deploy/install-systemd-user && systemctl --user daemon-reload"
   return 2
 }
 chk_alert_unit_shipped() {
@@ -534,9 +549,16 @@ chk_no_stale_design_doc() {
   return 2
 }
 chk_agents_md_current() {
-  grep -qi 'waxd' "$REPO/AGENTS.md" 2>/dev/null && ! grep -qi 'n8n' "$REPO/AGENTS.md" 2>/dev/null && return 0
-  echo "AGENTS.md (== CLAUDE.md == GEMINI.md) does not describe Wax, or still describes the retired n8n pipeline. It is loaded into every agent's context in this repo."
+  local f="$REPO/AGENTS.md"
+  [ -f "$f" ] || { echo "no AGENTS.md"; return 2; }
+  grep -qi 'waxd' "$f" && return 0
+  echo "AGENTS.md never mentions waxd — it does not describe the running system, and it is loaded into every agent's context in this repo."
   return 2
+  # Deliberately NOT grepping for retired names (n8n, Fireflies, watch_audio.sh):
+  # a CORRECT AGENTS.md names them precisely to say they are retired, and two
+  # earlier versions of this check flagged that negation as staleness. grep
+  # cannot tell an assertion from its negation, so it must not pretend to.
+  # Staleness of prose is a review job, not a check.
 }
 chk_legacy_dirs_quiet() {
   [ -d "$HOME/audio/inbox" ] || return 0
