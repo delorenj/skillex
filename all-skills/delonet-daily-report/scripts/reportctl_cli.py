@@ -67,6 +67,25 @@ def build_parser() -> argparse.ArgumentParser:
         help="also fail when any enabled section did not complete",
     )
 
+    dist = commands.add_parser(
+        "distribute",
+        help="deliver the published report to the vault, notebook, email and Slack",
+    )
+    dist.add_argument("--date", default=default_date())
+    dist.add_argument(
+        "--only",
+        action="append",
+        default=[],
+        choices=["vault", "notebook", "email", "slack"],
+        help="limit to this target; repeatable. Unselected targets are reported as "
+        "skipped, never as delivered",
+    )
+    dist.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="resolve every target and render every payload without sending",
+    )
+
     archive = commands.add_parser("archive", help="publish a validated report generation")
     archive.add_argument("--report", required=True, help="validated DailyReport JSON input")
     archive.add_argument("--markdown", required=True, help="rendered Markdown input")

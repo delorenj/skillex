@@ -29,6 +29,7 @@ from reportctl_archive import (
     section_path,
     verify_published,
 )
+from distribute import distribute
 from reportctl_cli import build_parser
 from reportctl_config import load_config
 from reportctl_contracts import ConfigError, active_section_ids, required_section_ids
@@ -52,6 +53,43 @@ def command_status(config: dict[str, Any], date: str) -> dict[str, Any]:
         "published": published,
         "healthy": published["ok"] and published.get("status") == "complete",
     }
+
+
+def command_distribute(config: dict[str, Any], args: Any) -> tuple[dict[str, Any], int]:
+    """Deliver the generation ``current.json`` names -- and only that one.
+
+    Distribution reads the published artifact rather than whatever a run left
+    in memory, so a report can be re-delivered later without re-running
+    collection, and so a generation that never verified is never sent.
+    """
+    published = verify_published(config, args.date)
+    if not published["coherent"]:
+        return (
+            {
+                "date": args.date,
+                "ok": False,
+                "error": "nothing coherent is published for this date; run `reportctl run` first",
+                "problems": published.get("problems", []),
+            },
+            EXIT_UNMET,
+        )
+
+    generation = Path(published["generation"])
+    markdown = (generation / "report.md").read_text(encoding="utf-8")
+    report = json.loads((generation / "report.json").read_text(encoding="utf-8"))
+
+    result = distribute(
+        config,
+        args.date,
+        markdown,
+        report,
+        published.get("status", "unknown"),
+        report.get("run_id", ""),
+        only=args.only or None,
+        dry_run=args.dry_run,
+    )
+    result["generation"] = published.get("generation_id")
+    return result, (EXIT_OK if result["ok"] else EXIT_UNMET)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -106,6 +144,8 @@ def main(argv: list[str] | None = None) -> int:
                     f"section(s) {output.get('degraded')}, and --require-complete was requested"
                 )
                 exit_code = EXIT_UNMET
+        elif args.command == "distribute":
+            output, exit_code = command_distribute(config, args)
         else:
             output = archive_report(config, args.report, args.markdown, args.manifest)
 

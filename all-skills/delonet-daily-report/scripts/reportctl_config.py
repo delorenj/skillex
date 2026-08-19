@@ -73,8 +73,10 @@ CONFIG_KEYS = {
     "narrator",
     "project_roots",
     "sections",
+    "distribution",
 }
 SECTION_KEYS = {"id", "title", "collector", "required", "enabled", "max_age_hours", "options"}
+OPTIONAL_CONFIG_KEYS = {"max_age_hours", "distribution"}
 
 # --- schema v1 -> v2 migration -------------------------------------------------
 V1_VERSION = 1
@@ -225,6 +227,64 @@ def validate_core_sections(sections: Any) -> list[str]:
     return section_ids
 
 
+
+#: Where a published report is delivered. Optional: a config without it still
+#: produces reports, they just stay on disk.
+DISTRIBUTION_TARGETS = {"vault", "notebook", "email", "slack"}
+_TARGET_KEYS = {
+    "vault": {"enabled", "path", "git_commit"},
+    "notebook": {"enabled", "base_url", "notebook_name"},
+    "email": {"enabled", "to", "from", "mode", "subject_template"},
+    "slack": {"enabled", "to", "from", "mode", "subject_template"},
+}
+
+
+def validate_distribution(distribution: Any) -> dict[str, Any]:
+    """Validate delivery targets.
+
+    Credentials are deliberately NOT part of this schema. A Resend key belongs
+    in the environment or the vault, never in a config file that gets committed
+    -- so there is no key field here to put one in by accident.
+    """
+    if not isinstance(distribution, dict):
+        raise ConfigError("distribution must be an object")
+    unknown = set(distribution) - DISTRIBUTION_TARGETS
+    if unknown:
+        raise ConfigError(f"distribution: unknown target(s): {', '.join(sorted(unknown))}")
+    for name, cfg in distribution.items():
+        if not isinstance(cfg, dict):
+            raise ConfigError(f"distribution.{name} must be an object")
+        extra = set(cfg) - _TARGET_KEYS[name]
+        if extra:
+            raise ConfigError(f"distribution.{name}: unknown key(s): {', '.join(sorted(extra))}")
+        if "enabled" in cfg and not is_bool(cfg["enabled"]):
+            raise ConfigError(f"distribution.{name}.enabled must be boolean")
+        if not cfg.get("enabled"):
+            continue
+        if name == "vault" and not nonempty(cfg.get("path")):
+            raise ConfigError("distribution.vault.path must be a non-empty string when enabled")
+        if name in {"email", "slack"}:
+            recipients = cfg.get("to")
+            if not isinstance(recipients, list) or not recipients or not all(
+                nonempty(r) and "@" in r for r in recipients
+            ):
+                raise ConfigError(f"distribution.{name}.to must be a non-empty list of addresses")
+            if not nonempty(cfg.get("from")):
+                raise ConfigError(f"distribution.{name}.from must be a non-empty string")
+            if cfg.get("mode", "full") not in {"full", "digest"}:
+                raise ConfigError(f"distribution.{name}.mode must be 'full' or 'digest'")
+        if any(_looks_like_secret(v) for v in cfg.values() if isinstance(v, str)):
+            raise ConfigError(
+                f"distribution.{name}: a value looks like a credential. Keys belong in the "
+                "environment (RESEND_API_KEY) or 1Password, never in this file"
+            )
+    return distribution
+
+
+def _looks_like_secret(value: str) -> bool:
+    return value.startswith(("re_", "xoxb-", "xoxp-", "sk-", "ghp_"))
+
+
 def validate_narrator(narrator: Any) -> dict[str, Any]:
     if not isinstance(narrator, dict):
         raise ConfigError("narrator must be an object")
@@ -259,7 +319,10 @@ def validate_config(config: Any) -> dict[str, Any]:
     if legacy:
         raise ConfigError(legacy)
     require_keys(config, CONFIG_KEYS, "config")
-    missing = CONFIG_KEYS - {"max_age_hours"} - set(config)
+    # `distribution` is optional: a config without it still produces reports,
+    # they just stay on disk. Requiring it would break every config written
+    # before delivery existed.
+    missing = CONFIG_KEYS - OPTIONAL_CONFIG_KEYS - set(config)
     if missing:
         raise ConfigError(f"config: missing keys: {', '.join(sorted(missing))}")
     if config["version"] != CONFIG_VERSION:
@@ -279,6 +342,8 @@ def validate_config(config: Any) -> dict[str, Any]:
     config["max_age_hours"] = validate_age(config.get("max_age_hours", 24), "max_age_hours")
     validate_core_sections(config["core_sections"])
     validate_narrator(config["narrator"])
+    if "distribution" in config:
+        validate_distribution(config["distribution"])
     validate_project_roots(config["project_roots"])
     sections = config["sections"]
     if not isinstance(sections, list) or not sections:
