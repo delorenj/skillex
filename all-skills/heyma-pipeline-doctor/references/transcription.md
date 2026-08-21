@@ -16,11 +16,11 @@ waxd → worker.process → transcribe_adapter.transcribe_command()
            bin/transcribe (shell)
                  │  picks the interpreter:
                  ├─ $TRANSCRIBE_DIR/.venv-diarization/bin/python   → diarization ON
-                 └─ else `mise x -- uv run python`                 → diarization SILENTLY OFF
+                 └─ else `mise x -- uv run python`                 → required run degrades loudly
                         │
                         ▼
-                 scripts/transcribe.py → faster-whisper large-v3 (CUDA)
-                        └─ whisperlivekit.diarization.sortformer_backend_offline
+                 scripts/transcribe.py → faster-whisper large-v3 (CUDA/auto policy)
+                        └─ tracked wax.diarization_sortformer (strict CUDA default)
 ```
 
 **Both splits have caused multi-day silent outages.** The `transcribe` binary
@@ -47,15 +47,19 @@ single-speaker result unless you look here.
 tail -40 "$(ls -t "$HOME/HeyMa/var/logs"/*/transcription.*.log | head -1)"
 ```
 
-`Missing dependency for diarization: No module named 'X'` is the signature.
+Look for `Diarization-Device`, `DIARIZATION-DEGRADED`, `Diarization device
+preflight failed`, `Failed to load diarization model`, or `Diarization failed`.
+Every successful production run records both requested and actual device.
 
 ### 3. Test the imports in the venv that will actually be used
 
 ```bash
 T=$(readlink -f "$(command -v transcribe)")
-D="$(dirname "$(dirname "$T")")/.venv-diarization/bin/python"
+R="$(dirname "$(dirname "$T")")"
+D="$R/.venv-diarization/bin/python"
 echo "transcriber: $T"; echo "venv: $D"
-"$D" -c "import librosa, nemo, whisperlivekit.diarization.sortformer_backend_offline as m; print('OK', m.__file__)"
+PYTHONPATH="$R/components/wax/src" "$D" -c \
+  "from wax.diarization_sortformer import cuda_smoke; print(cuda_smoke())"
 ```
 
 Run it against the venv beside the **resolved** transcriber, not the one you
@@ -65,19 +69,20 @@ expect to exist. That distinction is the whole 2026-08-12 incident.
 
 | Finding | Cause | Fix |
 |---|---|---|
-| `No module named 'whisperlivekit'` but the directory exists | vendored source deleted, only `__pycache__` left | `git -C <checkout> checkout 1d21e8b^ -- whisperlivekit/` — 63 files, byte-identical to the tree that last produced `diarized=1` |
-| no `.venv-diarization` at all | venv lives in the other checkout, or was never built | `uv venv --python 3.12 .venv-diarization && uv pip install --python .venv-diarization/bin/python -e . 'nemo_toolkit[asr]'` |
+| `No module named 'wax.diarization_sortformer'` | checkout predates the tracked adapter or `WAX_TRANSCRIBE` points elsewhere | update the deployed checkout and confirm `same-checkout` |
+| no `.venv-diarization` at all | venv was deleted, lives in the other checkout, or was never built | `mise run wax:diarization:install` (pinned manifest + real CUDA smoke) |
 | imports fine but still `diarized=0` | Sortformer weights not cached and the host is offline | check `~/.cache/huggingface/hub/models--nvidia--diar_streaming_sortformer_4spk-v2` (~450 MB) |
+| `Diarization-Device` says `cpu` | `WAX_DIARIZATION_DEVICE=cpu/auto`, or old code forced CPU after loading | set strict `cuda`, reinstall the unit, restart waxd, run `wax doctor` |
 | `transcribe` resolves outside the deployed repo | the two-checkout split | pin `Environment=WAX_TRANSCRIBE=/home/delorenj/HeyMa/bin/transcribe` in `waxd.service` |
 
 ### 5. The `WAX_DIARIZATION` trap
 
-Historically **opt-out only**: `transcribe_adapter` branched solely on
-`0/false/no/off`, so `WAX_DIARIZATION=1` in the unit was a no-op that granted
-false confidence. It is retained deliberately (BMAD story 1-1) pending a canonical
-config. Do not conclude diarization is enabled because you can see that variable —
-the load-bearing test is whether the venv python exists and can import all three
-modules.
+`WAX_DIARIZATION=1` means the stage is required and a missing speaker track is
+reported as degraded; falsy values are the only opt-out. Device selection is a
+separate contract: `WAX_DIARIZATION_DEVICE=cuda` is the strict production
+default, `cpu` is an explicit escape hatch, and only `auto` may fall back to CPU.
+An ASR `--device cpu` retry does not alter the diarizer device. The load-bearing
+test is `wax doctor`: it executes a real Sortformer streaming step on CUDA.
 
 ## Transcription itself
 

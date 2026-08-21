@@ -49,7 +49,7 @@ transaction. `waxd` drains the outbox to NATS every 10 s.
 | Per-item logs | `<root>/var/logs/<item_id>/transcription.N.log` | the only place diarization errors appear |
 | Pass registry | `components/wax/config/passes.d/*.yaml` | **not** repo-root `passes.d/` |
 | Transcripts | `$WAX_VAULT` → `~/d/Transcripts` | symlink into the notes vault |
-| Diarization runtime | `.venv-diarization/` + `whisperlivekit/` beside the resolved `transcribe` | vendored, gitignored |
+| Diarization runtime | `.venv-diarization/` + tracked `components/wax/src/wax/diarization_sortformer.py` | pinned by `requirements-diarization.txt`; rebuild with `mise run wax:diarization:install` |
 
 ## The two state machines
 
@@ -95,9 +95,9 @@ recently of anything else.
 - **Archive before transcribe.** The audio is irreplaceable; the transcript is
   recomputable. If S3 fails, the source is kept *and* stashed in
   `recovered/unbacked/`, and transcription still proceeds.
-- **`WAX_DIARIZATION` is opt-out.** Only a falsy value did anything historically,
-  which made `WAX_DIARIZATION=1` in the unit inert. Retained deliberately (BMAD
-  story 1-1) until a canonical config lands.
+- **Diarization enablement and device are independent.** `WAX_DIARIZATION=1`
+  requires a speaker track; `WAX_DIARIZATION_DEVICE=cuda` separately requires
+  Sortformer to run on GPU. An ASR CPU retry never changes the latter.
 - **Passes are independent by contract.** `requires:` exists in the schema but a
   non-empty value is refused. A pass failing must not block another pass.
 - **Four passes are `enabled: false` placeholders** (domain-curation, mem-ops,

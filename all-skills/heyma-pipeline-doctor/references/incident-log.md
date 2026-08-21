@@ -8,6 +8,33 @@ that does not learn is just documentation.
 
 ---
 
+## 2026-08-21 · CUDA available, diarization on CPU · *execution overrode its own model loader*
+
+**Signature.** Torch reported CUDA 13.0 and an RTX 3090, and importing the old
+backend even allocated ~918 MiB on `cuda:0`, but every production log said
+`Running diarization (cpu)`. Long recordings spent tens of minutes diarizing on
+CPU despite a healthy GPU runtime.
+
+**Cause.** The backend automatically loaded Sortformer onto CUDA, including one
+hidden model at module import. `scripts/transcribe.py` then loaded a second copy
+and explicitly moved that model and preprocessor to CPU under a stale
+"partial CUDA runtime" workaround. No setting controlled this, and metadata did
+not record the actual device.
+
+**Fix.** Replaced the ignored WhisperLiveKit dependency with the tracked,
+side-effect-free `wax.diarization_sortformer` adapter; made
+`WAX_DIARIZATION_DEVICE=cuda` the strict default; kept ASR and diarization device
+policies independent; pinned the rebuild manifest; and added requested/actual
+device evidence to logs, transcript frontmatter, and adapter provenance. Both
+the installer and doctor now load Sortformer and execute a real streaming CUDA
+forward pass.
+
+**Checks that now catch it:** `diarization-device`, `diarization-cuda`, plus the
+primary `wax doctor` probes `diarization device policy` and
+`diarization cuda runtime`.
+
+---
+
 ## 2026-08-15 → 2026-08-19 · title-slug 404 · *dependency deleted off the host*
 
 **Signature.** Transcripts land correctly but keep bare timestamp filenames
@@ -61,10 +88,11 @@ probed `librosa` and `nemo` — both fine. Execution imported a **third** module
 The guard passed, up to 3 h of GPU ASR ran to completion, and the import died
 afterwards. Measured waste on one job: **29 min 24 s of ASR**.
 
-**Fix.** Restored the subtree from history (`git checkout 1d21e8b^ -- whisperlivekit/`),
-moved the diarization runtime into the deployed tree, pinned
-`WAX_TRANSCRIBE` in the unit so PATH can never again choose which code runs, and
-made the preflight import the real entry point.
+**Fix at the time.** Restored the subtree from history, moved the runtime into
+the deployed tree, pinned `WAX_TRANSCRIBE` in the unit so PATH can never again
+choose which code runs, and made the preflight import the real entry point. On
+2026-08-21 the private backend was replaced entirely by the tracked owned Wax
+adapter, removing this deletion class rather than merely detecting it.
 
 **Lesson.** *A preflight that tests different modules than execution imports is
 worse than no preflight* — it converts a hard failure into a silent downgrade and

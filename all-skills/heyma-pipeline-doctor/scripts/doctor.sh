@@ -297,8 +297,9 @@ chk_recent_diarized() {
 chk_no_diarization_error_in_log() {
   local L; L="$(ls -t "$VAR"/logs/*/transcription.*.log 2>/dev/null | head -1)"
   [ -n "$L" ] || return 3
-  grep -q 'Missing dependency for diarization' "$L" || return 0
-  echo "$(grep -m1 'Missing dependency for diarization' "$L")  [$L]"
+  local pattern='Missing dependency for diarization|Diarization device preflight failed|Failed to load diarization model|Diarization failed|DIARIZATION-DEGRADED'
+  grep -Eq "$pattern" "$L" || return 0
+  echo "$(grep -Em1 "$pattern" "$L")  [$L]"
   return 1
 }
 chk_tray_colour_honest() {
@@ -396,12 +397,43 @@ chk_same_checkout() {
   return 1
 }
 chk_diarization_imports() {
-  local t d; t="$(resolved_transcribe)"; [ -e "$t" ] || return 3
-  d="$(dirname "$(dirname "$t")")/.venv-diarization/bin/python"
-  [ -x "$d" ] || { echo "no diarization venv at $d — bin/transcribe silently skips diarization with only a [warn] to stderr"; return 1; }
-  "$d" -c 'import importlib.util as u,sys
-missing=[m for m in ("librosa","nemo","whisperlivekit") if u.find_spec(m) is None]
-sys.exit(0 if not missing else (print("missing: "+", ".join(missing)) or 1))' && return 0
+  local t d r; t="$(resolved_transcribe)"; [ -e "$t" ] || return 3
+  r="$(dirname "$(dirname "$t")")"
+  d="$r/.venv-diarization/bin/python"
+  [ -x "$d" ] || { echo "no diarization venv at $d — repair with: mise run wax:diarization:install"; return 1; }
+  PYTHONPATH="$r/components/wax/src" "$d" -c \
+    'import librosa, nemo, torch, wax.diarization_sortformer' >/dev/null 2>&1 && return 0
+  return 1
+}
+chk_diarization_device() {
+  local value=""
+  if [ -n "$MAIN_PID" ] && [ -r "/proc/$MAIN_PID/environ" ]; then
+    value="$(tr '\0' '\n' < "/proc/$MAIN_PID/environ" 2>/dev/null |
+             sed -n 's/^WAX_DIARIZATION_DEVICE=//p' | head -1)"
+  fi
+  value="${value:-cuda}"
+  case "$value" in
+    cuda) return 0 ;;
+    cpu|auto)
+      echo "WAX_DIARIZATION_DEVICE=$value permits CPU; production default is strict cuda"
+      return 2 ;;
+    *)
+      echo "invalid WAX_DIARIZATION_DEVICE=$value (expected cuda, cpu, or auto)"
+      return 1 ;;
+  esac
+}
+chk_diarization_cuda() {
+  local t d r out
+  t="$(resolved_transcribe)"; [ -e "$t" ] || return 3
+  r="$(dirname "$(dirname "$t")")"
+  d="$r/.venv-diarization/bin/python"
+  [ -x "$d" ] || return 3
+  out="$(PYTHONPATH="$r/components/wax/src" timeout 120 "$d" -c \
+    'import json; from wax.diarization_sortformer import cuda_smoke; print(json.dumps(cuda_smoke(), sort_keys=True))' 2>&1)" && {
+      printf '%s\n' "$out" | tail -1
+      return 0
+    }
+  printf '%s\n' "$out" | tail -3
   return 1
 }
 chk_sortformer_weights() {
@@ -618,7 +650,9 @@ check frontmatters-editor    "frontmatters editor resolvable"         "apply ste
 banner "Transcription dependencies"
 layer transcription
 check same-checkout       "daemon and transcriber share a checkout"  "two checkouts"
-check diarization-imports "diarization venv imports all three deps"  "diarization dead"
+check diarization-imports "tracked diarizer and runtime import"      "diarization dead"
+check diarization-device  "diarization policy requires CUDA"         "CPU selected"
+check diarization-cuda    "Sortformer executes a CUDA forward pass"   "CUDA path broken"
 check sortformer-weights  "Sortformer checkpoint cached"             "will download"
 
 banner "Archive"
