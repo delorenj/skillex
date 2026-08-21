@@ -87,7 +87,7 @@ change.
 |---|---|---|
 | `WAX_TITLE_API_BASE` | `https://openrouter.ai/api/v1` | any OpenAI-compatible base |
 | `WAX_TITLE_MODEL` | `google/gemini-3.7-flash` | must appear in `{base}/models` |
-| `WAX_TITLE_API_KEY_OP` | `op://DeLoSecrets/OpenRouter/wax` | resolved at call time |
+| `WAX_TITLE_API_KEY_OP` | `op://DeLoSecrets/yydsybdlpernq5j5tcf42hmtsi/credential` | dedicated HeyMa key, resolved at call time |
 | `WAX_TITLE_API_KEY_OP_FALLBACK` | `op://DeLoSecrets/OpenRouter/hermes` | borrowed key; warns loudly |
 | `WAX_TITLE_REQUEST_TIMEOUT_S` | `120` | |
 
