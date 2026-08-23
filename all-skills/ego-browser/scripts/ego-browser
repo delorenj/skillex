@@ -16,7 +16,7 @@
 
 set -euo pipefail
 
-VERSION="1.0.1"
+VERSION="1.0.2"
 CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/ego-browser"
 STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/ego-browser"
 CONFIG_FILE="$CONFIG_DIR/config.env"
@@ -26,7 +26,20 @@ AUDIT_LOG="$STATE_DIR/audit.log"
 # The Mac that owns the browser profile. Override in config.env or the env.
 DEFAULT_HOST="carries-macbook-air.burro-salmon.ts.net"
 
+# Precedence: environment > config.env > remote.env (discovery cache) > default.
+# Sourcing a file assigns unconditionally, so stash the environment's values
+# first and re-apply them afterwards - otherwise a config file silently wins
+# over an explicit `EGO_BROWSER_HOST=... ego-browser ...`.
+_env_host="${EGO_BROWSER_HOST-}"
+_env_bin="${EGO_BROWSER_REMOTE_BIN-}"
+_env_opts="${EGO_BROWSER_SSH_OPTS-}"
+
+[ -f "$CONFIG_DIR/remote.env" ] && . "$CONFIG_DIR/remote.env"
 [ -f "$CONFIG_FILE" ] && . "$CONFIG_FILE"
+
+[ -n "$_env_host" ] && EGO_BROWSER_HOST="$_env_host"
+[ -n "$_env_bin" ]  && EGO_BROWSER_REMOTE_BIN="$_env_bin"
+[ -n "$_env_opts" ] && EGO_BROWSER_SSH_OPTS="$_env_opts"
 
 EGO_BROWSER_HOST="${EGO_BROWSER_HOST:-${DEFAULT_HOST}}"
 EGO_BROWSER_SSH_OPTS="${EGO_BROWSER_SSH_OPTS:--o ConnectTimeout=10 -o BatchMode=yes}"
@@ -115,13 +128,19 @@ MSG
 }
 
 resolve_remote_bin() {
-  [ -n "$EGO_BROWSER_REMOTE_BIN" ] && { printf '%s' "$EGO_BROWSER_REMOTE_BIN"; return 0; }
+  # A cache entry only counts if it was written for the host we're targeting.
+  if [ -n "$EGO_BROWSER_REMOTE_BIN" ] \
+     && { [ -z "${EGO_BROWSER_CACHED_HOST-}" ] \
+          || [ "${EGO_BROWSER_CACHED_HOST-}" = "$EGO_BROWSER_HOST" ]; }; then
+    printf '%s' "$EGO_BROWSER_REMOTE_BIN"; return 0
+  fi
   local found
   found=$(ssh_ctl "$REMOTE_RESOLVE" 2>/dev/null) || return 1
   [ -n "$found" ] || return 1
   # Cache it so later invocations skip the search.
   {
-    printf '# written by ego-browser %s\n' "$VERSION"
+    printf '# written by ego-browser %s for host %s\n' "$VERSION" "$EGO_BROWSER_HOST"
+    printf 'EGO_BROWSER_CACHED_HOST=%s\n' "$(shq "$EGO_BROWSER_HOST")"
     printf 'EGO_BROWSER_REMOTE_BIN=%s\n' "$(shq "$found")"
   } > "$CONFIG_DIR/remote.env"
   printf '%s' "$found"
