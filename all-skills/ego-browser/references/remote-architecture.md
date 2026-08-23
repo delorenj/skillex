@@ -101,6 +101,9 @@ sudo pmset -c sleep 0 disksleep 0 standby 0 autopoweroff 0
 sudo pmset -a disablesleep 1 womp 1 tcpkeepalive 1
 ```
 
+On Apple Silicon `autopoweroff` does not exist and is silently ignored — that
+is expected, not a failed command. `standby`, `sleep` and `disksleep` all apply.
+
 Confirm with `pmset -g custom` (AC should read `sleep 0`, `disksleep 0`) and
 `pmset -g | grep SleepDisabled` (should read `1`). These persist across reboots.
 
