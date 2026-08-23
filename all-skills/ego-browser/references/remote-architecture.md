@@ -19,6 +19,15 @@ canonical-browser goal or fragment it per host, the browser lives in exactly one
 place — the MacBook that already holds the real Chrome profile — and every host
 reaches it through `scripts/ego-browser`.
 
+## Current status — verified live
+
+Brought up and tested 2026-08-23 against `carries-macbook-air` (macOS 26.6.2,
+arm64). All six `doctor` checks pass, multi-line heredocs execute, and the
+inherited profile is genuinely authenticated (a read-only GitHub check reported
+the session as `delorenj`). ego lite was already installed at
+`/Users/delorenj/.local/bin/ego-browser` and Remote Login was already enabled,
+so the install step below was not needed on this machine.
+
 ## The path a call takes
 
 ```
@@ -26,7 +35,7 @@ agent (any host)
   └─ ego-browser nodejs <<'EOF' … EOF
        └─ buffer stdin, append to audit.log
             └─ ssh -T carries-macbook-air.burro-salmon.ts.net
-                 └─ exec '/Applications/ego lite.app/…/ego-browser' nodejs
+                 └─ exec '/Users/delorenj/.local/bin/ego-browser' nodejs
                       └─ ego lite (Aqua session) drives the real profile
 ```
 
@@ -80,33 +89,57 @@ The bridge is only as good as the Mac's uptime. Worth setting on that machine:
   adapter*. A closed lid on battery will still drop it off the tailnet.
 - **Tailscale on login**, so it rejoins after a reboot without a human.
 
-## Known caveat: the launchd GUI session
+## The launchd GUI session — tested, not a problem
 
-This is the one risk that could not be tested while the Mac was offline, so it
-is called out rather than assumed away.
+This was flagged as the main unknown before the Mac was reachable. It has now
+been tested end to end on macOS 26.6.2 (arm64) and **it is not an issue**: a
+plain non-interactive ssh session reaches ego lite's services fine, drives the
+real profile, and returns page data. `ego-browser doctor` passes all six checks.
 
-On macOS, a process started from a plain ssh session lands in a different
-launchd bootstrap namespace than the GUI (Aqua) session. CLIs that talk to a
-GUI app's Mach services sometimes fail there with a connection error, even
-though the same command works in Terminal.app on the Mac.
+The reasoning behind the original concern still holds in general — a process
+started from ssh lands in a different launchd bootstrap namespace than the Aqua
+session — but ego lite evidently does not depend on a Mach service that the
+namespace blocks. Keep the remedies below only as a fallback if a future macOS
+or ego lite release regresses this:
 
-Whether this bites depends on how `ego-browser` reaches ego lite. If it uses a
-local TCP/WebSocket port (typical for a Chromium-derived app), plain ssh works
-fine. If it uses a Mach service, it may not.
+1. Keep the Mac logged in to its GUI session with ego lite running.
+2. Launch via `ssh mac 'open -a "ego lite"'` — `open` hands off to the GUI session.
+3. Last resort: `launchctl asuser $(id -u) …`, which needs root on the Mac.
 
-**`ego-browser doctor` distinguishes the two cases**: check 5 exercises the Node
-runtime, check 6 exercises the live browser connection. Runtime OK + browser
-FAIL is the signature of this problem.
+`doctor` check 6 distinguishes the cases: it now reports plainly when a failure
+is an application-level error rather than a broken connection, so a bad probe
+can never again be misread as a launchd problem.
 
-Remedies, cheapest first:
+## Pitfall: ssh eats stdin
 
-1. Keep the Mac **logged in to its GUI session** with ego lite running. Once an
-   Aqua session exists, ssh-launched clients can usually reach it.
-2. Launch the app from the ssh session so it inherits a usable context:
-   `ssh mac 'open -a "ego lite"'` — `open` hands off to the GUI session.
-3. If neither works, wrap the remote call in `launchctl asuser $(id -u) …`.
-   Note this requires root on the Mac, so it means a passwordless-sudo rule for
-   that one command — do that only if 1 and 2 both fail.
+This bit the bridge during bring-up and is worth knowing before editing the
+script. **`ssh` reads and discards stdin even when running a remote command.**
+A liveness probe like `ssh host true` placed before the forwarding call will
+silently swallow the agent's entire heredoc; ego lite then receives empty input
+and opens an interactive REPL, which returns a banner and exit code 0. The
+result is a call that looks like it succeeded but ran nothing.
+
+Two guards are in place, and both should stay:
+
+- `ssh_ctl()` adds `-n` (stdin from /dev/null) and is used for **every** control
+  or probe call. Only `ssh_pipe()` may touch stdin.
+- The agent's script is buffered to a temp file **before** any ssh runs.
+
+The audit log is the giveaway if this ever regresses: an entry with a header but
+no script body means stdin was consumed upstream.
+
+## Invocation forms
+
+Verified against the shipped CLI:
+
+| Form | Result |
+| --- | --- |
+| `ego-browser nodejs` + piped stdin | **works** — this is what the bridge uses |
+| `ego-browser` + piped stdin, no command | prints usage; does not run the script |
+| `ego-browser nodejs -e '<script>'` | hangs waiting on stdin over ssh — avoid |
+
+Do not put `.cell` / `.end` in a piped script; those are interactive-REPL
+commands only.
 
 ## Deliberate non-goals
 
