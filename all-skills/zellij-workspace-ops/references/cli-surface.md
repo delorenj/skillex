@@ -5,16 +5,31 @@ the capability map, verified against the installed binary's `--help`.
 
 ## Identify a pane from inside it
 
-Both are real environment variables inside any zellij pane:
-
 ```
 $ZELLIJ_PANE_ID        # e.g. 3   — `set-pane-color` defaults to this
 $ZELLIJ_SESSION_NAME   # e.g. Workspace
-$ZELLIJ                # set at all → you are inside zellij
+$ZELLIJ                # "0" — but see the trap below
 ```
 
-Guard every hook with `[ -n "${ZELLIJ:-}" ]` and wrap the call in
-`timeout 1s … || true`. A hook must never block or fail an agent turn.
+**Gate hooks on `ZELLIJ_SESSION_NAME`, never on `$ZELLIJ`.** The server does set
+`ZELLIJ=0` (`envs::set_zellij("0")`), and the bare pane shell has it — but it is
+**absent from the Claude Code and Codex processes themselves**, which is exactly where
+hooks run. Sampled from `/proc/<pid>/environ` on 2026-08-23:
+
+| process | `ZELLIJ_SESSION_NAME` | `ZELLIJ` |
+|---|---|---|
+| pane `zsh` | set | `0` |
+| `kimi-co` | set | `0` |
+| Claude Code (`2.1.241`) | set | **absent** |
+| `codex`, `node-MainThread` | set | **absent** |
+
+Something strips it between the pane shell and the agent (a `tmux: server` also turns up
+inside a pane, and the agents may sanitise their own env). The mechanism does not matter;
+the consequence does — **a hook gated on `$ZELLIJ` can never fire even once.** Gating on
+`ZELLIJ_SESSION_NAME` is also better on its own merits: it is the variable the call
+actually needs, so the guard and the requirement are the same check.
+
+Wrap every call in `timeout 1s … || true`. A hook must never block or fail an agent turn.
 
 ## Target a tab from outside
 
@@ -43,6 +58,41 @@ Those are the attention signal. See [attention.md](attention.md).
 
 Always run these with `timeout` and `env -u ZELLIJ -u ZELLIJ_SESSION_NAME` when calling
 from outside a pane, so a stale inherited env cannot retarget the call.
+
+### `list-panes --json` is 45× slower than `list-panes --tab`
+
+Measured twice on this machine, rock-steady:
+
+| Call | Time |
+|---|---|
+| `action list-panes --tab` | **104 ms** |
+| `action list-panes --json` | **4706 ms** |
+
+`--json` (and `--all`) resolve each pane's running command out of `ps`, which is what
+costs the four and a half seconds. `--tab` returns the same `TAB_ID` / `TAB_NAME` /
+pane-id columns as a table.
+
+**A hook cannot afford the `--json` path** — it blows straight through any sane
+`timeout` and would stall an agent turn. Parse the table instead; its columns are
+two-space separated, so tab names containing single spaces (`Ideal Scenario`) survive a
+`-F'  '` split intact:
+
+```bash
+zellij --session "$S" action list-panes --tab \
+  | awk -F'  ' -v p="terminal_$ZELLIJ_PANE_ID" '$4==p {print $1"\t"$3; exit}'
+```
+
+The cost is specific to `list-panes`, and it is the `ps` resolution that does it — do
+not generalise it to `--json` as a flag. Measured alongside, on the same session:
+
+| Call | Time |
+|---|---|
+| `list-tabs --json` | 105 ms |
+| `list-tabs --json --panes` | 104 ms |
+
+So deckard's 2 s cap is comfortable for the call it actually makes (`list-tabs --json`);
+its timeouts were the wedged server, not this. Reach for `list-panes --json` only when
+you genuinely need each pane's running command, and never from a hook.
 
 ## Drive a pane
 
@@ -130,7 +180,7 @@ From inside a WASM plugin:
 ## Calling any of this from a hook
 
 ```bash
-[ -n "${ZELLIJ:-}" ] || exit 0
+[ -n "${ZELLIJ_SESSION_NAME:-}" ] || exit 0    # NOT $ZELLIJ — see above
 timeout 1s zellij action … >/dev/null 2>&1 || true
 ```
 
