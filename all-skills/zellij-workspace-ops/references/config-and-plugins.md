@@ -74,6 +74,39 @@ Currently granted there: `zellij_visual_notifications`, `zellij-new-tab-next-to-
 `zellij-attention`, `room`. **Permissions have never been the blocker** for any of the
 plugin problems investigated — do not spend time on that hypothesis.
 
+### Never alias a custom `.wasm` in the `plugins {}` block
+
+The `plugins {}` block is for aliasing **built-in** plugins (`zellij:` prefix) only.
+A custom `.wasm` must be referenced by its full `file:` URL directly in the binding:
+
+```kdl
+bind "Ctrl y" {
+    LaunchOrFocusPlugin "file:/home/delorenj/.config/zellij/plugins/room.wasm" {
+        floating true
+        move_to_focused_tab true
+    }
+    SwitchToMode "normal"
+}
+```
+
+**Why the alias fails**, so the error is recognisable: zellij's keybinding parser calls
+`RunPluginOrAlias::from_url()` at config-parse time and passes `None` for the alias
+dictionary. A bare name like `"room"` has no URL scheme, so URL parsing fails, the
+fallback alias lookup finds nothing, and you get an *alias error at config load*. The
+`file:` scheme is handled natively by `RunPluginLocation::parse()`, which bypasses the
+alias resolver entirely.
+
+| Plugin type | Reference format |
+|---|---|
+| Built-in | `zellij:name` — e.g. `zellij:share`, `zellij:session-manager` |
+| Custom `.wasm` | `file:/absolute/path` |
+| Remote | `https://…` |
+
+**No variables in plugin URLs.** Neither `~` nor `$HOME` is expanded — zellij takes the
+string literally. Older docs on this machine show `file:$HOME/…` because a now-deleted
+setup script `sed`-expanded `$HOME` before zellij ever saw the file. That script is gone,
+so `$HOME` in a plugin URL is now just as broken as a tilde. Absolute paths only.
+
 ## No version gate — stop rebuilding plugins
 
 Checked three ways:
