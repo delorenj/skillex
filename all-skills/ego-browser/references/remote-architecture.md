@@ -80,14 +80,41 @@ If ego lite moves, delete that cache file or set `EGO_BROWSER_REMOTE_BIN`.
 Steps 1 and 3 are inherently hands-on: the first needs a macOS setting toggled,
 the second is a GUI wizard. Neither can be driven from Linux.
 
-## Keeping the Mac available
+## Keeping the Mac available — applied 2026-08-23
 
-The bridge is only as good as the Mac's uptime. Worth setting on that machine:
+The bridge is only as good as the Mac's uptime, and this one was dropping off
+the tailnet every few minutes. The cause was **not** the idle timer. It runs
+**lid closed (clamshell)** on AC, and its own log named the culprit:
 
-- **Prevent sleep** while on power: `sudo pmset -c sleep 0 disablesleep 0`, or
-  *System Settings → Displays → Advanced → Prevent automatic sleeping on power
-  adapter*. A closed lid on battery will still drop it off the tailnet.
-- **Tailscale on login**, so it rejoins after a reboot without a human.
+```
+Sleep  Entering Sleep state due to 'Clamshell Sleep' ... Using AC (Charge:100%)
+```
+
+macOS sleeps on lid-close regardless of the idle sleep setting, so `pmset -c
+sleep 0` alone does nothing for a clamshell machine. The setting that matters
+is `disablesleep`, which is global rather than per-power-source.
+
+Applied and verified:
+
+```bash
+sudo pmset -c sleep 0 disksleep 0 standby 0 autopoweroff 0
+sudo pmset -a disablesleep 1 womp 1 tcpkeepalive 1
+```
+
+Confirm with `pmset -g custom` (AC should read `sleep 0`, `disksleep 0`) and
+`pmset -g | grep SleepDisabled` (should read `1`). These persist across reboots.
+
+**Battery caveat.** `disablesleep` is global, so if AC is ever lost the machine
+stays awake and drains instead of sleeping. macOS still force-sleeps at critical
+battery, so this won't corrupt anything — but before unplugging it to travel,
+undo it:
+
+```bash
+sudo pmset -a disablesleep 0
+```
+
+`womp 1` (wake on network) and `tcpkeepalive 1` were already set and are worth
+keeping: they let the Mac recover its tailnet presence if it ever does sleep.
 
 ## The launchd GUI session — tested, not a problem
 
