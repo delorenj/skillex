@@ -60,13 +60,43 @@ Two deliberate design points that are easy to undo by accident:
   *ignored* signal is inherited across `exec`, which would leave Ctrl-C dead inside the
   agent itself. A *handled* signal resets to default for the child.
 
-### `post_command_discovery_hook` — for panes already running the old way
+### `post_command_discovery_hook` — TRIED, REVERTED, do not re-add naively
 
-Set in `config.kdl`:
+This was wired on 2026-08-23 and **removed the same day for corrupting pane
+commands.** The mechanism is sound; the matching was not. Read this before
+reaching for it again.
 
-```kdl
-post_command_discovery_hook "/home/delorenj/.config/zellij/scripts/resurrect-command-hook.sh"
+The hook matched agent names as bare **substrings** of the whole command line
+(`case "$cmd" in *claude*|*codex*|*hermes*|*agy*|…`). Against this machine's real
+`ps` output that captures things which are not interactive agents at all:
+
 ```
+node .../bin/codex mcp-server                     -> agent-pane codex     ✗
+.../codex-linux-x64/vendor/.../codex mcp-server   -> agent-pane codex     ✗
+.../hermes-agent/releases/.../python /h...        -> agent-pane hermes    ✗
+```
+
+An MCP server is not an agent; a daemon's python is not the `hermes` CLI. `*agy*`
+and `*hermes*` are broad enough to hit a great deal on this box. Observed damage:
+a pane that was a plain shell with restored scrollback became
+`command="agent-pane" args="hermes" start_suspended true` — coming back as an
+ENTER prompt running the wrong thing, the exact opposite of the intent.
+
+Two further reasons not to retry it as-is:
+
+- **Its upside was already near zero.** It can only rewrite panes with a *live*
+  process (see the limit below), and a pane with a live process is working and
+  does not need migrating.
+- **zellij caches `terminal_cmds` per pane**, so a poisoned entry does *not* clear
+  when the hook is removed. It corrects only when that pane's foreground process
+  next changes.
+
+If you ever do want it, match on the **basename of the executable** (resolving
+`node`/`python` to the script they run), require an exact match against the agent
+set, and reject known non-interactive subcommands (`mcp-server`, `daemon`, `exec`,
+`-p`, `run`). Substring matching on a full command line is not safe here.
+
+The contract itself, for reference:
 
 Contract, verified against 0.44.3 source
 (`zellij-server/src/os_input_output.rs::run_command_hook`):
@@ -76,12 +106,12 @@ Contract, verified against 0.44.3 source
 - a non-zero exit makes zellij log an error and keep the original — so the safe failure
   mode is "echo the input back, exit 0"
 
-**Performance is a real constraint, not a nicety.** The hook is invoked once per *line
-of `ps -ao ppid,args`* — every process on the machine — on every serialization tick.
-This box runs ~2,566 processes. The script is therefore pure POSIX `case` and parameter
-expansion with **zero** subshells; measured at 474 µs, ≈1.2 s of CPU per minute. Adding
-a single `grep`/`sed`/`$(…)` multiplies by the whole process table. Do not "clean it
-up" with a pipeline.
+**Cost, measured — smaller than it first looks.** The hook is invoked once per *line of
+`ps -ao ppid,args`*. An earlier version of this file said that meant ~2,566 invocations
+(the `ps -e` count); that is wrong. `ps -ao` lists only tty-attached processes, which
+here is **69 lines**, so one `get_all_cmds_by_ppid()` call costs ~25 ms of hook. Keep it
+fork-free anyway, but do not reject the approach on performance grounds — it was
+measured innocent when pane creation was slow. The cause of that was elsewhere.
 
 ## The limit: it is not retroactive
 
@@ -108,7 +138,9 @@ The convergent path: dismiss the suspended panes once, then launch through
 zellij action send-keys --pane-id <id> Esc
 ```
 
-Enumerate ids from `zellij action list-panes --json`.
+Enumerate ids from `zellij action list-panes --tab` — **not** `--json`, which takes
+4.7 s because it resolves each pane's command out of `ps`. See
+[cli-surface.md](cli-surface.md).
 
 ## Serialization knobs currently set
 
