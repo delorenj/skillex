@@ -56,6 +56,7 @@ Load the reference for the **first** failing layer. Do not read them all.
 | Board layer | Playbook |
 |---|---|
 | Daemon, Paths & ledger, Deploy, Repo hygiene | `references/control-plane.md` |
+| Capture | `references/capture-ingest.md` |
 | Queue & inbox | `references/capture-ingest.md` |
 | Stage outcomes — titles/slugs | `references/enrichment.md` |
 | Stage outcomes — diarization | `references/transcription.md` |

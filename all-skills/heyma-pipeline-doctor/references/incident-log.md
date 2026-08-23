@@ -8,6 +8,34 @@ that does not learn is just documentation.
 
 ---
 
+## August 22, 2026 · GDM restart stranded a 23-hour capture · *audio graph teardown*
+
+**Signature.** The tray returned yellow after the graphical session restarted.
+`wax state` and `wax status` exited 2, and the stream reported
+`error-partial (uninstructed_exit)`. The inbox and all pipeline stages were
+healthy, but the doctor mislabeled the nonzero state result as `wax-cli`, which
+made a capture fault look like a broken control plane.
+
+**Cause.** A privileged `systemctl restart gdm` stopped the graphical user
+session. The encoder's transient scope correctly outlived `waxd` by about 12
+seconds, but D-Bus, PipeWire, and WirePlumber then stopped. FFmpeg exited when
+its Pulse source graph disappeared. This was not a machine reboot: the boot ID
+before and after the failure was identical.
+
+**Recovery.** All 1,381 Ogg segments were independently valid: 273,860,321
+bytes and 82,851.326 seconds. Wax remuxed them into a 273,651,230-byte recording,
+verified its S3 object by size and multipart ETag, and parked the local copy
+under `skipped/overduration/`. The original segment set remains under
+`recovered/orphans/`, with a matching aggregate SHA-256 fingerprint.
+
+**Fix.** Salvage now moves every original segment and sentinel into
+`recovered/orphans/` instead of deleting the segment directory. A dedicated
+systemd capture guard runs `wax rec quiesce` before an orderly graphical-session
+teardown removes D-Bus or PipeWire. The doctor now separates CLI validity from
+stream health and routes `error-partial` directly to the capture playbook.
+
+**Checks that now catch it:** `stream-healthy`, `capture-guard-active`.
+
 ## 2026-08-21 · CUDA available, diarization on CPU · *execution overrode its own model loader*
 
 **Signature.** Torch reported CUDA 13.0 and an RTX 3090, and importing the old

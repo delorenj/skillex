@@ -92,7 +92,7 @@ while [ $# -gt 0 ]; do
 doctor.sh — read-only health board for the Wax audio pipeline
 
   --json           machine-readable output
-  --layer <name>   run one layer only (daemon|paths|queue|stages|enrichment|
+  --layer <name>   run one layer only (daemon|capture|paths|queue|stages|enrichment|
                    transcription|archive|events|desktop|deploy|hygiene)
   --only <id>      run one check by id
   --quick          skip the slow checks (S3 round-trips, test suite, candystore)
@@ -172,8 +172,16 @@ chk_waxd_active() {
   return 1
 }
 chk_wax_cli() {
-  "$WAX" state --json >/dev/null 2>&1 && return 0
-  echo "$($WAX state --json 2>&1 | tail -2)"
+  local out rc
+  out="$("$WAX" state --json 2>&1)"; rc=$?
+  # `wax state` deliberately exits 2 when a machine reports error. That is a
+  # healthy CLI delivering bad pipeline news, not a broken executable. Parse
+  # the payload here and let stream-healthy classify the state separately.
+  case "$rc" in 0|2) ;; *) echo "$out" | tail -2; return 1 ;; esac
+  printf '%s' "$out" | python3 -c \
+    'import json,sys; s=json.load(sys.stdin); assert "stream" in s and "inbox" in s' \
+    >/dev/null 2>&1 && return 0
+  echo "$out" | tail -2
   return 1
 }
 chk_state_fresh() {
@@ -207,6 +215,34 @@ while True:
 sys.exit(0 if "stream" in json.loads(b) else 1)
 PY
   return 0
+}
+
+# ── capture ──────────────────────────────────────────────────────────────────
+chk_stream_healthy() {
+  local out rc
+  out="$("$WAX" state stream --cold --json 2>&1)"; rc=$?
+  case "$rc" in 0|2) ;; *) echo "$out" | tail -2; return 1 ;; esac
+
+  local fields=()
+  mapfile -t fields < <(STREAM_JSON="$out" python3 - <<'PY' 2>/dev/null
+import json, os
+s = json.loads(os.environ["STREAM_JSON"])
+for key in ("state", "clause", "cause_code", "evidence"):
+    print("" if s.get(key) is None else str(s.get(key)).replace("\n", " "))
+PY
+  )
+  [ "${#fields[@]}" -eq 4 ] || { echo "wax returned an invalid stream snapshot"; return 1; }
+  local s="${fields[0]}" clause="${fields[1]}" cause="${fields[2]}" evidence="${fields[3]}"
+  case "$s" in
+    ready|recording) return 0 ;;
+    not-ready)
+      echo "stream.state=$s clause=$clause cause=$cause evidence=$evidence"
+      [ "$clause" = a ] && return 2
+      return 1 ;;
+    *)
+      echo "stream.state=$s cause=$cause evidence=$evidence"
+      return 1 ;;
+  esac
 }
 
 # ── paths & ledger ───────────────────────────────────────────────────────────
@@ -560,6 +596,27 @@ chk_alert_unit_shipped() {
   echo "waxd.service declares OnFailure=wax-alert.service but deploy/ does not ship it — a fresh install has no crash-alert path."
   return 2
 }
+chk_capture_guard_active() {
+  local unit=wax-capture-guard.service
+  [ -f "$REPO/components/wax/deploy/systemd/user/$unit" ] || {
+    echo "$unit is missing from deploy/; a graphical-session restart can strand a live recording."
+    return 1
+  }
+  systemctl --user is-enabled --quiet "$unit" || {
+    echo "$unit is not enabled. Reinstall Wax's user units, then enable it."
+    return 1
+  }
+  systemctl --user is-active --quiet "$unit" || {
+    echo "$unit is not active. Start it before the next logout or reboot."
+    return 1
+  }
+  local installed
+  installed="$(systemctl --user cat "$unit" 2>/dev/null)"
+  printf '%s' "$installed" | grep -Fq "$REPO/bin/wax" &&
+    printf '%s' "$installed" | grep -Fq 'rec quiesce' && return 0
+  echo "$unit does not invoke this checkout's `wax rec quiesce`. Reinstall Wax's user units."
+  return 1
+}
 chk_tests_pass() {
   [ "$QUICK" = 1 ] && return 3
   ( cd "$REPO/components/wax" && PYTHONPATH="$REPO/components/wax/src" \
@@ -616,6 +673,10 @@ if ! systemctl --user is-active --quiet waxd.service; then block_layer queue; bl
 check state-fresh        "state mirror written within 180s"     "tick stopped"
 check waxd-socket        "status socket answers"                "socket thread dead"
 check waxd-rss           "daemon RSS under 512 MB"              "leak"
+
+banner "Capture"
+layer capture
+check stream-healthy     "stream is recordable or recording"    "capture stranded"
 
 banner "Paths & ledger"
 layer paths
@@ -677,6 +738,7 @@ banner "Deploy & tests"
 layer deploy
 check unit-matches-repo   "installed unit matches the repo"  "deploy drift"
 check alert-unit-shipped  "wax-alert.service is in deploy/"  "unshipped unit"
+check capture-guard-active "session-shutdown capture guard active" "recording can strand"
 check tests-pass          "component test suite passes"      "regression"
 
 banner "Repo hygiene"
@@ -711,6 +773,7 @@ else
     printf '%s' "$FAILED_LAYERS" | grep -v '^$' | head -1 | while read -r l; do
       case "$l" in
         daemon|paths)   echo "  references/control-plane.md" ;;
+        capture)        echo "  references/capture-ingest.md" ;;
         queue)          echo "  references/capture-ingest.md" ;;
         stages)         echo "  references/enrichment.md  (and transcription.md if diarization is red)" ;;
         enrichment)     echo "  references/enrichment.md" ;;

@@ -25,15 +25,33 @@ even after waxd has been SIGKILLed. Use it when you do not trust the daemon.
 | State | Means | Do |
 |---|---|---|
 | `ready` | no sentinels, preflight ok | nothing |
-| `recording` | rec.json + .partial, no .stop, encoder alive | nothing |
-| `not-ready` clause `a-finalizing` | stop written, finalizer running | wait; there is a 45 s deadline |
+| `recording` | rec.json, no .stop, encoder alive; audio accumulating in `.segs/` | nothing |
+| `not-ready` clause `a-finalizing` | stop written, finalizer running | wait; there is a 180 s deadline |
 | `not-ready` clause `b-incapable` | preflight failed | read `cause_code`: `no_default_source`, `disk_low`, `inbox_unwritable`, `stream_unwritable` |
-| `error-partial` | encoder exited uninstructed | `wax rec salvage` — remuxes to a valid ogg, moves the orphan to `recovered/orphans/` |
+| `error-partial` | encoder exited uninstructed | `wax rec salvage` — remuxes a valid Ogg into the inbox and moves every original segment and sentinel to `recovered/orphans/` |
 | `error` | sticky catch-all | `wax rec list`, fix the cause, then `wax reset` |
 
 **`wax rec start` never refuses because of residue.** It sweeps prior residue
 aside loudly (emitting `session.failed` for the stranded rid) and records. A
 recorder blockable by yesterday's crash is worse than the GUI app it replaced.
+
+### Graphical-session shutdown
+
+The encoder's transient scope survives a plain `waxd` restart, but it cannot
+keep reading after GDM tears down D-Bus, PipeWire, and WirePlumber. The enabled
+`wax-capture-guard.service` runs `wax rec quiesce` before those services stop.
+Idle is success; an active capture is cleanly finalized. Confirm the protection
+with:
+
+```bash
+systemctl --user is-enabled wax-capture-guard.service
+systemctl --user is-active wax-capture-guard.service
+```
+
+If the guard is absent, run `components/wax/deploy/install-systemd-user`, reload
+the user manager, and enable the unit. Do not test it by restarting GDM during a
+real recording; the component suite exercises the same FIFO stop and remux path
+against an isolated synthetic encoder.
 
 **No default source** is the most common `b-incapable` cause:
 ```bash
