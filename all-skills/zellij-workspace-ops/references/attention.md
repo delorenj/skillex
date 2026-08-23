@@ -91,9 +91,49 @@ high_contrast  reduced_motion  ipc_socket_path
 - Debug lines to confirm receipt: `Queueing notification: type=`,
   `No pane_id, notification queued but no visual state updated`
 
-A known-good config block already exists in `layouts/agent-orchestrator.kdl`. It never
-loaded because `default_layout` is `"terminal"` — **seven months dark for want of one
-config line.**
+A config block for it exists in `layouts/agent-orchestrator.kdl`, which is not the
+default layout — so it had never run in seven months.
+
+### …and why it still cannot do this job — measured 2026-08-23
+
+It was finally loaded and driven end to end. **It does not solve cross-tab attention,
+and adding it to `load_plugins` is worse than useless.** Three findings, from its own
+debug output:
+
+1. **A `load_plugins` entry is a BACKGROUND plugin and gets no render surface.** Its log
+   says `render() called: rows=0, cols=0`. It draws literally nothing. Listing it there
+   *looks* like wiring while being a no-op — which is very likely why it sat "installed"
+   for seven months.
+2. **Even hosted in a real pane, its entire output is a one-line bar inside its own
+   pane.** Captured verbatim with a notification queued:
+   `🔔 \u{1b}[38;2;234;179;8m[❗!!:13*]\u{1b}[0m (+1 queued)` — i.e. the same subtle
+   marker that is useless across 16–30 tabs.
+3. **It has no tab-mutating call in its compiled symbols** — only
+   `update_pane_visual_state`, `handle_notification_message`, `fg_escape`. It can never
+   mark tab 7 while you are looking at tab 3, which is the whole requirement. (The
+   `RenameTab` strings inside the `.wasm` come from the zellij-tile Action table that
+   every plugin embeds, not from its own code.)
+
+So it is a *pane* status bar, not a tab annunciator. If you ever want that bar, give it
+a pane — see `layouts/agent-orchestrator.kdl`. Do not put it in `load_plugins`.
+
+### What actually works cross-tab
+
+The only stock-zellij mechanism that changes how **one** tab looks from **any other** tab
+is the tab **name**. `scripts/zellij-notify` uses `rename-tab-by-id`, which:
+
+- mutates a tab by stable id **without stealing focus** — yanking focus off whatever the
+  user is doing would be worse than no alert;
+- still works when **no client is attached**, which matters because
+  `go-to-tab-name` and `close-tab` are silent no-ops in that state.
+
+It is wired to Claude Code's `Notification` hook (mark) and `UserPromptSubmit` (clear),
+and follows the hook contract: never blocks, never fails a turn, no-op + exit 0 outside
+zellij.
+
+This lands exactly on the ceiling described above — a name change, not a glow. That is
+the honest maximum without owning the renderer. To go past it you must replace the
+tab-bar plugin itself (fork `zellij:tab-bar`, or adopt zj-radar / zellaude below).
 
 ## Attribution — which tab fired?
 
