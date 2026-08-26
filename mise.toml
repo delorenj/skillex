@@ -99,3 +99,19 @@ depends = ["lint", "tc", "test"]
 [tasks.setup]
 description = "Install dependencies and git hooks"
 run = ["uv sync", "lefthook install"]
+
+# PJAN-84: the GLOBAL projection — ~/.agents/skills.json into skill-sets/global,
+# which every CLI on this machine reads through a single dir-level alias. It
+# lives here, in the registry that owns the farm, and NOT in the CommonProject
+# template: a project must never sync the machine's shared skill set, and there
+# is deliberately no enter hook for it.
+#
+# Preview first. This projection is shared by every CLI and every project on the
+# box, so see what a sync would remove before it removes anything.
+[tasks."skills:sync:global:preview"]
+description = "Report what a global skill sync would remove, without removing it"
+run = "python3 '{{config_root}}/.mise/scripts/sync-skills.py' --scope global --reconcile-dry-run"
+
+[tasks."skills:sync:global"]
+description = "Sync ~/.agents/skills.json into the shared global skill farm"
+run = "python3 '{{config_root}}/.mise/scripts/sync-skills.py' --scope global"
