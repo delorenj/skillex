@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://raw.githubusercontent.com/delorenj/skillex/main/skills.schema.json",
   "title": "Agent Skills Manifest",
-  "description": "Configuration for agent skill fanout. Declares individual skills and/or whole skill packs to synchronize into every agent CLI's skills directory.",
+  "description": "Configuration for agent skill fanout. Declares canonical all-skills entries and reference-only packs to compile into one scope activation root.",
   "type": "object",
   "definitions": {
     "skillName": {
@@ -22,7 +22,8 @@
     },
     "sourceUri": {
       "type": "string",
-      "description": "A skill/pack source: a file:// URI, an https:// git URL, or a git@host:path SSH URL.",
+      "description": "Legacy bootstrap/import source. Direct external activation bypasses the canonical all-skills catalog and is deprecated by ADR-0001.",
+      "deprecated": true,
       "anyOf": [
         { "pattern": "^file://" },
         { "pattern": "^https://" },
@@ -50,7 +51,7 @@
     },
     "packs": {
       "type": "array",
-      "description": "Skill packs to synchronize. A pack is a versioned directory of skills in the registry under packs/<name>[/<version>]. Declaring a pack materializes every skill it contains; you do not list its members individually.",
+      "description": "Reference-only skill compositions under packs/<name>[/<version>]. A pack selects canonical all-skills names; it never owns or materializes copied skill payloads.",
       "items": {
         "anyOf": [
           {
@@ -72,7 +73,8 @@
               },
               "source": {
                 "$ref": "#/definitions/sourceUri",
-                "description": "Direct source override (file:// path, or a git URL cloned into the local cache). Mutually exclusive with registry_path."
+                "description": "Deprecated direct source override retained only for migration. Import the pack manifest and its member skills into the canonical registry instead.",
+                "deprecated": true
               },
               "registry": {
                 "type": "string",
@@ -100,11 +102,13 @@
               "flatten": {
                 "type": "boolean",
                 "default": false,
-                "description": "Expand nested (container/leaf) layouts at projection time by descending: an inventory entry with no SKILL.md is treated as a container and is descended into, while any directory holding a SKILL.md is a skill and is never descended into. Depth is whatever the tree is, not a fixed one level. The projected name is the leaf directory's basename. Also enabled by [policy] flatten = true in the pack's pack.toml. include/exclude apply to the flattened names."
+                "deprecated": true,
+                "description": "Legacy copied-payload migration flag. New packs list canonical leaf names directly; flattening does not authorize pack-owned skill definitions."
               },
               "sealed": {
                 "type": "boolean",
-                "description": "Force SHA256SUMS verification of the pack payload. May only tighten: setting false does not disable a pack whose pack.toml declares [policy] sealed = true."
+                "deprecated": true,
+                "description": "Legacy copied-payload verification flag. Reproducibility now pins the canonical catalog and composition revisions instead of duplicating skill bytes."
               }
             },
             "required": ["name"],
@@ -115,12 +119,12 @@
     },
     "skills": {
       "type": "array",
-      "description": "Individual skills to synchronize. An entry here always overrides a pack member of the same name.",
+      "description": "Canonical all-skills entries to synchronize. An entry here always overrides a pack member of the same name.",
       "items": {
         "anyOf": [
           {
             "type": "string",
-            "description": "A skill path in the registry (e.g. 'skill-sets/33god/hindsight'). If no slash, defaults to 'all-skills/<name>'."
+            "description": "A canonical skill name. Slash-bearing registry paths are legacy and should be imported into all-skills before activation."
           },
           {
             "type": "object",
@@ -131,7 +135,8 @@
               },
               "source": {
                 "$ref": "#/definitions/sourceUri",
-                "description": "The source of the skill (file:// path, git@..., or https://...)."
+                "description": "Deprecated direct source. Import the skill into all-skills and reference its canonical name instead.",
+                "deprecated": true
               },
               "version": {
                 "type": "string",

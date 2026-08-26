@@ -57,7 +57,7 @@ Rationale: CLIs diverge on layout. Keeping rendering logic in adapters preserves
 
 ### AD-3: Symlinks only (no file copies)
 
-Rationale: edits to a skill in `all-skills/` must propagate instantly to all active CLI roots. Copies would drift. Broken symlinks are observable with `ls -la`.
+Rationale: edits to a skill in `all-skills/` must propagate instantly to all active CLI roots. Copies would drift. This applies to every skill set and agentpack; there is no sealed-payload exception. See the accepted [ADR-0001](../architecture/ADR-0001-reference-only-skill-topology.md) for the complete ownership and activation-root contract.
 
 ### AD-4: Snapshot-and-restore rollback
 

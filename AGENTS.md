@@ -21,6 +21,11 @@ My [skill collection](./all-skills/) structured into categorized sets of compati
   - NOTE: Consider modifying how this is named/arranged around unix-like available/enabled pattern.
 - There must be no duplicate skills.
 - All skills are defined once in [all-skills](./all-skills/) and symlinked elsewhere when needed.
+- Skill sets and agentpacks are reference-only compositions. They may own
+  composition metadata and pack-level support assets, but must never contain a
+  real `SKILL.md`; there is no snapshot-pack exception.
+- The enforceable ownership contract is
+  [ADR-0001](./docs/architecture/ADR-0001-reference-only-skill-topology.md).
 
 > WIP
 > To be iterated on and refined over time

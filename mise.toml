@@ -96,6 +96,10 @@ run = "uv build"
 description = "Run all quality checks: lint, typecheck, test"
 depends = ["lint", "tc", "test"]
 
+[tasks."topology:check"]
+description = "Audit strict single-source ownership (expected red until migration completes)"
+run = "uv run skillex topology check --root '{{config_root}}'"
+
 [tasks.setup]
 description = "Install dependencies and git hooks"
 run = ["uv sync", "lefthook install"]
