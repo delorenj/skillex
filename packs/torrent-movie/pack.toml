@@ -1,0 +1,6 @@
+[pack]
+name = "torrent-movie"
+description = "Search and download torrents to qBittorrent"
+
+[freeform]
+skills = ["torrent-movie"]

@@ -1,0 +1,162 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://raw.githubusercontent.com/delorenj/skillex/main/skills.schema.json",
+  "title": "Agent Skills Manifest",
+  "description": "Configuration for agent skill fanout. Declares individual skills and/or whole skill packs to synchronize into every agent CLI's skills directory.",
+  "type": "object",
+  "definitions": {
+    "skillName": {
+      "type": "string",
+      "pattern": "^[a-z0-9]([a-z0-9._-]*[a-z0-9])?$",
+      "description": "A single safe path component: lowercase alphanumerics, dot, dash, underscore. No slashes, no leading/trailing separator."
+    },
+    "packName": {
+      "type": "string",
+      "pattern": "^[a-zA-Z0-9]([a-zA-Z0-9._-]*[a-zA-Z0-9])?$",
+      "description": "A single safe path component naming a directory under the registry's packs/ directory."
+    },
+    "versionComponent": {
+      "type": "string",
+      "pattern": "^[a-zA-Z0-9]([a-zA-Z0-9._+-]*[a-zA-Z0-9])?$",
+      "description": "A single safe path component naming a version directory (e.g. '6.10.2', '0.18.2', '6.10.1-next.31')."
+    },
+    "sourceUri": {
+      "type": "string",
+      "description": "A skill/pack source: a file:// URI, an https:// git URL, or a git@host:path SSH URL.",
+      "anyOf": [
+        { "pattern": "^file://" },
+        { "pattern": "^https://" },
+        { "pattern": "^git@" }
+      ]
+    }
+  },
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "JSON Schema URL. Canonical value: https://raw.githubusercontent.com/delorenj/skillex/main/skills.schema.json"
+    },
+    "scope": {
+      "type": "string",
+      "enum": ["global", "project"],
+      "description": "The scope of this manifest."
+    },
+    "inherit_global": {
+      "type": "boolean",
+      "description": "Whether to inherit global skills and packs (only applicable for project scope). Project entries override inherited ones of the same name."
+    },
+    "registry": {
+      "type": "string",
+      "description": "Default Git repository registry URL for skills and packs."
+    },
+    "packs": {
+      "type": "array",
+      "description": "Skill packs to synchronize. A pack is a versioned directory of skills in the registry under packs/<name>[/<version>]. Declaring a pack materializes every skill it contains; you do not list its members individually.",
+      "items": {
+        "anyOf": [
+          {
+            "type": "string",
+            "description": "Shorthand for a registry pack: '<name>' or '<name>@<version>'.",
+            "pattern": "^[a-zA-Z0-9]([a-zA-Z0-9._-]*[a-zA-Z0-9])?(@[a-zA-Z0-9]([a-zA-Z0-9._+-]*[a-zA-Z0-9])?)?$"
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "name": {
+                "$ref": "#/definitions/packName",
+                "description": "The pack name. Resolves to packs/<name> in the registry unless source or registry_path is given."
+              },
+              "version": {
+                "$ref": "#/definitions/versionComponent",
+                "description": "Version directory under packs/<name>/. If omitted and the pack directory holds only version subdirectories, the highest version is selected."
+              },
+              "source": {
+                "$ref": "#/definitions/sourceUri",
+                "description": "Direct source override (file:// path, or a git URL cloned into the local cache). Mutually exclusive with registry_path."
+              },
+              "registry": {
+                "type": "string",
+                "description": "Git repository registry URL override for this specific pack."
+              },
+              "registry_path": {
+                "type": "string",
+                "description": "Explicit path to the pack within the registry (e.g. 'packs/bmad/6.10.2'). Mutually exclusive with source."
+              },
+              "include": {
+                "type": "array",
+                "items": { "$ref": "#/definitions/skillName" },
+                "description": "If present, only these skills from the pack are materialized."
+              },
+              "exclude": {
+                "type": "array",
+                "items": { "$ref": "#/definitions/skillName" },
+                "description": "Skills to skip. Applied after include."
+              },
+              "optional": {
+                "type": "boolean",
+                "default": false,
+                "description": "When true, an unresolvable pack produces a warning instead of an error."
+              },
+              "flatten": {
+                "type": "boolean",
+                "default": false,
+                "description": "Expand nested (container/leaf) layouts at projection time by descending: an inventory entry with no SKILL.md is treated as a container and is descended into, while any directory holding a SKILL.md is a skill and is never descended into. Depth is whatever the tree is, not a fixed one level. The projected name is the leaf directory's basename. Also enabled by [policy] flatten = true in the pack's pack.toml. include/exclude apply to the flattened names."
+              },
+              "sealed": {
+                "type": "boolean",
+                "description": "Force SHA256SUMS verification of the pack payload. May only tighten: setting false does not disable a pack whose pack.toml declares [policy] sealed = true."
+              }
+            },
+            "required": ["name"],
+            "not": { "required": ["source", "registry_path"] }
+          }
+        ]
+      }
+    },
+    "skills": {
+      "type": "array",
+      "description": "Individual skills to synchronize. An entry here always overrides a pack member of the same name.",
+      "items": {
+        "anyOf": [
+          {
+            "type": "string",
+            "description": "A skill path in the registry (e.g. 'skill-sets/33god/hindsight'). If no slash, defaults to 'all-skills/<name>'."
+          },
+          {
+            "type": "object",
+            "properties": {
+              "name": {
+                "$ref": "#/definitions/skillName",
+                "description": "The local folder name to link the skill to."
+              },
+              "source": {
+                "$ref": "#/definitions/sourceUri",
+                "description": "The source of the skill (file:// path, git@..., or https://...)."
+              },
+              "version": {
+                "type": "string",
+                "description": "Optional git branch, tag, or commit hash to checkout."
+              },
+              "registry": {
+                "type": "string",
+                "description": "Optional Git repository registry URL override for this specific skill."
+              },
+              "registry_path": {
+                "type": "string",
+                "description": "Path to the skill within the registry."
+              }
+            },
+            "anyOf": [
+              { "required": ["name", "source"] },
+              { "required": ["name", "registry_path"] }
+            ]
+          }
+        ]
+      }
+    }
+  },
+  "anyOf": [
+    { "required": ["skills"] },
+    { "required": ["packs"] }
+  ]
+}

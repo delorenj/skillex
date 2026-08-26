@@ -1,0 +1,300 @@
+{
+  "declared": 18,
+  "flattened": true,
+  "pack": "hermes-base",
+  "skills": [
+    {
+      "name": "apple-notes",
+      "relpath": "apple/apple-notes"
+    },
+    {
+      "name": "apple-reminders",
+      "relpath": "apple/apple-reminders"
+    },
+    {
+      "name": "findmy",
+      "relpath": "apple/findmy"
+    },
+    {
+      "name": "imessage",
+      "relpath": "apple/imessage"
+    },
+    {
+      "name": "claude-code",
+      "relpath": "autonomous-ai-agents/claude-code"
+    },
+    {
+      "name": "codex",
+      "relpath": "autonomous-ai-agents/codex"
+    },
+    {
+      "name": "hermes-agent",
+      "relpath": "autonomous-ai-agents/hermes-agent"
+    },
+    {
+      "name": "opencode",
+      "relpath": "autonomous-ai-agents/opencode"
+    },
+    {
+      "name": "computer-use",
+      "relpath": "computer-use"
+    },
+    {
+      "name": "architecture-diagram",
+      "relpath": "creative/architecture-diagram"
+    },
+    {
+      "name": "ascii-art",
+      "relpath": "creative/ascii-art"
+    },
+    {
+      "name": "ascii-video",
+      "relpath": "creative/ascii-video"
+    },
+    {
+      "name": "baoyu-infographic",
+      "relpath": "creative/baoyu-infographic"
+    },
+    {
+      "name": "claude-design",
+      "relpath": "creative/claude-design"
+    },
+    {
+      "name": "comfyui",
+      "relpath": "creative/comfyui"
+    },
+    {
+      "name": "design-md",
+      "relpath": "creative/design-md"
+    },
+    {
+      "name": "excalidraw",
+      "relpath": "creative/excalidraw"
+    },
+    {
+      "name": "humanizer",
+      "relpath": "creative/humanizer"
+    },
+    {
+      "name": "manim-video",
+      "relpath": "creative/manim-video"
+    },
+    {
+      "name": "p5js",
+      "relpath": "creative/p5js"
+    },
+    {
+      "name": "popular-web-designs",
+      "relpath": "creative/popular-web-designs"
+    },
+    {
+      "name": "pretext",
+      "relpath": "creative/pretext"
+    },
+    {
+      "name": "sketch",
+      "relpath": "creative/sketch"
+    },
+    {
+      "name": "songwriting-and-ai-music",
+      "relpath": "creative/songwriting-and-ai-music"
+    },
+    {
+      "name": "touchdesigner-mcp",
+      "relpath": "creative/touchdesigner-mcp"
+    },
+    {
+      "name": "jupyter-live-kernel",
+      "relpath": "data-science/jupyter-live-kernel"
+    },
+    {
+      "name": "dogfood",
+      "relpath": "dogfood"
+    },
+    {
+      "name": "himalaya",
+      "relpath": "email/himalaya"
+    },
+    {
+      "name": "codebase-inspection",
+      "relpath": "github/codebase-inspection"
+    },
+    {
+      "name": "github-auth",
+      "relpath": "github/github-auth"
+    },
+    {
+      "name": "github-code-review",
+      "relpath": "github/github-code-review"
+    },
+    {
+      "name": "github-issues",
+      "relpath": "github/github-issues"
+    },
+    {
+      "name": "github-pr-workflow",
+      "relpath": "github/github-pr-workflow"
+    },
+    {
+      "name": "github-repo-management",
+      "relpath": "github/github-repo-management"
+    },
+    {
+      "name": "hermes-desktop-plugins",
+      "relpath": "hermes-desktop-plugins"
+    },
+    {
+      "name": "gif-search",
+      "relpath": "media/gif-search"
+    },
+    {
+      "name": "heartmula",
+      "relpath": "media/heartmula"
+    },
+    {
+      "name": "songsee",
+      "relpath": "media/songsee"
+    },
+    {
+      "name": "youtube-content",
+      "relpath": "media/youtube-content"
+    },
+    {
+      "name": "lm-evaluation-harness",
+      "relpath": "mlops/evaluation/lm-evaluation-harness"
+    },
+    {
+      "name": "weights-and-biases",
+      "relpath": "mlops/evaluation/weights-and-biases"
+    },
+    {
+      "name": "huggingface-hub",
+      "relpath": "mlops/huggingface-hub"
+    },
+    {
+      "name": "llama-cpp",
+      "relpath": "mlops/inference/llama-cpp"
+    },
+    {
+      "name": "vllm",
+      "relpath": "mlops/inference/vllm"
+    },
+    {
+      "name": "audiocraft",
+      "relpath": "mlops/models/audiocraft"
+    },
+    {
+      "name": "segment-anything",
+      "relpath": "mlops/models/segment-anything"
+    },
+    {
+      "name": "obsidian",
+      "relpath": "note-taking/obsidian"
+    },
+    {
+      "name": "airtable",
+      "relpath": "productivity/airtable"
+    },
+    {
+      "name": "google-workspace",
+      "relpath": "productivity/google-workspace"
+    },
+    {
+      "name": "maps",
+      "relpath": "productivity/maps"
+    },
+    {
+      "name": "nano-pdf",
+      "relpath": "productivity/nano-pdf"
+    },
+    {
+      "name": "notion",
+      "relpath": "productivity/notion"
+    },
+    {
+      "name": "ocr-and-documents",
+      "relpath": "productivity/ocr-and-documents"
+    },
+    {
+      "name": "petdex",
+      "relpath": "productivity/petdex"
+    },
+    {
+      "name": "powerpoint",
+      "relpath": "productivity/powerpoint"
+    },
+    {
+      "name": "teams-meeting-pipeline",
+      "relpath": "productivity/teams-meeting-pipeline"
+    },
+    {
+      "name": "arxiv",
+      "relpath": "research/arxiv"
+    },
+    {
+      "name": "blogwatcher",
+      "relpath": "research/blogwatcher"
+    },
+    {
+      "name": "llm-wiki",
+      "relpath": "research/llm-wiki"
+    },
+    {
+      "name": "polymarket",
+      "relpath": "research/polymarket"
+    },
+    {
+      "name": "research-paper-writing",
+      "relpath": "research/research-paper-writing"
+    },
+    {
+      "name": "openhue",
+      "relpath": "smart-home/openhue"
+    },
+    {
+      "name": "xurl",
+      "relpath": "social-media/xurl"
+    },
+    {
+      "name": "hermes-agent-skill-authoring",
+      "relpath": "software-development/hermes-agent-skill-authoring"
+    },
+    {
+      "name": "node-inspect-debugger",
+      "relpath": "software-development/node-inspect-debugger"
+    },
+    {
+      "name": "plan",
+      "relpath": "software-development/plan"
+    },
+    {
+      "name": "python-debugpy",
+      "relpath": "software-development/python-debugpy"
+    },
+    {
+      "name": "requesting-code-review",
+      "relpath": "software-development/requesting-code-review"
+    },
+    {
+      "name": "simplify-code",
+      "relpath": "software-development/simplify-code"
+    },
+    {
+      "name": "spike",
+      "relpath": "software-development/spike"
+    },
+    {
+      "name": "systematic-debugging",
+      "relpath": "software-development/systematic-debugging"
+    },
+    {
+      "name": "test-driven-development",
+      "relpath": "software-development/test-driven-development"
+    },
+    {
+      "name": "yuanbao",
+      "relpath": "yuanbao"
+    }
+  ],
+  "version": "0.18.2"
+}
