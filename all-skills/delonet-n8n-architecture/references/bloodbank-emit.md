@@ -6,6 +6,13 @@ lives in `bloodbank-integration` — do not duplicate or diverge from it here.
 
 ## Transport: which path from n8n?
 
+This section is for events **originated by workflow execution**, such as
+`audio.transcription.completed`. External Plane ingress is a different boundary:
+the signed request enters the active `Plane → Bloodbank` workflow, the custom
+node verifies the raw-body HMAC and normalizes provider data, then publishes the
+canonical event NATS-direct. See `plane-webhook-ingress.md`; do not route Plane
+through Bloodbank HTTP `/event`.
+
 n8n runs as a **PM2 host process on `:5678` with no Dapr sidecar**, and NATS is
 reachable on the host at `127.0.0.1:4222`. **Publish NATS-direct — do NOT use the
 bloodbank HTTP ingress for pipeline events.**
