@@ -140,6 +140,12 @@ def test_profile_config_transactions_serialize_real_writers_and_recovery() -> No
     ]
 
     replacement = spec["validated_config_replacement"]
+    assert replacement["canonical_mutation_lock"] == {
+        "scope": "whole_window",
+        "named_profile_config": "per_profile_lock",
+        "distributable_parent_config": "canonical_config_lock",
+        "recovery_snapshot_install_share_lock": True,
+    }
     assert replacement["serializes"] == [
         "stale_recovery",
         "snapshot",
@@ -194,6 +200,21 @@ def test_channels_secrets_services_registry_and_git_are_fail_closed() -> None:
         "retirement",
         "private_remote_force_rewrite",
     ]
+    assert spec["secrets"]["zero_downtime_rotation_order"] == [
+        "inventory_consumers_and_reload_behavior",
+        "create_distinct_replacement_while_old_remains_valid",
+        "store_replacement_in_approved_vault",
+        "update_and_reload_consumers_one_by_one",
+        "verify_each_consumer_on_replacement",
+        "revoke_old_credential_after_all_consumers_are_healthy",
+        "verify_old_authentication_fails",
+    ]
+    assert spec["secrets"]["revoke_first"] == {
+        "normal_rotation": False,
+        "explicit_emergency_authorization_required": True,
+        "outage_risk_acknowledgement_required": True,
+        "recovery_plan_required": True,
+    }
     assert spec["secrets"]["private_remote_rewrite_requires"] == [
         "named_remote_and_ref_scope",
         "protected_rollback_refs",
