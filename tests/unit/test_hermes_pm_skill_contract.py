@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any, cast
 
 ROOT = Path(__file__).parents[2]
 FLEET_SKILL = ROOT / "all-skills" / "agent-fleet-operations"
@@ -17,13 +18,14 @@ REQUIRED_CORE = [
 ]
 
 
-def contract() -> dict:
-    return json.loads(CONTRACT_PATH.read_text(encoding="utf-8"))
+def contract() -> dict[str, Any]:
+    return cast(dict[str, Any], json.loads(CONTRACT_PATH.read_text(encoding="utf-8")))
 
 
 def test_command_and_skill_core_are_immutable_and_additive() -> None:
     spec = contract()
 
+    assert spec["schema_version"] == 2
     assert spec["deploy_command"] == ["pj", "hermes-agent", "--yes"]
     assert spec["required_skill_core"] == REQUIRED_CORE
     assert spec["skill_policy"] == {
@@ -102,6 +104,63 @@ def test_runtime_exclusion_requires_ignore_and_index_absence() -> None:
     ]
 
 
+def test_profile_config_transactions_serialize_real_writers_and_recovery() -> None:
+    spec = contract()
+    transactions = spec["profile_config_transactions"]
+
+    assert transactions["writers"] == [
+        "initial_seed",
+        "channel_adoption",
+        "channel_rotation",
+        "voice_reconcile",
+        "render",
+        "absorb",
+        "recovery",
+        "fleet_backfill",
+    ]
+    assert transactions["profile_root_must_be_real"] is True
+    assert all(transactions["profile_lock"].values())
+    assert transactions["registry_lock_order"] == ["registry", "profile"]
+    assert transactions["lock_before_snapshot"] == [
+        "durable_secret_references",
+        "channel_identity",
+        "registry_claim",
+        "role_metadata",
+        "config_delta",
+        "generated_config",
+    ]
+    assert transactions["optimistic_snapshot_requires_locked_compare"] is True
+    assert transactions["required_regressions"] == [
+        "real_caller_voice_then_channel",
+        "real_caller_channel_then_voice",
+        "tokenless_adoption_and_rotation_both_orders",
+        "initial_seed_and_backfill_contention",
+        "truthful_timeout",
+        "process_crash_release",
+    ]
+
+    replacement = spec["validated_config_replacement"]
+    assert replacement["serializes"] == [
+        "stale_recovery",
+        "snapshot",
+        "install",
+        "validation",
+        "commit_or_restore",
+        "cleanup",
+    ]
+    assert replacement["same_directory_protected_recovery"] is True
+    assert replacement["backup_like_recovery_names_forbidden"] is True
+    assert replacement["restore_before_optional_post_restore_validation"] is True
+    assert replacement["exact_restore"] == [
+        "device_and_inode",
+        "bytes",
+        "mode",
+        "mtime_ns",
+    ]
+    assert replacement["candidate_install"] == "atomic"
+    assert replacement["recovery_and_candidate_fsync_required"] is True
+
+
 def test_channels_secrets_services_registry_and_git_are_fail_closed() -> None:
     spec = contract()
 
@@ -122,6 +181,26 @@ def test_channels_secrets_services_registry_and_git_are_fail_closed() -> None:
         "unrelated_child_environment",
     ]
     assert all(spec["secrets"]["transient_validation"].values())
+    assert spec["secrets"]["eradication_scan_surfaces"] == [
+        "current_text_database_cache_state",
+        "git_index_and_staged_blobs",
+        "local_reachable_refs",
+        "local_reflogs",
+        "local_unreachable_objects",
+        "fetched_remote_reachable_refs",
+    ]
+    assert spec["secrets"]["authorization_required"] == [
+        "rotation",
+        "retirement",
+        "private_remote_force_rewrite",
+    ]
+    assert spec["secrets"]["private_remote_rewrite_requires"] == [
+        "named_remote_and_ref_scope",
+        "protected_rollback_refs",
+        "clean_clone_scan",
+        "consumer_health",
+        "old_clone_invalidation",
+    ]
     assert spec["service_stabilization"] == {
         "bounded_window_required": True,
         "single_is_active_sample_is_sufficient": False,
@@ -160,5 +239,14 @@ def test_human_runbooks_route_to_the_normative_contract() -> None:
 
     assert "pm-deployment-contract.json" in deployment
     assert "references/pm-deployment.md" in fleet_entrypoint
+    assert "references/config-mutation-safety.md" in fleet_entrypoint
+    assert "references/secret-migration.md" in fleet_entrypoint
+    for reference in ("config-mutation-safety.md", "secret-migration.md"):
+        assert (FLEET_SKILL / "references" / reference).is_file()
     assert "agent-fleet-operations" in project_creation
     assert "references/pm-deployment.md" in project_creation
+
+    for name in ("agent-fleet-operations", "33god-agent-fleet-operations"):
+        projection = ROOT / "skill-sets" / "global" / name
+        assert projection.is_symlink()
+        assert projection.resolve() == FLEET_SKILL.resolve()
