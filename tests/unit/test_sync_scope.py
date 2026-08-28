@@ -41,34 +41,6 @@ from tests.conftest import Sandbox, codes_in, write_manifest
 # ---------------------------------------------------------------------------
 
 
-@pytest.fixture(autouse=True)
-def _seal_tmp_path(tmp_path: Path) -> None:
-    """Stop every upward walk in this module AT ``tmp_path``.
-
-    Not cosmetic -- it closes a live hole in the sandbox. pytest's basetemp is
-    ``$TMPDIR/pytest-of-<user>/...`` and on this machine ``TMPDIR`` lives INSIDE
-    the real home. ``sandbox`` repoints ``HOME`` into ``tmp_path``, so
-    ``refused_roots()`` stops naming the real home; a ``find_project`` walk that
-    starts at a directory with no ``.git`` and no manifest above it therefore
-    climbs straight out of the sandbox and adopts the REAL
-    ``~/.agents/skills.json`` as "the project". Verified with a basetemp under
-    ``$HOME`` but outside any git repo::
-
-        discover_scopes(cwd).scopes
-        -> [global -> <sandbox>/home/.agents/skills,
-            project -> /home/<user>/.agents/skills]     # the real one, and sync WRITES it
-
-    Today only the accidental ``~/.claude/.git`` stops that walk, and scope.py's
-    own docstring says relying on an accident is not a guard. A bare ``.git``
-    marker at ``tmp_path`` is a boundary ``find_project`` already honors, so the
-    walk can never leave the sandbox regardless of where basetemp lands.
-
-    ``tests/conftest.py`` should arguably do this in ``make_sandbox`` for every
-    sync module; it is local here because that file has another owner.
-    """
-    (tmp_path / ".git").mkdir(exist_ok=True)
-
-
 def deep(root: Path, *parts: str) -> Path:
     """``root/<parts...>``, created. The ``<repo>/src/a/b/c`` shape."""
     path = root.joinpath(*parts)
@@ -136,7 +108,14 @@ def test_refused_roots_tracks_the_patched_home(sandbox: Sandbox) -> None:
 
 
 def test_the_walk_never_escapes_the_sandbox(sandbox: Sandbox) -> None:
-    """Canary for ``_seal_tmp_path``: no scope may name a path outside tmp_path.
+    """Canary for the sandbox seal: no scope may name a path outside tmp_path.
+
+    The seal itself lives in ``make_sandbox`` in ``tests/conftest.py`` (it was
+    local to this module until the whole sync suite was assembled -- every module
+    is exposed, not just this one). Its comment explains why a bare ``.git``
+    marker at ``tmp_path`` is load-bearing: pytest's basetemp is inside the real
+    ``$HOME`` on this machine, so an unsealed upward walk adopts the REAL
+    ``~/.agents/skills.json`` as "the project".
 
     If this fails, a sync test is one ``apply()`` away from rewriting the real
     ``~/.agents/skills``.

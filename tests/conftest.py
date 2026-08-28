@@ -439,6 +439,28 @@ def make_sandbox(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, registry: Path
     state_home.mkdir(parents=True, exist_ok=True)
     (tmp_path / "projects").mkdir(parents=True, exist_ok=True)
 
+    # SEAL: stop every upward walk AT tmp_path. This is not cosmetic and it is not
+    # scoped to one module -- it closes a live hole in the sandbox.
+    #
+    # pytest's basetemp is $TMPDIR/pytest-of-<user>/..., and on this machine TMPDIR
+    # is /home/<user>/.claude/tmp -- INSIDE the real home. Repointing HOME below
+    # stops `refused_roots()` from naming the real home, but the cwd still
+    # physically sits under it, so a `find_project` walk from a directory with no
+    # .git and no manifest above it climbs straight out of the sandbox. Measured,
+    # with HOME already patched:
+    #
+    #     find_project(<tmp>/projects)  ->  /home/<user>        # the REAL home
+    #     discover_scopes(...).scopes   ->  [global -> <tmp>/home/.agents/skills,
+    #                                        project -> /home/<user>/.agents/skills]
+    #
+    # and `apply()` writes that second one. The only thing preventing it today is
+    # the accidental presence of /home/<user>/.claude/.git one level above
+    # basetemp; scope.py's own docstring says relying on that kind of accident is
+    # not a guard. A bare .git marker is a boundary `find_project` already honors,
+    # and `probe_child_projects` skips it (no manifest inside), so it is inert in
+    # every other respect.
+    (tmp_path / ".git").mkdir(exist_ok=True)
+
     monkeypatch.setenv("HOME", str(home))
     monkeypatch.setenv("USERPROFILE", str(home))  # Path.home() on Windows
     monkeypatch.setenv("XDG_STATE_HOME", str(state_home))

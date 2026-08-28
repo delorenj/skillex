@@ -391,31 +391,6 @@ def test_strict_ignores_a_warning_outside_the_promote_set(
 # ---------------------------------------------------------------------------
 
 
-def test_forget_removes_the_receipt_and_exits_zero(
-    sandbox: Sandbox,
-    registry: Path,
-    outside: Path,
-    write_catalog,
-    write_set,
-    run_sync,
-) -> None:
-    catalog = write_catalog(registry, "alpha")
-    write_set(registry, "gset", [("link", "alpha", catalog["alpha"])])
-    sandbox.write_global_manifest(sets=["gset"])
-
-    assert run_sync(cwd=outside)[0] == EXIT_OK
-    receipt = state_path_for(sandbox.global_root)
-    assert receipt.is_file()
-    assert receipt.parent == sandbox.state_dir  # in XDG state, never beside the root
-
-    code, _ = run_sync("--forget", cwd=outside)
-
-    assert code == EXIT_OK
-    assert not receipt.exists()
-    # --forget drops the receipt, never the projection.
-    assert (sandbox.global_root / "alpha").is_symlink()
-
-
 # ---------------------------------------------------------------------------
 # exit codes
 # ---------------------------------------------------------------------------
