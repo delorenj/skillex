@@ -504,12 +504,18 @@ def compose(
                 detail=tuple(discarded[:12]) + (("...",) if len(discarded) > 12 else ()),
                 fix="remove sets[]/skills[], or remove packs[].",
             )
-        hit = find_in_roots(roots, entry.registry_path or f"packs/{entry.name}")
+        # Report the path that was actually SEARCHED FOR, not the default one. With
+        # `registry_path` set they differ, and naming the default makes both the
+        # warning and the error state a falsehood: a rung that carries packs/<name>
+        # but not the override gets reported as "exists, but has no packs/<name>",
+        # sending the reader to inspect a directory that is sitting right there.
+        pack_rel = entry.registry_path or f"packs/{entry.name}"
+        hit = find_in_roots(roots, pack_rel)
         if hit is not None:
-            _report_skipped(reporter, hit, f"packs/{entry.name}")
+            _report_skipped(reporter, hit, pack_rel)
         if hit is None:
             if not entry.optional:
-                raise _missing(Code.E_PACK_MISSING, roots, f"packs/{entry.name}", entry.name)
+                raise _missing(Code.E_PACK_MISSING, roots, pack_rel, entry.name)
             reporter.emit(
                 Code.W_PACK_MISSING,
                 f"optional pack {entry.name!r} not found; continuing without it",
@@ -564,6 +570,10 @@ def compose(
     for index, set_entry in enumerate(manifest.sets):
         origin = f'sets[{index}] "{set_entry.name}"'
         set_dir: Path | None
+        # The path actually SEARCHED FOR. `source` and `registry_path` are mutually
+        # exclusive (SetEntry._validate_exclusivity), so on the source branch this is
+        # always the default and the refusal below reads exactly as it did before.
+        set_rel = set_entry.registry_path or f"sets/{set_entry.name}"
         if set_entry.source is not None:
             if not set_entry.source.startswith("file://"):
                 raise RefusalError(
@@ -578,9 +588,9 @@ def compose(
             local = Path(set_entry.source[len("file://") :])
             set_dir = local if (local.is_dir() or local.is_symlink()) else None
         else:
-            hit = find_in_roots(roots, set_entry.registry_path or f"sets/{set_entry.name}")
+            hit = find_in_roots(roots, set_rel)
             if hit is not None:
-                _report_skipped(reporter, hit, f"sets/{set_entry.name}")
+                _report_skipped(reporter, hit, set_rel)
             set_dir = hit.path if hit else None
 
         if set_dir is None:
@@ -592,7 +602,7 @@ def compose(
                     fix="add it to the registry, or remove the entry.",
                 )
                 continue
-            raise _missing(Code.E_SET_MISSING, roots, f"sets/{set_entry.name}", set_entry.name)
+            raise _missing(Code.E_SET_MISSING, roots, set_rel, set_entry.name)
 
         found = walk_composition(set_dir, reporter, label=f"set {set_entry.name!r}")
         keep = set(set_entry.filter_inventory([m.name for m in found]))

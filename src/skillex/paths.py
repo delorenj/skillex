@@ -148,13 +148,23 @@ def find_in_roots(roots: Sequence[Path], relpath: str) -> RegistryHit | None:
     Returns ``None`` when no rung carries it; the caller raises with the full
     tried-list, because "not found" is only actionable if you can see where it
     looked.
+
+    Only rungs that EXIST land in :attr:`RegistryHit.skipped`, per that field's
+    contract.
     """
     skipped: list[Path] = []
     for root in roots:
         candidate = root / relpath
         if candidate.is_symlink() or candidate.exists():
             return RegistryHit(root=root, path=candidate, skipped=tuple(skipped))
-        skipped.append(root)
+        # A rung that was never cloned is not a stale checkout an operator should go
+        # refresh, and recording it would make W_STALE_REGISTRY_CANDIDATE say
+        # "skipped <p> (exists, but has no <x>)" about a directory that does not
+        # exist. Callers normally pass `registry_roots()`, which is already filtered
+        # to existing rungs, so this only bites on the one surface that does not
+        # filter: `sync --registry-root`.
+        if root.is_dir():
+            skipped.append(root)
     return None
 
 
