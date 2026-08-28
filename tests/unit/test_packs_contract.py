@@ -1117,8 +1117,21 @@ class TestCanonicalSchemaIsPublished:
         props = doc["properties"]
         assert props["packs"]["type"] == "array"
         assert props["skills"]["type"] == "array"
-        # Section 1: a manifest is valid with either array alone.
-        assert doc["anyOf"] == [{"required": ["skills"]}, {"required": ["packs"]}]
+        # Section 1: a manifest is valid with any ONE of the three arrays alone.
+        # `sets` is load-bearing here, not cosmetic: the live global manifest
+        # declares only `sets`, and before it was added that manifest validated
+        # solely because of a vestigial `"skills": []`.
+        assert doc["anyOf"] == [
+            {"required": ["skills"]},
+            {"required": ["sets"]},
+            {"required": ["packs"]},
+        ]
+
+    def test_schema_declares_sets(self) -> None:
+        doc = json.loads(self.schema_path.read_text(encoding="utf-8"))
+        assert doc["properties"]["sets"]["type"] == "array"
+        # A pack replaces the whole root, so at most one may ever be declared.
+        assert doc["properties"]["packs"]["maxItems"] == 1
 
 
 @pytest.mark.integration

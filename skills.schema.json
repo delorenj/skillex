@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://raw.githubusercontent.com/delorenj/skillex/main/skills.schema.json",
   "title": "Agent Skills Manifest",
-  "description": "Configuration for agent skill fanout. Declares canonical all-skills entries and reference-only packs to compile into one scope activation root.",
+  "description": "Configuration for agent skill fanout. Declares canonical all-skills entries, reference-only sets, and prebuilt packs to compile into one scope activation root.",
   "type": "object",
   "definitions": {
     "skillName": {
@@ -15,14 +15,24 @@
       "pattern": "^[a-zA-Z0-9]([a-zA-Z0-9._-]*[a-zA-Z0-9])?$",
       "description": "A single safe path component naming a directory under the registry's packs/ directory."
     },
+    "setName": {
+      "type": "string",
+      "pattern": "^[a-zA-Z0-9]([a-zA-Z0-9._-]*[a-zA-Z0-9])?$",
+      "description": "A single safe path component naming a directory under the registry's sets/ directory."
+    },
     "versionComponent": {
       "type": "string",
       "pattern": "^[a-zA-Z0-9]([a-zA-Z0-9._+-]*[a-zA-Z0-9])?$",
       "description": "A single safe path component naming a version directory (e.g. '6.10.2', '0.18.2', '6.10.1-next.31')."
     },
+    "registryPath": {
+      "type": "string",
+      "pattern": "^(?!\\.\\.?(?:/|$))[A-Za-z0-9._-]+(?:/(?!\\.\\.?(?:/|$))[A-Za-z0-9._-]+)*$",
+      "description": "A relative, /-separated path inside the registry. Rejects absolute paths, backslashes, and any '.', '..' or empty segment, so it can never escape the registry root."
+    },
     "sourceUri": {
       "type": "string",
-      "description": "Legacy bootstrap/import source. Direct external activation bypasses the canonical all-skills catalog and is deprecated by ADR-0001.",
+      "description": "Legacy bootstrap/import source. Direct external activation bypasses the canonical all-skills catalog and is deprecated by ADR-0001. Only file:// is honored at sync time; git URLs are refused because nothing in skillex clones.",
       "deprecated": true,
       "anyOf": [
         { "pattern": "^file://" },
@@ -39,19 +49,70 @@
     "scope": {
       "type": "string",
       "enum": ["global", "project"],
-      "description": "The scope of this manifest."
+      "description": "Advisory label only. Placement decides scope: a manifest at ~/.agents/skills.json is global, one at <repo>/.agents/skills.json is that project's. A mismatch is reported and ignored."
     },
     "inherit_global": {
       "type": "boolean",
-      "description": "Whether to inherit global skills and packs (only applicable for project scope). Project entries override inherited ones of the same name."
+      "default": true,
+      "description": "Whether a project's compiled map unions in the global map (project scope only; ignored on a global manifest). Project entries override inherited ones of the same name. This governs the project map's CONTENTS, never which roots are written - both scopes are always synced when a project is in play."
     },
     "registry": {
       "type": "string",
-      "description": "Default Git repository registry URL for skills and packs."
+      "description": "Default Git repository registry URL for skills, sets and packs. Used only to name the local registry cache directory; nothing is ever cloned or fetched."
+    },
+    "sets": {
+      "type": "array",
+      "description": "Skill sets to synchronize, in precedence order. A set is a directory of symlinks in the registry under sets/<name>. Declaring a set projects every member it contains; you do not list its members individually. Sets are composable and are applied in array order, so a later set overwrites an earlier one for any shared name; an entry in skills[] beats them all.",
+      "items": {
+        "anyOf": [
+          {
+            "type": "string",
+            "description": "Shorthand for a registry set: '<name>'. Sets are not versioned, so there is no '@version' form.",
+            "pattern": "^[a-zA-Z0-9]([a-zA-Z0-9._-]*[a-zA-Z0-9])?$"
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "name": {
+                "$ref": "#/definitions/setName",
+                "description": "The set name. Resolves to sets/<name> in the registry unless source or registry_path is given."
+              },
+              "source": {
+                "$ref": "#/definitions/sourceUri",
+                "description": "Direct source override (a file:// path). Mutually exclusive with registry_path.",
+                "deprecated": true
+              },
+              "registry_path": {
+                "$ref": "#/definitions/registryPath",
+                "description": "Explicit path to the set within the registry (e.g. 'sets/min-global'). Mutually exclusive with source."
+              },
+              "include": {
+                "type": "array",
+                "items": { "$ref": "#/definitions/skillName" },
+                "description": "If present, only these members of the set are projected."
+              },
+              "exclude": {
+                "type": "array",
+                "items": { "$ref": "#/definitions/skillName" },
+                "description": "Members to skip. Applied after include."
+              },
+              "optional": {
+                "type": "boolean",
+                "default": false,
+                "description": "When true, an unresolvable set produces a warning instead of an error."
+              }
+            },
+            "required": ["name"],
+            "not": { "required": ["source", "registry_path"] }
+          }
+        ]
+      }
     },
     "packs": {
       "type": "array",
-      "description": "Reference-only skill compositions under packs/<name>[/<version>]. A pack selects canonical all-skills names; it never owns or materializes copied skill payloads.",
+      "maxItems": 1,
+      "description": "A prebuilt, non-composable skill root under packs/<name>[/<version>]. Declaring a pack REPLACES the activation root entirely: it trumps sets[] and skills[], and at most one may be declared. A pack selects canonical all-skills names; it never owns or materializes copied skill payloads.",
       "items": {
         "anyOf": [
           {
@@ -81,7 +142,7 @@
                 "description": "Git repository registry URL override for this specific pack."
               },
               "registry_path": {
-                "type": "string",
+                "$ref": "#/definitions/registryPath",
                 "description": "Explicit path to the pack within the registry (e.g. 'packs/bmad/6.10.2'). Mutually exclusive with source."
               },
               "include": {
@@ -103,7 +164,7 @@
                 "type": "boolean",
                 "default": false,
                 "deprecated": true,
-                "description": "Legacy copied-payload migration flag. New packs list canonical leaf names directly; flattening does not authorize pack-owned skill definitions."
+                "description": "Legacy copied-payload migration flag. Expands nested container/leaf layouts at projection time: an entry with no SKILL.md is a container and is descended into, while any directory holding a SKILL.md is a skill and is never descended into, so a skill's own references/ and scripts/ never become skills. Depth is whatever the tree is. The projected name is the leaf directory's basename, and entries whose name begins with '.' or '_' are never projected at any depth. Also enabled by [policy] flatten = true in the pack's pack.toml; include/exclude apply to the flattened names. New packs list canonical leaf names directly; flattening does not authorize pack-owned skill definitions."
               },
               "sealed": {
                 "type": "boolean",
@@ -119,19 +180,20 @@
     },
     "skills": {
       "type": "array",
-      "description": "Canonical all-skills entries to synchronize. An entry here always overrides a pack member of the same name.",
+      "description": "Individual canonical all-skills entries to synchronize. Resolved LAST, so an entry here always overrides a set member or a pack member of the same name. The projected folder name is always the declared name, never the target directory's basename.",
       "items": {
         "anyOf": [
           {
-            "type": "string",
-            "description": "A canonical skill name. Slash-bearing registry paths are legacy and should be imported into all-skills before activation."
+            "$ref": "#/definitions/registryPath",
+            "description": "A canonical skill name, resolving to all-skills/<name>. A slash-bearing registry path is legacy and should be imported into all-skills before activation; declaring a pack this way is refused."
           },
           {
             "type": "object",
+            "additionalProperties": false,
             "properties": {
               "name": {
                 "$ref": "#/definitions/skillName",
-                "description": "The local folder name to link the skill to."
+                "description": "The local folder name to link the skill to. Resolves to all-skills/<name> unless source or registry_path is given."
               },
               "source": {
                 "$ref": "#/definitions/sourceUri",
@@ -140,21 +202,21 @@
               },
               "version": {
                 "type": "string",
-                "description": "Optional git branch, tag, or commit hash to checkout."
+                "deprecated": true,
+                "description": "Legacy git branch, tag, or commit hash. Nothing in skillex clones or checks out, so this is refused at sync time."
               },
               "registry": {
                 "type": "string",
-                "description": "Optional Git repository registry URL override for this specific skill."
+                "deprecated": true,
+                "description": "Legacy per-entry registry URL override. Refused at sync time; use the manifest-level 'registry' instead."
               },
               "registry_path": {
-                "type": "string",
-                "description": "Path to the skill within the registry."
+                "$ref": "#/definitions/registryPath",
+                "description": "Path to the skill within the registry. Mutually exclusive with source."
               }
             },
-            "anyOf": [
-              { "required": ["name", "source"] },
-              { "required": ["name", "registry_path"] }
-            ]
+            "required": ["name"],
+            "not": { "required": ["source", "registry_path"] }
           }
         ]
       }
@@ -162,6 +224,7 @@
   },
   "anyOf": [
     { "required": ["skills"] },
+    { "required": ["sets"] },
     { "required": ["packs"] }
   ]
 }
