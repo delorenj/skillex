@@ -108,9 +108,24 @@ class Code(StrEnum):
     W_MANIFEST_UNKNOWN_KEY = "W_MANIFEST_UNKNOWN_KEY"
     W_PROJECTION_NOT_GITIGNORED = "W_PROJECTION_NOT_GITIGNORED"
     W_INCUMBENT_ENGINE_ACTIVE = "W_INCUMBENT_ENGINE_ACTIVE"
-    W_RIVAL_LOCKFILE = "W_RIVAL_LOCKFILE"
 
     # -- info (-v only) -----------------------------------------------------
+    #: A rival installer's lock file is INFO, not a warning, and the distinction
+    #: is the one this class's docstring draws: it is *expected in a healthy
+    #: tree*. The other environment checks describe something you can go and fix
+    #: -- an unignored root, a wired-up projector -- and they fall silent once you
+    #: do. This one cannot: if you still use that installer the file stays, so at
+    #: WARNING it is unclearable, fires on every single global sync forever, and
+    #: is the only finding on an otherwise healthy run of this machine. That is
+    #: precisely how a warning channel gets trained out of a reader. It is also
+    #: what STRICT_PROMOTES below already calls it in prose -- "operational noise
+    #: (... a rival writer ...) ... describes the environment, not the
+    #: composition" -- so this only makes the severity agree with the comment.
+    #:
+    #: Nothing is lost: ``--json`` publishes every finding regardless of severity,
+    #: so a consumer still sees it (now as ``"severity": "info"``), and ``-v``
+    #: still shows it to a human who goes looking.
+    I_RIVAL_LOCKFILE = "I_RIVAL_LOCKFILE"
     I_SET_REBIND = "I_SET_REBIND"
     I_SKILL_OVERRIDES_SET = "I_SKILL_OVERRIDES_SET"
     I_PROJECT_BELOW_CWD = "I_PROJECT_BELOW_CWD"

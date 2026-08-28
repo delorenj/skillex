@@ -34,6 +34,14 @@ RIVAL_LOCKFILE = Path(".agents") / ".skill-lock.json"
 
 _GIT_TIMEOUT_SECONDS = 5
 
+#: Cap on a ``mise.toml`` this module will read into memory. A real one is a few
+#: KB; a megabyte is already absurd. The guard exists because the ancestor walk
+#: means this module now opens config files it did NOT author -- ``/mise.toml``,
+#: an ancestor in a shared tree -- and ``read_text()`` on a pathological file
+#: (a symlink to a huge regular file; ``is_file()`` follows it) would OOM and
+#: kill the sync from inside a check documented as best-effort and never fatal.
+_MAX_CONFIG_BYTES = 1_000_000
+
 
 def _git(args: list[str], cwd: Path) -> subprocess.CompletedProcess[str] | None:
     """Run a read-only git command, or return None if git cannot answer."""
@@ -186,6 +194,8 @@ def check_incumbent_engine(search_roots: Sequence[Path], reporter: Reporter) -> 
             continue
         seen.add(config)
         try:
+            if config.stat().st_size > _MAX_CONFIG_BYTES:
+                continue
             lines = config.read_text(encoding="utf-8").splitlines()
         except (OSError, UnicodeDecodeError):
             # UnicodeDecodeError is a ValueError, NOT an OSError: a mise.toml with
@@ -225,7 +235,12 @@ def check_incumbent_engine(search_roots: Sequence[Path], reporter: Reporter) -> 
 
 
 def check_rival_lockfile(home: Path, reporter: Reporter) -> None:
-    """Note a third-party skill installer's lock file. Never read, never written."""
+    """Note a third-party skill installer's lock file. Never read, never written.
+
+    INFO rather than WARNING on purpose -- see :attr:`Code.I_RIVAL_LOCKFILE`. The
+    file is a fact about the machine that the user may fully intend to keep, so a
+    warning here would fire on every healthy global sync and never clear.
+    """
     lockfile = home / RIVAL_LOCKFILE
     if not lockfile.is_file():
         return
@@ -234,7 +249,7 @@ def check_rival_lockfile(home: Path, reporter: Reporter) -> None:
     except OSError:
         return
     reporter.emit(
-        Code.W_RIVAL_LOCKFILE,
+        Code.I_RIVAL_LOCKFILE,
         f"another skill installer keeps state at {lockfile}",
         path=lockfile,
         detail=(

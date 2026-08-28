@@ -530,8 +530,8 @@ def test_a_present_lockfile_names_the_path_and_its_size(tmp_path: Path) -> None:
 
     check_rival_lockfile(tmp_path, reporter)
 
-    finding = only(reporter, Code.W_RIVAL_LOCKFILE)
-    assert finding.severity is Severity.WARNING
+    finding = only(reporter, Code.I_RIVAL_LOCKFILE)
+    assert finding.severity is Severity.INFO
     assert finding.path == lockfile
     assert str(lockfile) in finding.message
     assert any(line.startswith(f"{len(payload)} bytes") for line in finding.detail)
@@ -597,22 +597,35 @@ def test_check_rival_lockfile_never_writes(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize(
-    "code",
+    ("code", "expected"),
     [
-        Code.W_PROJECTION_NOT_GITIGNORED,
-        Code.W_INCUMBENT_ENGINE_ACTIVE,
-        Code.W_RIVAL_LOCKFILE,
+        # Actionable and CLEARABLE: fix the .gitignore, repoint the task, and the
+        # finding goes away. That is what earns a warning.
+        (Code.W_PROJECTION_NOT_GITIGNORED, Severity.WARNING),
+        (Code.W_INCUMBENT_ENGINE_ACTIVE, Severity.WARNING),
+        # NOT clearable, if you still use that installer -- so at WARNING it fired
+        # on every healthy global sync forever and was the only finding on a clean
+        # run of this machine. diagnostics.py reserves INFO for exactly that:
+        # "events that are expected in a healthy tree, so they must not train the
+        # eye to skip warnings."
+        (Code.I_RIVAL_LOCKFILE, Severity.INFO),
     ],
 )
-def test_environment_findings_are_warnings_that_strict_does_not_promote(code: Code) -> None:
+def test_environment_findings_never_fail_a_run_and_strict_never_promotes_them(
+    code: Code, expected: Severity
+) -> None:
     """These describe the ENVIRONMENT, not the composition.
 
-    ``--strict`` is a topology gate; failing CI because a co-worker's machine also
-    has another installer on it would make the flag useless for what it is for.
+    Two properties, and the second is the one that must hold for all three:
+    the severity each code's PREFIX declares, and that ``--strict`` promotes none
+    of them. ``--strict`` is a topology gate; failing CI because a co-worker's
+    machine also has another installer on it would make the flag useless for what
+    it is for.
     """
     from skillex.core.diagnostics import severity_of
 
-    assert severity_of(code) is Severity.WARNING
+    assert severity_of(code) is expected
+    assert expected is not Severity.ERROR
     assert code not in STRICT_PROMOTES
 
 
@@ -650,8 +663,10 @@ def test_no_check_ever_raises_on_a_hostile_tree(tmp_path: Path, hostile: str) ->
     check_gitignored(home / ".agents" / "skills", reporter)
     check_rival_lockfile(home, reporter)
 
-    # Whatever it decided to say, every finding is a survivable warning.
-    assert all(f.severity is Severity.WARNING for f in reporter.findings)
+    # Whatever it decided to say, nothing here is fatal. Asserting WARNING
+    # exactly would be the wrong pin: I_RIVAL_LOCKFILE is deliberately INFO, and
+    # this test is about survivability, not about which channel a finding uses.
+    assert all(f.severity is not Severity.ERROR for f in reporter.findings)
 
 
 @requires_git
@@ -680,7 +695,7 @@ def test_all_three_together_write_nothing(
     assert set(codes(reporter)) == {
         Code.W_INCUMBENT_ENGINE_ACTIVE,
         Code.W_PROJECTION_NOT_GITIGNORED,
-        Code.W_RIVAL_LOCKFILE,
+        Code.I_RIVAL_LOCKFILE,
     }
     assert worktree(repo) == before_repo
     assert snapshot(sandbox.home) == before_home
