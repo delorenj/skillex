@@ -48,7 +48,13 @@ from pathlib import Path
 import pytest
 
 from skillex.core import environment
-from skillex.core.diagnostics import STRICT_PROMOTES, Code, Reporter, Severity
+from skillex.core.diagnostics import (
+    EXIT_REFUSED,
+    STRICT_PROMOTES,
+    Code,
+    Reporter,
+    Severity,
+)
 from skillex.core.environment import (
     INCUMBENT_SCRIPTS,
     RIVAL_LOCKFILE,
@@ -56,7 +62,7 @@ from skillex.core.environment import (
     check_incumbent_engine,
     check_rival_lockfile,
 )
-from tests.conftest import Sandbox, snapshot
+from tests.conftest import Sandbox, codes_in, run_sync_json, snapshot, write_catalog
 
 requires_git = pytest.mark.skipif(shutil.which("git") is None, reason="git is not installed")
 
@@ -678,3 +684,288 @@ def test_all_three_together_write_nothing(
     }
     assert worktree(repo) == before_repo
     assert snapshot(sandbox.home) == before_home
+
+
+# ===========================================================================
+# The false-positive lens: cases where a check fired when it should not, or
+# stayed silent when it should not. Every test below failed before its fix.
+# ===========================================================================
+
+
+@requires_git
+def test_a_root_that_does_not_exist_yet_is_not_reported_as_unignored(repo: Path) -> None:
+    """The FIRST sync of a correctly configured repo must be silent.
+
+    ``.agents/skills/`` -- with the trailing slash, the canonical spelling, and the
+    one in this machine's ``core.excludesFile`` -- is a DIRECTORY-ONLY pattern.
+    ``git check-ignore`` matches it against the filesystem, so it answers "not
+    ignored" for a path with no directory behind it yet. The root is absent exactly
+    once per repo: on the run that is about to create it. Warning there tells a
+    user who did everything right to go add a rule they already have.
+    """
+    (repo / ".gitignore").write_text(".agents/skills/\n", encoding="utf-8")
+    root = repo / ".agents" / "skills"
+    assert not root.exists()
+    reporter = Reporter()
+
+    check_gitignored(root, reporter)
+
+    assert codes(reporter) == []
+
+
+@requires_git
+def test_an_absent_root_that_is_genuinely_not_ignored_still_warns(repo: Path) -> None:
+    """The control. Without it the test above would also pass if the absent case
+    had simply been skipped, which would lose the check on every first sync."""
+    root = repo / ".agents" / "skills"
+    assert not root.exists()
+    reporter = Reporter()
+
+    check_gitignored(root, reporter)
+
+    assert codes(reporter) == [Code.W_PROJECTION_NOT_GITIGNORED]
+
+
+@requires_git
+def test_a_symlink_root_that_a_dir_only_rule_does_not_cover_still_warns(repo: Path) -> None:
+    """Alias mode is NOT a false positive, and must not be silenced with the above.
+
+    A directory-only rule does not match a symlink, and ``git add -A`` in this
+    exact shape stages ``.agents/skills`` as a symlink -- measured, not reasoned:
+    that is the "machine-specific symlink restored on someone else's checkout"
+    the check exists to prevent. So the honest answer here is to warn.
+    """
+    (repo / ".gitignore").write_text(".agents/skills/\n", encoding="utf-8")
+    root = repo / ".agents" / "skills"
+    root.symlink_to(repo / "elsewhere")
+    reporter = Reporter()
+
+    check_gitignored(root, reporter)
+
+    assert codes(reporter) == [Code.W_PROJECTION_NOT_GITIGNORED]
+
+
+@requires_git
+def test_the_suggested_rule_actually_silences_the_warning(repo: Path) -> None:
+    """The fix must WORK when followed verbatim, and hit nothing else.
+
+    The rule used to be ``/<root.name>`` -- ``/skills`` -- anchored at the repo
+    top-level, where it does not match ``.agents/skills`` at all and does match an
+    unrelated top-level ``skills/`` (``~/code/33GOD/skills/`` is one, with 16
+    tracked files). Following it left the warning firing and untracked real
+    sources. Applying the fix and re-running the check is the only assertion that
+    can catch that; matching the string never would.
+    """
+    unrelated = repo / "skills"
+    unrelated.mkdir()
+    (unrelated / "keep.md").write_text("real source\n", encoding="utf-8")
+    root = repo / ".agents" / "skills"
+    root.mkdir(parents=True)
+    reporter = Reporter()
+
+    check_gitignored(root, reporter)
+    finding = only(reporter, Code.W_PROJECTION_NOT_GITIGNORED)
+
+    assert finding.fix is not None
+    rule = finding.fix.removeprefix("add ").split(" to ")[0]
+    (repo / ".gitignore").write_text(rule + "\n", encoding="utf-8")
+
+    after = Reporter()
+    check_gitignored(root, after)
+    assert codes(after) == []  # the advice worked
+
+    # ...and did not quietly ignore an unrelated directory that shares the name.
+    still_tracked = subprocess.run(
+        ["git", "check-ignore", "-q", str(unrelated / "keep.md")],
+        cwd=repo,
+        capture_output=True,
+        check=False,
+    )
+    assert still_tracked.returncode == 1
+
+
+@requires_git
+def test_a_root_beyond_a_symlinked_parent_is_silent_not_a_guess(repo: Path) -> None:
+    """``git check-ignore`` exits 128 for a path beyond a symbolic link.
+
+    128 is not "not ignored", and the module's contract is that a check which
+    cannot answer stays silent. Treating every non-zero code as "not ignored" made
+    git's refusal indistinguishable from git's answer.
+    """
+    real = repo / "real"
+    (real / "skills").mkdir(parents=True)
+    (repo / "link").symlink_to(real)
+    reporter = Reporter()
+
+    check_gitignored(repo / "link" / "skills", reporter)
+
+    assert codes(reporter) == []
+
+
+def test_a_project_scope_searches_its_ancestors_not_only_itself(tmp_path: Path) -> None:
+    """mise config is HIERARCHICAL: an ancestor's ``[[hooks.enter]]`` fires in a child.
+
+    Confirmed against mise 2026.8.10, which printed the ancestor hook's output
+    from the child directory. ``~/code/33GOD/mise.toml`` is wired to the retired
+    projector with eight components beneath it, and
+    ``~/code/intelliforia-mobile/extension`` is a live project whose own
+    ``mise.toml`` is clean while its parent's is not. Searching only the project
+    root reports neither.
+    """
+    home = tmp_path
+    parent = write_mise(tmp_path / "mono", "[[hooks.enter]]", 'run = "sync-skills.py"')
+    child = tmp_path / "mono" / "child"
+    write_mise(child, "[tools]", 'python = "3.12"')
+    reporter = Reporter()
+
+    check_incumbent_engine(environment.incumbent_search_roots(child, home, []), reporter)
+
+    finding = only(reporter, Code.W_INCUMBENT_ENGINE_ACTIVE)
+    assert finding.path == parent
+
+
+def test_the_ancestor_walk_stops_at_home(tmp_path: Path) -> None:
+    """Above a user's home is not that user's configuration, and must not be read."""
+    home = tmp_path / "home"
+    outside = write_mise(tmp_path, "[[hooks.enter]]", 'run = "sync-skills.py"')
+    project = home / "code" / "proj"
+    project.mkdir(parents=True)
+
+    roots = environment.incumbent_search_roots(project, home, [])
+
+    assert outside.parent not in roots
+    assert roots == [project, home / "code", home]
+
+
+def test_a_checkout_outside_home_still_gets_its_ancestors(tmp_path: Path) -> None:
+    """The home bound must not become an exemption for /srv or /opt checkouts."""
+    home = tmp_path / "home"
+    home.mkdir()
+    project = tmp_path / "srv" / "work" / "proj"
+    project.mkdir(parents=True)
+
+    roots = environment.incumbent_search_roots(project, home, [])
+
+    assert tmp_path / "srv" / "work" in roots
+    assert tmp_path / "srv" in roots
+
+
+def test_global_scope_searches_home_and_dot_agents_not_only_the_registry(
+    tmp_path: Path,
+) -> None:
+    """The registry is a SOURCE. The configs that write ``~/.agents/skills`` live in
+    ``$HOME`` and ``$HOME/.agents``, and searching the registry ladder instead
+    reported neither -- verified end-to-end before the fix, with a
+    ``sync-skills.py --scope global`` hook in both places and no warning."""
+    home = tmp_path / "home"
+    at_home = write_mise(home, "[[hooks.enter]]", 'run = "sync-skills.py --scope global"')
+    at_agents = write_mise(home / ".agents", "[[hooks.enter]]", 'run = "provision-packs.py"')
+    registry = tmp_path / "registry"
+    registry.mkdir()
+    reporter = Reporter()
+
+    check_incumbent_engine(environment.incumbent_search_roots(None, home, [registry]), reporter)
+
+    assert codes(reporter) == [
+        Code.W_INCUMBENT_ENGINE_ACTIVE,
+        Code.W_INCUMBENT_ENGINE_ACTIVE,
+    ]
+    assert [f.path for f in reporter.findings] == [at_home, at_agents]
+
+
+def test_a_project_scope_does_not_search_the_registry(tmp_path: Path) -> None:
+    """The registry's own tasks are wired ``--scope project --root <the registry>``:
+    they write the REGISTRY's root, not this project's. Naming them under a project
+    scope would be a wolf-cry on every sync in every repo on the machine."""
+    home = tmp_path
+    registry = tmp_path / "registry"
+    write_mise(registry, "[[hooks.enter]]", 'run = "sync-skills.py"')
+    project = tmp_path / "proj"
+    project.mkdir()
+    reporter = Reporter()
+
+    check_incumbent_engine(environment.incumbent_search_roots(project, home, [registry]), reporter)
+
+    assert codes(reporter) == []
+
+
+def test_two_wired_configs_in_one_scope_carry_distinct_messages(tmp_path: Path) -> None:
+    """The renderer groups findings by CODE and prints only the head's detail lines.
+    With the ancestor walk, a parent and a child are both commonly wired (eight
+    33GOD components are), and a message of ``config.name`` made both read
+    "wired in mise.toml" -- so the reader could not tell which file the shown lines
+    came from."""
+    home = tmp_path
+    write_mise(tmp_path / "mono", "[[hooks.enter]]", 'run = "sync-skills.py"')
+    child = tmp_path / "mono" / "child"
+    write_mise(child, "[[hooks.enter]]", 'run = "provision-packs.py"')
+    reporter = Reporter()
+
+    check_incumbent_engine(environment.incumbent_search_roots(child, home, []), reporter)
+
+    messages = [f.message for f in reporter.findings]
+    assert len(messages) == 2
+    assert len(set(messages)) == 2
+
+
+# ---------------------------------------------------------------------------
+# ORDER: the checks must run before anything that can refuse out of the loop.
+# ---------------------------------------------------------------------------
+
+
+def test_an_unmanaged_root_still_reports_who_wrote_it(sandbox: Sandbox) -> None:
+    """The one case the incumbent check exists for must not be the case it skips.
+
+    ``E_UNMANAGED_ROOT`` -- "this root has entries and no skillex state" -- IS the
+    signature of another projector having already written it. It is raised from
+    ``diff()``, which used to run BEFORE the environment checks, so the refusal
+    abandoned the loop and the run never named the engine responsible. Reproduced
+    live on ``~/code/33GOD/momo``: exit 3, ``E_UNMANAGED_ROOT``, and not one word
+    about the ``mise.toml`` two lines away that is wired to the retired projector.
+
+    Worse, the obvious way out of the refusal -- delete the root, or ``--forget``
+    -- hands it straight back to that projector on the next ``cd``.
+    """
+    write_catalog(sandbox.registry, "demo")
+    sandbox.write_global_manifest(skills=["demo"])
+    project = sandbox.project(manifest={"skills": ["demo"]})
+    write_mise(project, "[[hooks.enter]]", 'run = "python3 .mise/scripts/sync-skills.py"')
+    # A root some OTHER engine wrote: real entries, no skillex receipt.
+    foreign = sandbox.project_root_of(project) / "handwritten"
+    foreign.mkdir(parents=True)
+    (foreign / "SKILL.md").write_text("# hand-written\n", encoding="utf-8")
+
+    code, payload = run_sync_json("--dry-run", cwd=project)
+
+    assert code == EXIT_REFUSED
+    reported = codes_in(payload)
+    assert Code.E_UNMANAGED_ROOT.value in reported
+    assert Code.W_INCUMBENT_ENGINE_ACTIVE.value in reported
+
+
+def test_a_manifest_that_cannot_resolve_still_reports_who_wrote_it(sandbox: Sandbox) -> None:
+    """Same property one stage earlier: ``compose()`` can refuse too."""
+    sandbox.write_global_manifest(skills=[])
+    project = sandbox.project(manifest={"skills": ["nope"]})
+    write_mise(project, "[[hooks.enter]]", 'run = "python3 .mise/scripts/sync-skills.py"')
+
+    code, payload = run_sync_json("--dry-run", cwd=project)
+
+    assert code != 0
+    assert Code.W_INCUMBENT_ENGINE_ACTIVE.value in codes_in(payload)
+
+
+def test_the_cli_searches_a_projects_ancestors_too(sandbox: Sandbox) -> None:
+    """The wiring, not just the helper: `skillex sync` must pass the ancestor list.
+
+    Unit-testing ``incumbent_search_roots`` alone cannot catch sync.py handing
+    ``[target.base]`` to the check, which is what it did.
+    """
+    write_catalog(sandbox.registry, "demo")
+    sandbox.write_global_manifest(skills=["demo"])
+    project = sandbox.project(manifest={"skills": ["demo"]})
+    write_mise(project.parent, "[[hooks.enter]]", 'run = "python3 sync-skills.py"')
+
+    _, payload = run_sync_json("--dry-run", cwd=project)
+
+    assert Code.W_INCUMBENT_ENGINE_ACTIVE.value in codes_in(payload)

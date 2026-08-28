@@ -13,6 +13,7 @@ the eye to skip the real one.
 from __future__ import annotations
 
 import subprocess
+from collections.abc import Sequence
 from pathlib import Path
 
 from skillex.core.diagnostics import Code, Reporter
@@ -66,8 +67,27 @@ def check_gitignored(root: Path, reporter: Reporter) -> None:
     if inside is None or inside.returncode != 0:
         return  # not a repo, or no git available: nothing to say
     ignored = _git(["check-ignore", "-q", str(root)], parent)
-    if ignored is None or ignored.returncode == 0:
-        return  # ignored, or git could not tell us
+    if ignored is None or ignored.returncode != 1:
+        # 0 is "ignored". Anything else is git declining to answer -- 128 is what
+        # it returns for a path beyond a symbolic link, and for a repo whose
+        # state it will not read -- and this module guesses at nothing.
+        return
+    if not root.exists() and not root.is_symlink():
+        # The root is not there YET; this run is about to create it, as a
+        # DIRECTORY. A directory-only pattern -- `.agents/skills/`, the canonical
+        # spelling and the one in this machine's core.excludesFile -- cannot match
+        # a path with no directory on disk behind it, so asking about the bare
+        # path warns about a repo that is already configured correctly, on the one
+        # run where the user has least reason to distrust it: the first. Ask
+        # instead about the shape sync is going to write.
+        as_dir = _git(["check-ignore", "-q", f"{root}/"], parent)
+        if as_dir is None or as_dir.returncode != 1:
+            return
+    toplevel = inside.stdout.strip()
+    try:
+        rule = "/" + str(root.relative_to(toplevel))
+    except ValueError:  # pragma: no cover - root is always under its own toplevel
+        rule = f"/{root.name}"
     reporter.emit(
         Code.W_PROJECTION_NOT_GITIGNORED,
         f"{root} is inside a git repo and is not ignored",
@@ -76,11 +96,79 @@ def check_gitignored(root: Path, reporter: Reporter) -> None:
             "It is generated output; committing it produces a diff on every sync",
             "and restores machine-specific symlinks on someone else's checkout.",
         ),
-        fix=f"add /{root.name} to {inside.stdout.strip()}/.gitignore or .git/info/exclude.",
+        # The rule is anchored at the REPO TOP-LEVEL, because that is where the
+        # file being edited lives -- `/skills` there does not ignore
+        # `.agents/skills`, it ignores an unrelated top-level `skills/` (a real
+        # directory in more than one repo here), so following that advice both
+        # leaves the warning firing and untracks something the user wanted.
+        # No trailing slash: a directory-only rule does not cover the root in
+        # alias mode, where it is a symlink and `git add -A` stages it.
+        fix=f"add {rule} to {toplevel}/.gitignore or .git/info/exclude.",
     )
 
 
-def check_incumbent_engine(search_roots: list[Path], reporter: Reporter) -> None:
+def incumbent_search_roots(
+    base: Path | None, home: Path, registry_roots: Sequence[Path]
+) -> list[Path]:
+    """Every directory whose ``mise.toml`` can fire against this scope's root.
+
+    Two things make the naive answer (``[base]``, or the registry ladder for
+    global) wrong, and both are measured on this machine rather than imagined:
+
+    * **mise config is hierarchical.** A ``[[hooks.enter]]`` in an ANCESTOR runs
+      when you cd into a child -- verified with mise 2026.8.10, which printed the
+      ancestor hook's output from the child directory. ``~/code/33GOD/mise.toml``
+      is wired to the retired projector and eight 33GOD components sit under it;
+      ``~/code/intelliforia-mobile/extension`` is a project whose own
+      ``mise.toml`` is clean while its parent's is not. Looking at one directory
+      reports none of that.
+
+    * **the registry is a SOURCE, not a writer of the global root.** At global
+      scope the honest place to look is ``$HOME`` and ``$HOME/.agents`` -- the
+      only configs whose hooks fire against ``~/.agents/skills``. The registry
+      checkout is kept in the list because its own tasks do project (that is how
+      ``skills:sync:global`` is spelled here), not because it is the primary
+      suspect.
+
+    The walk stops at ``home`` when it passes through it -- above a user's home is
+    not that user's configuration -- and at the filesystem root otherwise, so a
+    checkout outside ``$HOME`` is not silently exempt. Only ``mise.toml`` is ever
+    opened, and only by :func:`check_incumbent_engine`.
+    """
+    out: list[Path] = []
+    seen: set[Path] = set()
+
+    def add(directory: Path) -> None:
+        if directory not in seen:
+            seen.add(directory)
+            out.append(directory)
+
+    def add_with_ancestors(start: Path) -> None:
+        add(start)
+        current = start
+        # Stop at ``home`` when the walk passes through it -- above a user's home
+        # is not that user's configuration -- and otherwise at the filesystem
+        # root, so a checkout outside ``$HOME`` (``/srv/work``, ``/opt/...``) is
+        # not silently exempt from the same hierarchy mise itself honours. Each
+        # rung costs one ``is_file()``; the depth is a handful.
+        while current != home and current.parent != current:
+            current = current.parent
+            add(current)
+
+    if base is not None:
+        # A project scope. The registry's own tasks are wired `--scope project
+        # --root <the registry>`: they write the REGISTRY's root, not this
+        # project's, so naming them here would be a wolf-cry on every sync.
+        add_with_ancestors(base)
+        return out
+    add(home)
+    add(home / ".agents")
+    for root in registry_roots:
+        add_with_ancestors(root)
+    return out
+
+
+def check_incumbent_engine(search_roots: Sequence[Path], reporter: Reporter) -> None:
     """Warn when another projector is still wired to write this scope's root.
 
     Reports the file and LINE, because "something else also syncs skills" is not
@@ -120,7 +208,12 @@ def check_incumbent_engine(search_roots: list[Path], reporter: Reporter) -> None
             continue
         reporter.emit(
             Code.W_INCUMBENT_ENGINE_ACTIVE,
-            f"another projector is still wired in {config.name}",
+            # The FULL path, not `config.name`: with the ancestor walk two
+            # configs in one scope both spell "mise.toml", the renderer collapses
+            # findings that share a message, and one of the two files' hit lines
+            # disappears. Verified on `~/code/33GOD/momo`, where the parent and
+            # the child are both wired.
+            f"another projector is still wired in {config}",
             path=config,
             detail=(
                 *(f"{config}:{number}  {text}" for number, text in hits[:6]),
@@ -158,4 +251,5 @@ __all__ = [
     "check_gitignored",
     "check_incumbent_engine",
     "check_rival_lockfile",
+    "incumbent_search_roots",
 ]

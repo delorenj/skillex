@@ -38,6 +38,7 @@ from skillex.core.environment import (
     check_gitignored,
     check_incumbent_engine,
     check_rival_lockfile,
+    incumbent_search_roots,
 )
 from skillex.core.file_lock import FileLock, LockBusyError
 from skillex.core.loader import ManifestError, ManifestParseError, load_skills_manifest
@@ -375,6 +376,26 @@ def register(app: typer.Typer) -> None:
                 reporter.scope = target.label
                 manifest = _load(target.manifest_path)
                 scoped_roots = registry_roots(manifest.registry) if manifest.registry else roots
+                # Who ELSE writes here. Read-only, never fatal, and reported FIRST
+                # -- before compose, preflight and diff, every one of which can
+                # raise a RefusalError that abandons the whole loop.
+                #
+                # Placing these after diff() silenced them in the single case they
+                # exist for. E_UNMANAGED_ROOT -- "this root has entries and no
+                # skillex state" -- IS the signature of another projector having
+                # already written it, and it refuses out of the loop before the
+                # check that would have named that projector ever ran. Verified on
+                # `~/code/33GOD/momo`, whose mise.toml is wired to the retired
+                # engine and whose root that engine already owns: the run reported
+                # the refusal and said nothing about the engine. The obvious way
+                # out of the refusal (delete the root, or --forget) then hands it
+                # straight back on the next `cd`.
+                check_gitignored(target.root, reporter)
+                check_incumbent_engine(
+                    incumbent_search_roots(target.base, Path.home(), scoped_roots), reporter
+                )
+                if target.kind is ScopeKind.GLOBAL:
+                    check_rival_lockfile(Path.home(), reporter)
                 desired = compose(
                     manifest,
                     target,
@@ -407,13 +428,6 @@ def register(app: typer.Typer) -> None:
                     skip_occupied=skip_occupied,
                     prune=prune,
                 )
-                # Who ELSE writes here. Read-only, never fatal, and run at plan
-                # time so --dry-run surfaces them too -- a rival writer is most
-                # worth knowing about before you commit to a sync, not after.
-                check_gitignored(target.root, reporter)
-                check_incumbent_engine([target.base] if target.base else [*scoped_roots], reporter)
-                if target.kind is ScopeKind.GLOBAL:
-                    check_rival_lockfile(Path.home(), reporter)
                 results.append(ScopeResult(target, manifest, desired, state, current, rplan))
             reporter.scope = None
         except RefusalError as refusal:
