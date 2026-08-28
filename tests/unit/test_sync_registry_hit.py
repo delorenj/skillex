@@ -641,3 +641,148 @@ class TestRegistryPathIsReportedNotTheDefault:
         finding = excinfo.value.finding
         assert finding.code is Code.E_SET_MISSING
         assert finding.detail == (f"{only_rung}  exists, but has no sets/{SET}",)
+
+
+# ===========================================================================
+# The pack-member lookup: the one find_in_roots call site that used to be mute
+# ===========================================================================
+
+
+class TestManifestOnlyPackMembersReportTheStaleRung:
+    """``expand_pack`` resolves each manifest-only member with its own
+    ``find_in_roots(roots, f"all-skills/{name}")``, and that call site alone never
+    reported what it walked past. A pack whose members all resolve one rung down
+    from the checkout the operator believes is authoritative was silent.
+
+    Wiring it naively is the reason it stayed unwired: :class:`Reporter` does not
+    deduplicate (once per offending name is correct everywhere else), and this
+    runs once per MEMBER -- ``packs/hermes-base`` expands to 73 -- so the honest
+    fix has to report the ladder fact once, not once per member.
+    """
+
+    MEMBERS = ("m-one", "m-two", "m-three")
+
+    @staticmethod
+    def _ladder(tmp_path: Path) -> tuple[Path, Path]:
+        """Rung 1 exists and carries an ``all-skills/`` -- just not these members."""
+        cache = tmp_path / "cache-clone"
+        (cache / "all-skills").mkdir(parents=True)
+        write_skill(cache / "all-skills", "something-else")
+
+        checkout = make_registry(tmp_path / "checkout")
+        write_catalog(checkout, *TestManifestOnlyPackMembersReportTheStaleRung.MEMBERS)
+        # `declared` with no matching directories IS the manifest-only pack: every
+        # member has to come from all-skills/.
+        write_pack(
+            checkout, PACK, declared=list(TestManifestOnlyPackMembersReportTheStaleRung.MEMBERS)
+        )
+        return cache, checkout
+
+    def _member_findings(self, reporter: Reporter) -> list[Any]:
+        """Stale-rung findings raised by the MEMBER lookup, not the pack lookup.
+
+        The `packs[]` lookup skips the same rung and legitimately reports it too;
+        that one names ``packs/<name>``, these name ``all-skills/<member>``.
+        """
+        return [
+            f
+            for f in reporter.findings
+            if f.code is Code.W_STALE_REGISTRY_CANDIDATE and "all-skills/" in " ".join(f.detail)
+        ]
+
+    def test_a_member_resolving_past_a_stale_rung_is_reported_at_all(
+        self, sandbox: Sandbox, tmp_path: Path
+    ) -> None:
+        """Fails before the fix: this call site emitted nothing, ever."""
+        cache, checkout = self._ladder(tmp_path)
+
+        desired, reporter = compose_global(sandbox, [cache, checkout], packs=[PACK])
+
+        assert set(desired.bindings) == set(self.MEMBERS)
+        found = self._member_findings(reporter)
+        assert found, (
+            "a manifest-only pack member walked past an existing checkout and "
+            f"said nothing; got {codes(reporter)}"
+        )
+        assert found[0].path == checkout
+        assert any(str(cache) in line for line in found[0].detail)
+
+    def test_it_states_the_ladder_fact_once_not_once_per_member(
+        self, sandbox: Sandbox, tmp_path: Path
+    ) -> None:
+        """Fails if the call site is wired WITHOUT the suppression set.
+
+        Three members here; hermes-base has 73. One repeated fact about the ladder
+        must not bury the run.
+        """
+        cache, checkout = self._ladder(tmp_path)
+
+        _, reporter = compose_global(sandbox, [cache, checkout], packs=[PACK])
+
+        assert len(self._member_findings(reporter)) == 1, (
+            "the ladder fact was reported once per member: "
+            f"{[f.message for f in self._member_findings(reporter)]}"
+        )
+
+    def test_a_one_rung_ladder_stays_silent(self, sandbox: Sandbox, tmp_path: Path) -> None:
+        """The control. Nothing was walked past, so there is nothing to say --
+        without this, an unconditional emit would satisfy the two tests above.
+        """
+        _, checkout = self._ladder(tmp_path)
+
+        _, reporter = compose_global(sandbox, [checkout], packs=[PACK])
+
+        assert Code.W_STALE_REGISTRY_CANDIDATE not in codes(reporter)
+
+
+class TestExplicitRegistryRootOutranksTheManifest:
+    """``--registry-root`` is documented as "Override the registry ladder."
+
+    It used to lose to a ``registry`` key in the manifest: ``sync.py`` computed
+    ``registry_roots(manifest.registry) if manifest.registry else roots``, so for
+    any manifest that declared a registry the flag was discarded outright and the
+    run resolved against the cache ladder the key implies. The one surface a user
+    reaches for to FORCE a ladder was the one surface that could not, and it
+    failed silently -- no finding, no note, just resolution somewhere else.
+
+    A per-invocation flag is both more specific and more deliberate than a
+    committed config file, so it wins.
+    """
+
+    def test_the_flag_wins_over_a_registry_key_and_the_set_resolves(
+        self, sandbox: Sandbox, tmp_path: Path, run_sync_json: Any
+    ) -> None:
+        """Fails before the fix: the manifest's ladder answers and the set is missing."""
+        checkout = make_registry(tmp_path / "explicit")
+        catalog = write_catalog(checkout, SKILL)
+        write_set(checkout, SET, [("link", SKILL, catalog[SKILL])])
+        # A registry key whose cache rung does not exist and never carried this set.
+        sandbox.write_global_manifest(
+            sets=[SET], registry="https://github.com/example/not-cloned.git"
+        )
+
+        exit_code, payload = run_sync_json(
+            "--registry-root", str(checkout), "--dry-run", cwd=outside(sandbox)
+        )
+
+        assert exit_code == 0, json_codes(payload)
+        assert Code.E_SET_MISSING.value not in json_codes(payload)
+        assert Code.E_NO_REGISTRY.value not in json_codes(payload)
+
+    def test_without_the_flag_the_registry_key_still_builds_the_ladder(
+        self, sandbox: Sandbox, run_sync_json: Any
+    ) -> None:
+        """The control: the fix must not stop a declared ``registry`` from working.
+
+        Same manifest, no flag. The declared registry's ladder has no checkout
+        behind it, so this run cannot resolve -- which is the proof that the run
+        above resolved because of the FLAG and not because the key was ignored.
+        """
+        sandbox.write_global_manifest(
+            sets=[SET], registry="https://github.com/example/not-cloned.git"
+        )
+
+        exit_code, payload = run_sync_json("--dry-run", cwd=outside(sandbox))
+
+        assert exit_code == EXIT_CONFIG
+        assert {Code.E_SET_MISSING.value, Code.E_NO_REGISTRY.value} & set(json_codes(payload))

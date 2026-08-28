@@ -119,15 +119,35 @@ def _missing(code: Code, tried: list[Path], what: str, name: str | None = None) 
     )
 
 
-def _report_skipped(reporter: Reporter, hit: RegistryHit, what: str) -> None:
+def _report_skipped(
+    reporter: Reporter,
+    hit: RegistryHit,
+    what: str,
+    seen: set[tuple[Path, ...]] | None = None,
+) -> None:
     """Warn when resolution walked past a checkout that exists.
 
     Silence here is how a stale clone stays invisible for months: the ladder finds
     the path one rung further down, everything works, and nobody learns that the
     cache the operator believes is authoritative has been wrong since a rename.
+
+    ``seen`` is an OPT-IN suppression set for callers that resolve many names
+    against the same ladder in one go -- :func:`expand_pack`, where a single pack
+    (`packs/hermes-base`) expands to 73 members. Every one of those would
+    otherwise emit its own copy of what is a single fact about the LADDER, not
+    about any member, and :class:`Reporter` deliberately does not deduplicate
+    (the same code firing once per offending name is the correct behaviour
+    everywhere else). Keyed on the skipped rungs, so a genuinely different stale
+    rung still reports. Callers that resolve exactly one name pass nothing and
+    are byte-for-byte unaffected.
     """
     if not hit.skipped:
         return
+    if seen is not None:
+        key = tuple(hit.skipped)
+        if key in seen:
+            return
+        seen.add(key)
     reporter.emit(
         Code.W_STALE_REGISTRY_CANDIDATE,
         f"{what} resolved from {hit.root}, past {len(hit.skipped)} earlier checkout(s)",
@@ -350,6 +370,7 @@ def expand_pack(
         reported_empty = set(inventory.empty_containers)
         remaining = [n for n in selected if n not in expanded and n not in reported_empty]
 
+    skipped_rungs: set[tuple[Path, ...]] = set()
     for name in remaining:
         path = pack_dir / name
         if path.is_symlink():
@@ -359,7 +380,8 @@ def expand_pack(
         elif not path.exists():
             # A manifest-only pack: pack.toml names members that live in the
             # catalog rather than in the pack directory.
-            hit = find_in_roots(roots, f"all-skills/{name}")
+            member_rel = f"all-skills/{name}"
+            hit = find_in_roots(roots, member_rel)
             if hit is None:
                 raise RefusalError(
                     Finding(
@@ -370,6 +392,12 @@ def expand_pack(
                         fix="add the skill to all-skills/, or remove it from pack.toml.",
                     )
                 )
+            # The one find_in_roots call site that used to resolve in SILENCE. A
+            # manifest-only pack member walking past a stale checkout was invisible,
+            # which is exactly the case W_STALE_REGISTRY_CANDIDATE exists for.
+            # Suppressed to once per distinct set of skipped rungs (see
+            # _report_skipped), so a 73-member pack states the fact once.
+            _report_skipped(reporter, hit, member_rel, seen=skipped_rungs)
             target = hit.path
         else:
             raise RefusalError(

@@ -180,6 +180,29 @@ def _render_findings(reporter: Reporter, *, verbose: bool) -> None:
     console.print()
 
 
+def _ladder_for(
+    declared_registry: str | None, roots: list[Path], registry_root: Path | None
+) -> list[Path]:
+    """The registry ladder one scope resolves against.
+
+    Precedence, and the first rung of it is the fix: an explicit
+    ``--registry-root`` WINS over a ``registry`` key in the manifest. It used to
+    lose, silently -- the flag whose help text reads "Override the registry
+    ladder" was discarded outright for any manifest that declared a registry, so
+    the one surface a user reaches for to force a ladder was the one surface that
+    could not. A per-invocation flag is the more deliberate and more specific
+    signal of the two; a config file must not outrank it.
+
+    Otherwise a declared ``registry`` builds its own ladder (that is what the key
+    is for), and failing both, the default ladder computed once in the caller.
+    """
+    if registry_root is not None:
+        return roots
+    if declared_registry:
+        return registry_roots(declared_registry)
+    return roots
+
+
 def _json_payload(
     reporter: Reporter, results: list[ScopeResult], *, exit_code: int, dry_run: bool
 ) -> dict[str, Any]:
@@ -364,9 +387,7 @@ def register(app: typer.Typer) -> None:
             if inherits and not writes_global:
                 donor = global_scope()
                 donor_manifest = _load(donor.manifest_path)
-                donor_roots = (
-                    registry_roots(donor_manifest.registry) if donor_manifest.registry else roots
-                )
+                donor_roots = _ladder_for(donor_manifest.registry, roots, registry_root)
                 # A throwaway reporter: findings about a scope this run is not
                 # touching are noise, not news.
                 global_bindings = compose(donor_manifest, donor, donor_roots, Reporter()).bindings
@@ -375,7 +396,7 @@ def register(app: typer.Typer) -> None:
             for target in plan.scopes:
                 reporter.scope = target.label
                 manifest = _load(target.manifest_path)
-                scoped_roots = registry_roots(manifest.registry) if manifest.registry else roots
+                scoped_roots = _ladder_for(manifest.registry, roots, registry_root)
                 # Who ELSE writes here. Read-only, never fatal, and reported FIRST
                 # -- before compose, preflight and diff, every one of which can
                 # raise a RefusalError that abandons the whole loop.
