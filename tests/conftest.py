@@ -33,7 +33,7 @@ from __future__ import annotations
 
 import json
 import os
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Iterable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -524,9 +524,60 @@ def registry(tmp_path: Path) -> Path:
 
 
 @pytest.fixture
-def sandbox(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, registry: Path) -> Sandbox:
-    """HOME, XDG_STATE_HOME and PJ_SKILLS_REGISTRY_ROOT, all inside ``tmp_path``."""
-    return make_sandbox(monkeypatch, tmp_path, registry)
+def sandbox(tmp_path: Path, registry: Path) -> Iterator[Sandbox]:
+    """HOME, XDG_STATE_HOME and PJ_SKILLS_REGISTRY_ROOT, all inside ``tmp_path``.
+
+    Deliberately uses a PRIVATE :class:`pytest.MonkeyPatch` rather than the shared
+    ``monkeypatch`` fixture. A test that patches something itself and then calls
+    ``monkeypatch.undo()`` -- the ordinary way to assert "and now, unbroken, it
+    converges" -- would otherwise undo the *sandbox as well*, silently repointing
+    ``HOME`` at the developer's real one for the rest of the test. ``apply()``
+    writes, so the next ``sync()`` call reconciles the real ``~/.agents/skills``.
+
+    That is not hypothetical: it is exactly how
+    ``test_interruption_leaves_a_superset_and_the_next_run_converges`` came to
+    rewrite this machine's live global activation root. Isolation must be a
+    property of the fixture, not a rule contributors are asked to remember.
+    """
+    mp = pytest.MonkeyPatch()
+    try:
+        yield make_sandbox(mp, tmp_path, registry)
+    finally:
+        mp.undo()
+
+
+@pytest.fixture(autouse=True)
+def _never_touch_the_real_machine() -> Iterator[None]:
+    """Tripwire: fail any test that mutated the developer's real skill state.
+
+    The ``sandbox`` fixture makes escape hard; this makes it *loud*. It costs two
+    ``stat`` calls per test and it is the only thing standing between a plausible
+    refactor and a test suite that quietly reconciles the machine it runs on.
+    """
+    watched = [
+        Path.home() / ".agents" / "skills",
+        Path.home() / ".local" / "state" / "skillex" / "projections",
+    ]
+
+    def fingerprint() -> list[tuple[str, float, int] | None]:
+        out: list[tuple[str, float, int] | None] = []
+        for path in watched:
+            try:
+                st = path.stat()
+                out.append((str(path), st.st_mtime, len(list(path.iterdir()))))
+            except OSError:
+                out.append(None)
+        return out
+
+    before = fingerprint()
+    yield
+    after = fingerprint()
+    assert after == before, (
+        "this test mutated the REAL machine state, not its sandbox:\n"
+        f"  before {before}\n  after  {after}\n"
+        "Request the `sandbox` fixture, and never call monkeypatch.undo() on a "
+        "MonkeyPatch that something else is also using."
+    )
 
 
 @pytest.fixture(name="write_skill")
