@@ -947,29 +947,6 @@ def test_unsupported_skill_fields_are_refused_with_an_explanation(spec):
     assert len(message.split("is not supported.", 1)[1].strip()) > 40
 
 
-def test_an_unsupported_field_fails_the_manifest_load(sandbox, registry, run_sync_json):
-    """It must reach the surface carrying its explanation, never be dropped.
-
-    ``sets[].flatten`` would otherwise project ZERO skills and report success. What
-    this pins is that the run is a CONFIGURATION error (exit 2, nothing touched)
-    and that the authored explanation survives all the way to ``--json``. Which of
-    the two config codes carries it -- ``E_UNSUPPORTED_FIELD`` or the generic
-    ``E_MANIFEST_PARSE`` -- is the CLI's error mapping, pinned by the sync CLI
-    tests, not this module's business.
-    """
-    write_manifest(sandbox.home, {"sets": [{"name": "s", "flatten": True}]})
-
-    code, payload = run_sync_json(cwd=outside(sandbox))
-
-    assert code == 2
-    assert [f["code"] for f in payload["findings"]] in (
-        [Code.E_UNSUPPORTED_FIELD.value],
-        [Code.E_MANIFEST_PARSE.value],
-    )
-    assert "flatten" in payload["findings"][0]["message"]
-    assert "project zero skills" in payload["findings"][0]["message"]
-
-
 # ===========================================================================
 # AC 6 / AC 7 boundary: what compose() itself does with inheritance
 # ===========================================================================

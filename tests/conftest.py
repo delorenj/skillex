@@ -576,9 +576,22 @@ def _never_touch_the_real_machine() -> Iterator[None]:
     ``stat`` calls per test and it is the only thing standing between a plausible
     refactor and a test suite that quietly reconciles the machine it runs on.
     """
+    # The two live projection roots, plus the two directories in THIS repo that a
+    # test could plausibly write into by accident. The repo pair is not
+    # hypothetical: every fixture helper here (`write_catalog`, `write_set`,
+    # `write_pack`) takes a registry root as its first argument, and handed the
+    # real checkout instead of a tmp_path they would build into the catalog that
+    # every surface on this machine resolves through. `sets/` is watched for the
+    # same reason and one more: it is where a stray projection lands, and an
+    # untracked directory there is invisible to `git status` if it is empty --
+    # which is exactly how a retired `skill-sets/` tree came back as nine empty
+    # directories nobody could see.
+    repo = Path(__file__).resolve().parent.parent
     watched = [
         Path.home() / ".agents" / "skills",
         Path.home() / ".local" / "state" / "skillex" / "projections",
+        repo / "all-skills",
+        repo / "sets",
     ]
 
     def fingerprint() -> list[tuple[str, float, int] | None]:

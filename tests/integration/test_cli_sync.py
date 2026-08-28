@@ -426,8 +426,16 @@ def test_exit_2_on_a_refused_unsupported_field(
 
     assert code == EXIT_CONFIG
     assert codes(payload) == [Code.E_UNSUPPORTED_FIELD.value]
-    # The authored explanation survives the trip through the loader intact.
+    # The authored explanation survives the trip through the loader intact --
+    # both the field that was refused and the REASON, which is the half that
+    # makes the refusal actionable. (Folded in from an equivalent test in
+    # test_sync_resolver.py that ran the same scenario through the same
+    # run_sync_json entry point but accepted `E_UNSUPPORTED_FIELD or
+    # E_MANIFEST_PARSE`; that disjunction's second branch is unreachable, since
+    # sync.py tests `isinstance(e.__cause__, UnsupportedFieldError)` first, so
+    # it could not fail if the mapping regressed to the generic code.)
     assert "flatten" in payload["findings"][0]["message"]
+    assert "project zero skills" in payload["findings"][0]["message"]
     assert not sandbox.global_root.exists()
 
 
