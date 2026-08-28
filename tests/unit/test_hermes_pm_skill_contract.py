@@ -35,7 +35,7 @@ def test_command_and_skill_core_are_immutable_and_additive() -> None:
     }
 
     for name in REQUIRED_CORE:
-        projection = ROOT / "skill-sets" / "global" / name
+        projection = ROOT / "sets" / "global" / name
         assert projection.is_symlink()
         assert (projection / "SKILL.md").is_file()
 
@@ -268,6 +268,6 @@ def test_human_runbooks_route_to_the_normative_contract() -> None:
     assert "references/pm-deployment.md" in project_creation
 
     for name in ("agent-fleet-operations", "33god-agent-fleet-operations"):
-        projection = ROOT / "skill-sets" / "global" / name
+        projection = ROOT / "sets" / "global" / name
         assert projection.is_symlink()
         assert projection.resolve() == FLEET_SKILL.resolve()
