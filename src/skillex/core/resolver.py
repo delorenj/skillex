@@ -308,7 +308,14 @@ def expand_pack(
                 chain=(path,),
             )
         expanded = {flat.declared for flat in inventory.skills}
-        remaining = [n for n in selected if n not in expanded]
+        # A declared container that expanded to nothing has ALREADY been reported,
+        # as a WARNING. Leaving it in `remaining` sends it through the unflattened
+        # member resolution below, where a directory holding no SKILL.md is a hard
+        # E_PACK_MEMBER_MISSING refusal -- so one empty container in an 18-entry pack
+        # like hermes-base makes the whole pack unsyncable while the reporter
+        # insists it is only a warning. The warning is the contract; honor it.
+        reported_empty = set(inventory.empty_containers)
+        remaining = [n for n in selected if n not in expanded and n not in reported_empty]
 
     for name in remaining:
         path = pack_dir / name
