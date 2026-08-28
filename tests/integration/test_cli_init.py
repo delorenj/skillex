@@ -18,9 +18,12 @@ class TestInit:
             app,
             [
                 "init",
-                "--config", str(cfg_path),
-                "--skills-root", str(tmp_path / "all-skills"),
-                "--packs-root", str(tmp_path / "packs"),
+                "--config",
+                str(cfg_path),
+                "--skills-root",
+                str(tmp_path / "all-skills"),
+                "--packs-root",
+                str(tmp_path / "packs"),
             ],
         )
         assert result.exit_code == 0, result.output
@@ -44,10 +47,13 @@ class TestInit:
             app,
             [
                 "init",
-                "--config", str(cfg_path),
+                "--config",
+                str(cfg_path),
                 "--force",
-                "--skills-root", str(tmp_path / "all-skills"),
-                "--packs-root", str(tmp_path / "packs"),
+                "--skills-root",
+                str(tmp_path / "all-skills"),
+                "--packs-root",
+                str(tmp_path / "packs"),
             ],
         )
         assert result.exit_code == 0

@@ -31,11 +31,11 @@ class TestIsValidSlotType:
     @pytest.mark.parametrize(
         "name",
         [
-            "memory",         # wrong case
-            "Review",         # not yet canonical
-            "custom:",        # empty suffix
-            "",               # empty
-            "random:foo",     # wrong prefix
+            "memory",  # wrong case
+            "Review",  # not yet canonical
+            "custom:",  # empty suffix
+            "",  # empty
+            "random:foo",  # wrong prefix
         ],
     )
     def test_rejects_invalid(self, name: str) -> None:

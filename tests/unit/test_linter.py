@@ -151,9 +151,7 @@ class TestSlotTypeMismatch:
                 )
             },
         )
-        pack = _make_pack(
-            manifest, slot_skills={"workflow": skill}, tmp_path=tmp_path
-        )
+        pack = _make_pack(manifest, slot_skills={"workflow": skill}, tmp_path=tmp_path)
         issues = lint_pack(pack, {"hindsight": skill})
         issue = _find(issues, RuleCode.SLOT_TYPE_MISMATCH)
         assert issue is not None
@@ -171,9 +169,7 @@ class TestSlotTypeMismatch:
                 )
             },
         )
-        pack = _make_pack(
-            manifest, slot_skills={"memory": skill}, tmp_path=tmp_path
-        )
+        pack = _make_pack(manifest, slot_skills={"memory": skill}, tmp_path=tmp_path)
         issues = lint_pack(pack, {"hindsight": skill})
         assert _find(issues, RuleCode.SLOT_TYPE_MISMATCH) is None
 
@@ -192,9 +188,7 @@ class TestUnslottedInSlot:
                 )
             },
         )
-        pack = _make_pack(
-            manifest, slot_skills={"memory": skill}, tmp_path=tmp_path
-        )
+        pack = _make_pack(manifest, slot_skills={"memory": skill}, tmp_path=tmp_path)
         issues = lint_pack(pack, {"mermaid": skill})
         assert _find(issues, RuleCode.UNSLOTTED_IN_SLOT) is not None
 
@@ -253,17 +247,13 @@ class TestDuplicateSkill:
 
 
 class TestMissingFrontmatter:
-    def test_freeform_unslotted_without_frontmatter_warns(
-        self, tmp_path: Path
-    ) -> None:
+    def test_freeform_unslotted_without_frontmatter_warns(self, tmp_path: Path) -> None:
         skill = _make_skill("barebones", with_frontmatter=False, tmp_path=tmp_path)
         manifest = PackManifest(
             name="pack",
             freeform_skills=["barebones"],
         )
-        pack = _make_pack(
-            manifest, freeform_skills=[skill], tmp_path=tmp_path
-        )
+        pack = _make_pack(manifest, freeform_skills=[skill], tmp_path=tmp_path)
         issues = lint_pack(pack, {"barebones": skill})
         issue = _find(issues, RuleCode.MISSING_FRONTMATTER)
         assert issue is not None
@@ -327,8 +317,6 @@ class TestCleanPack:
                 )
             },
         )
-        pack = _make_pack(
-            manifest, slot_skills={"memory": skill}, tmp_path=tmp_path
-        )
+        pack = _make_pack(manifest, slot_skills={"memory": skill}, tmp_path=tmp_path)
         issues = lint_pack(pack, {"hindsight": skill})
         assert issues == []

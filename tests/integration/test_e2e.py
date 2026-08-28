@@ -70,17 +70,17 @@ active_pack = "33god-dev"
 
 [cli.claude]
 enabled = true
-global_root = "{tmp_path / 'roots' / 'claude'}"
+global_root = "{tmp_path / "roots" / "claude"}"
 project_root = ".claude"
 
 [cli.codex]
 enabled = true
-global_root = "{tmp_path / 'roots' / 'codex'}"
+global_root = "{tmp_path / "roots" / "codex"}"
 project_root = ".codex"
 
 [cli.opencode]
 enabled = true
-global_root = "{tmp_path / 'roots' / 'opencode'}"
+global_root = "{tmp_path / "roots" / "opencode"}"
 project_root = ".opencode"
 """.strip(),
         encoding="utf-8",
@@ -105,8 +105,16 @@ class TestE2E:
         # 2. Dry-run activate
         result = runner.invoke(
             app,
-            ["pack", "activate", "33god-dev", "--scope", "global", "--dry-run",
-             "--config", str(cfg_path)],
+            [
+                "pack",
+                "activate",
+                "33god-dev",
+                "--scope",
+                "global",
+                "--dry-run",
+                "--config",
+                str(cfg_path),
+            ],
         )
         assert result.exit_code == 0, result.output
         assert "dry-run" in result.output
@@ -117,8 +125,7 @@ class TestE2E:
         # 3. Real activate
         result = runner.invoke(
             app,
-            ["pack", "activate", "33god-dev", "--scope", "global",
-             "--config", str(cfg_path)],
+            ["pack", "activate", "33god-dev", "--scope", "global", "--config", str(cfg_path)],
         )
         assert result.exit_code == 0, result.output
         assert "activated" in result.output
@@ -143,8 +150,7 @@ class TestE2E:
         # 5. Re-activate (idempotency)
         result = runner.invoke(
             app,
-            ["pack", "activate", "33god-dev", "--scope", "global",
-             "--config", str(cfg_path)],
+            ["pack", "activate", "33god-dev", "--scope", "global", "--config", str(cfg_path)],
         )
         assert result.exit_code == 0
 
@@ -176,33 +182,25 @@ skill = "hindsight"
 """.strip(),
             encoding="utf-8",
         )
-        result = runner.invoke(
-            app, ["pack", "lint", "broken", "--config", str(cfg_path)]
-        )
+        result = runner.invoke(app, ["pack", "lint", "broken", "--config", str(cfg_path)])
         assert result.exit_code == 1
         assert "SLOT_TYPE_MISMATCH" in result.output
 
     def test_skill_list(self, workspace: Path) -> None:
-        result = runner.invoke(
-            app, ["skill", "list", "--config", str(_config(workspace))]
-        )
+        result = runner.invoke(app, ["skill", "list", "--config", str(_config(workspace))])
         assert result.exit_code == 0
         assert "hindsight" in result.output
         assert "Memory" in result.output
 
     def test_slot_list(self, workspace: Path) -> None:
-        result = runner.invoke(
-            app, ["slot", "list", "--config", str(_config(workspace))]
-        )
+        result = runner.invoke(app, ["slot", "list", "--config", str(_config(workspace))])
         assert result.exit_code == 0
         assert "Memory" in result.output
         assert "Workflow" in result.output
         assert "TTS" in result.output
 
     def test_pack_list(self, workspace: Path) -> None:
-        result = runner.invoke(
-            app, ["pack", "list", "--config", str(_config(workspace))]
-        )
+        result = runner.invoke(app, ["pack", "list", "--config", str(_config(workspace))])
         assert result.exit_code == 0
         assert "33god-dev" in result.output
 
