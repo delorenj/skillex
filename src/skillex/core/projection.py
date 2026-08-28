@@ -22,12 +22,13 @@ silently detaching every process holding an open fd or CWD inside it.
 from __future__ import annotations
 
 import os
+from contextlib import suppress
 from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
 from typing import Literal
 
-from skillex.core.compositions import lexical_link_target
+from skillex.core.compositions import EXCLUDED_PREFIXES, lexical_link_target
 from skillex.core.diagnostics import Code, Finding, RefusalError, Reporter
 from skillex.core.resolver import Binding, Desired
 from skillex.core.scope import Scope, is_within
@@ -77,6 +78,10 @@ class RootState:
 class ReconcilePlan:
     ops: list[Op]
     mode: Literal["composed", "alias"]
+    #: Entries in the root that are outside sync's namespace (dot/underscore
+    #: prefixed) and are therefore neither projected nor pruned. Surfaced so
+    #: "37 entries" and "36 managed" never look like a discrepancy.
+    reserved: tuple[str, ...] = ()
     alias_target: Path | None = None
     #: True when the root must change shape (dir <-> symlink) before ops apply.
     mode_change: bool = False
@@ -217,7 +222,22 @@ def diff(
         return _diff_alias(current, desired, state, managed, reporter)
 
     ops: list[Op] = []
-    present = dict(current.children) if current.kind == "real_dir" else {}
+    all_children = dict(current.children) if current.kind == "real_dir" else {}
+    # Dot- and underscore-prefixed entries are OUTSIDE sync's namespace, not merely
+    # unowned. A composition can never project one (compositions.EXCLUDED_PREFIXES
+    # drops them at read time), so sync can neither create nor prune one, and
+    # treating them as evidence of a foreign populator would be a permanent, silent
+    # veto over the root.
+    #
+    # This is not hypothetical: Codex installs its own `.system/` directory --
+    # `skill-creator`, `skill-installer` and a `.codex-system-skills.marker` -- into
+    # the live global activation root, and it belongs there. Counting it as a
+    # trespasser made E_UNMANAGED_ROOT unclearable by any action short of deleting
+    # another tool's data. Reserved entries are ignored, in both directions.
+    reserved = {n for n in all_children if n.startswith(EXCLUDED_PREFIXES)} - {
+        n for n in all_children if n.startswith(TMP_PREFIX)
+    }
+    present = {n: e for n, e in all_children.items() if n not in reserved}
 
     # A root with no receipt is refused only when it holds something we could not
     # have written: a non-symlink, or a symlink pointing outside every managed root.
@@ -322,7 +342,7 @@ def diff(
                 fix="remove it yourself, or declare it in the manifest.",
             )
         ops.append(Op(Action.FOREIGN, name, current=Path(entry.path)))
-    return ReconcilePlan(ops=ops, mode="composed")
+    return ReconcilePlan(ops=ops, mode="composed", reserved=tuple(sorted(reserved)))
 
 
 def _diff_alias(
@@ -429,7 +449,17 @@ def apply(
         tmp = scope.root / f"{TMP_PREFIX}{op.name}-{os.getpid()}"
         tmp.unlink(missing_ok=True)
         os.symlink(op.target, tmp)
-        os.rename(tmp, scope.root / op.name)
+        try:
+            os.rename(tmp, scope.root / op.name)
+        except BaseException:
+            # An interrupted rename must not strand the staging link. It is ours,
+            # it was never published under its real name, and left behind it is a
+            # third thing the root can hold -- neither the old link nor the new one
+            # -- in a directory eight CLI aliases read. `sweep_tmp` and the SWEEP op
+            # are the backstop for a killed process, not a licence to leak here.
+            with suppress(OSError):
+                os.unlink(tmp)
+            raise
 
     for op in plan.by(Action.REMOVE, Action.SWEEP):
         try:

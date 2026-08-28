@@ -36,7 +36,7 @@ from skillex.core.diagnostics import (
 )
 from skillex.core.file_lock import FileLock, LockBusyError
 from skillex.core.loader import ManifestError, load_skills_manifest
-from skillex.core.models import SkillsManifest
+from skillex.core.models import SkillsManifest, UnsupportedFieldError
 from skillex.core.projection import (
     Action,
     ReconcilePlan,
@@ -103,7 +103,8 @@ def _render(reporter: Reporter, results: list[ScopeResult], *, verbose: bool) ->
         )
         root_desc = {
             "absent": "absent",
-            "real_dir": f"real dir, {len(result.current.children)} entries",
+            "real_dir": f"real dir, {len(result.current.children)} entries"
+            + (f" ({len(result.plan.reserved)} reserved)" if result.plan.reserved else ""),
             "symlink": f"symlink -> {result.current.link_target}",
             "other": "not a directory",
         }[result.current.kind]
@@ -189,6 +190,7 @@ def _json_payload(
                 "mode": r.plan.mode,
                 "alias_target": str(r.plan.alias_target) if r.plan.alias_target else None,
                 "counts": r.plan.counts,
+                "reserved": list(r.plan.reserved),
                 "applied": r.applied,
                 "ops": [
                     {
@@ -387,10 +389,21 @@ def register(app: typer.Typer) -> None:
         except RefusalError as refusal:
             reporter.findings.append(refusal.finding)
         except ManifestError as e:
+            # The loader wraps an UnsupportedFieldError rather than letting it escape,
+            # so the cause is the only thing that still distinguishes "your JSON is
+            # broken" from "that field parses, is in the published schema, and sync
+            # refuses it on purpose". Both are config errors (exit 2); only the code
+            # tells a script which one it is -- and E_UNSUPPORTED_FIELD exists in the
+            # enum precisely to be that code.
+            unsupported = isinstance(e.__cause__, UnsupportedFieldError)
             reporter.emit(
-                Code.E_MANIFEST_PARSE,
+                Code.E_UNSUPPORTED_FIELD if unsupported else Code.E_MANIFEST_PARSE,
                 str(e),
-                fix="fix the JSON, or check it against skills.schema.json.",
+                fix=(
+                    "remove the field; the message above says what it would have done."
+                    if unsupported
+                    else "fix the JSON, or check it against skills.schema.json."
+                ),
             )
         except LockBusyError as e:
             err_console.print(f"[red]{e}[/red]")
@@ -404,9 +417,12 @@ def register(app: typer.Typer) -> None:
         if explain is not None:
             raise typer.Exit(_explain(explain, results))
 
+        # Promotion above already turned every STRICT_PROMOTES warning into an ERROR,
+        # and a promoted code is never a config error, so this yields EXIT_REFUSED on
+        # its own. There is deliberately no "any warning fails --strict" fallback:
+        # that would fail on W_SET_OPTIONAL_MISSING and W_CLI_ROOT_NOT_ALIAS too, and
+        # STRICT_PROMOTES exists precisely to say those are not topology violations.
         code = exit_code_for(reporter.findings)
-        if strict and code == EXIT_OK and reporter.warnings():
-            code = EXIT_REFUSED
 
         drift = any(r.plan.has_drift for r in results)
 

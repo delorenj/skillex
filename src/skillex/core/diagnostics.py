@@ -21,7 +21,7 @@ The severity ladder is deliberately three-valued and NOT a log level:
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import Enum, StrEnum
 from pathlib import Path
 
@@ -188,24 +188,26 @@ class Finding:
     path: Path | None = None
     detail: tuple[str, ...] = ()
     fix: str | None = None
+    #: True when ``--strict`` promoted this warning to an error.
+    #:
+    #: The SEVERITY moves and the CODE does not, and the flag is what makes that
+    #: expressible: severity is otherwise derived from the code's prefix, so a
+    #: promoted copy that carries the same ``W_`` code is byte-identical to the
+    #: warning it came from -- which is exactly what :meth:`promoted` used to
+    #: return. Renaming the code under a flag is not an option either: ``code`` is
+    #: the published ``--json`` contract, and a consumer's mapping must not depend
+    #: on which flags the run happened to be given.
+    strict: bool = False
 
     @property
     def severity(self) -> Severity:
-        return severity_of(self.code)
+        return Severity.ERROR if self.strict else severity_of(self.code)
 
     def promoted(self) -> Finding:
-        """This finding as an ERROR, for ``--strict``. Message is left intact."""
-        if self.severity is not Severity.WARNING:
+        """This finding as an ERROR, for ``--strict``. Code and message left intact."""
+        if severity_of(self.code) is not Severity.WARNING:
             return self
-        return Finding(
-            code=self.code,
-            message=self.message,
-            scope=self.scope,
-            name=self.name,
-            path=self.path,
-            detail=self.detail,
-            fix=self.fix,
-        )
+        return replace(self, strict=True)
 
     def as_dict(self) -> dict[str, object]:
         out: dict[str, object] = {
@@ -223,6 +225,10 @@ class Finding:
             out["detail"] = list(self.detail)
         if self.fix is not None:
             out["fix"] = self.fix
+        if self.strict:
+            # So a consumer can tell "this is an error" from "--strict made this an
+            # error" without diffing two runs.
+            out["strict"] = True
         return out
 
 
