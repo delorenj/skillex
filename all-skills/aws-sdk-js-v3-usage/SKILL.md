@@ -5,7 +5,7 @@ description: >-
   code that uses AWS services via @aws-sdk/* packages (aws-sdk-js-v3), or when asked
   about schemas, runtime validation, serialization, or code generation in the context
   of the JS/TS AWS SDK.
-version: 1
+version: "1"
 ---
 
 > Do not use emojis in any code, comments, or output when this skill is active.

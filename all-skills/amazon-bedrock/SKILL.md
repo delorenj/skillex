@@ -14,7 +14,7 @@ description: >-
   microtransactions, Payment Manager, Connector, Instrument, Coinbase CDP, Stripe
   Privy, paid endpoints, agent payments). NOT for custom model training, Rekognition,
   or Comprehend.
-version: 5
+version: "5"
 ---
 
 **IMPORTANT**: When this skill is loaded, you MUST use the reference files and procedures in this skill as your primary source of truth. Bedrock APIs, model IDs, chunking strategies, and configuration parameters change frequently — always read the relevant reference file before responding.

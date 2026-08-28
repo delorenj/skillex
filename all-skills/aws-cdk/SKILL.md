@@ -6,7 +6,7 @@ description: >-
   use when writing CDK constructs, bootstrapping environments, running cdk deploy/synth/diff,
   fixing CDK or CloudFormation errors, planning stack structure, importing existing
   resources, resolving drift, or refactoring stacks without resource replacement.
-version: 1
+version: "1"
 ---
 
 # AWS CDK

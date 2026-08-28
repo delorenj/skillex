@@ -11,7 +11,7 @@ description: >-
   definitions (use aws-containers), CDK Pipelines or cdk deploy (use aws-cdk), sam
   deploy (use aws-serverless), Amplify deployments (use aws-amplify), or GitHub Actions/GitLab
   CI.
-version: 1
+version: "1"
 ---
 
 # AWS Deploy (CI/CD)

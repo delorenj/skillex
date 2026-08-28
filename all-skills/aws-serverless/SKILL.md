@@ -10,7 +10,7 @@ description: >-
   cold starts, timeouts, 502/504 errors, throttling, concurrency, CORS, Powertools,
   or any event-driven architecture on AWS, even without the word "serverless." Does
   not apply to EC2, ECS/Fargate containers, or Amplify hosting.
-version: 1
+version: "1"
 ---
 
 # AWS Serverless

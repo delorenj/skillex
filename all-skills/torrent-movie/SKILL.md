@@ -1,6 +1,6 @@
 ---
 name: torrent-movie
-description: Download a movie or show by searching torrents and adding the best magnet link to qBittorrent. Triggers: download movie, download show, torrent, magnet, TheChung. Use when the user asks to download a movie, show, or torrent.
+description: "Download a movie or show by searching torrents and adding the best magnet link to qBittorrent. Triggers: download movie, download show, torrent, magnet, TheChung. Use when the user asks to download a movie, show, or torrent."
 ---
 
 # Torrent Movie Downloader

@@ -13,7 +13,7 @@ description: >-
   redirect_uri/token/MFA/CORS/federation errors. Does NOT cover Amplify Gen2 backend
   definitions (defineAuth, npx ampx → aws-amplify), IAM/STS/Identity Center (→ aws-iam),
   or API Gateway/Lambda resource config beyond the authorizer (→ aws-serverless).
-version: 1
+version: "1"
 ---
 
 # AWS Auth (Amazon Cognito)

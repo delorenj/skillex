@@ -7,7 +7,7 @@ description: >-
   access. Triggers: "set up AWS", "configure AWS", "aws login", "get credentials",
   "authenticate", "session expired", "token expired", "no credentials", "AccessDeniedException"
   with no configured credentials.
-version: 1
+version: "1"
 ---
 
 # Sign In — Get CLI/SDK Credentials

@@ -8,7 +8,7 @@ description: >-
   topics with validated, version-specific patterns that prevent common mistakes. Triggers
   when user mentions AWS Blocks; project has aws-blocks/ directory; code imports @aws-blocks
   packages.
-version: 1
+version: "1"
 ---
 
 # AWS Blocks Application Development

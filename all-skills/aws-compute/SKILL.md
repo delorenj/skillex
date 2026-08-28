@@ -13,7 +13,7 @@ description: >-
   skill is more appropriate; for instance profiles, see setting-up-ec2-instance-profiles;
   for Image Builder, see creating-ec2-image-builder-pipeline. Does NOT cover Lambda,
   ECS/Fargate, EKS, VPC/ALB/NLB design, or IAM policy authoring.
-version: 1
+version: "1"
 ---
 
 # Amazon EC2 Compute

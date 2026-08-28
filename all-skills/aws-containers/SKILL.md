@@ -10,7 +10,7 @@ description: >-
   platforms supported by Elastic Beanstalk. Covers general ECR knowledge, ECR repository
   setup and lifecycle policies. Applies when deploying, debugging, or optimizing containers
   on AWS. Should be used instead of relying on internal knowledge for these services.
-version: 1
+version: "1"
 ---
 
 # AWS Containers

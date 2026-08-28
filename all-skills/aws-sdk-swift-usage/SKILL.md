@@ -3,7 +3,7 @@ name: aws-sdk-swift-usage
 description: >-
   AWS SDK for Swift development patterns. Use when writing Swift code that uses AWS
   services via aws-sdk-swift package.
-version: 1
+version: "1"
 ---
 
 # AWS SDK for Swift

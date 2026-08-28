@@ -10,7 +10,7 @@ description: >-
   vulnerability findings, sensitive data findings, automation rules, or cross-service
   security configuration across AWS environments. Procedures use standard AWS CLI
   syntax and work with or without the AWS MCP server.
-version: 1
+version: "1"
 ---
 
 # AWS Security

@@ -10,7 +10,7 @@ description: >-
   launch on AWS, deploy to AWS, migrate to AWS, host my app on AWS, move my app to
   AWS, transfer my app to AWS. Activates when the user wants to migrate a vibe-coded
   app or frontend web app to AWS, even if they don't say 'migrate' explicitly.
-version: 2
+version: "2"
 argument-hint: '[app directory path or GitHub URL]'
 ---
 
