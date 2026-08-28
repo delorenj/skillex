@@ -17,9 +17,9 @@ visual hub for the internals — not a place to hide a shell script inside one n
    an `executeCommand` wrapping a script that quietly does three jobs, giving the
    canvas zero visibility into any of them.
 2. **The bus is the completion signal.** Pipeline lifecycle events publish to
-   bloodbank (`bloodbank.evt.v1.<domain>.<entity>.<action>`). Never wire ntfy /
+   bloodbank (`bloodbank.evt.<domain>.<entity>.<action>`). Never wire ntfy /
    Slack / email directly for a pipeline event — the `bloodbank-event-toaster`
-   already fans `bloodbank.evt.v1.>` out to `ntfy.delo.sh/bloodbank`, so emitting
+   already fans `bloodbank.evt.>` out to `ntfy.delo.sh/bloodbank`, so emitting
    correctly gives you the notification **plus every other consumer** for free.
    A direct ntfy node bypasses the bus and throws all of that away.
 3. **Schema-first events.** Only emit events already defined under
@@ -76,7 +76,7 @@ is cheaper than untangling a monolith under fire.
   rung only. → node-catalog.
 - **n8n has no Dapr sidecar.** It runs as a PM2 host process on `:5678`; NATS is on
   the host at `127.0.0.1:4222`. Emit **NATS-direct** (via the `bb-emit` CLI) to
-  `bloodbank.evt.v1.<…>` — the bloodbank **HTTP ingress is v2/RabbitMQ and bypasses
+  `bloodbank.evt.<…>` — the bloodbank **HTTP ingress is v2/RabbitMQ and bypasses
   the v3 toaster**, and Dapr `/publish` is unavailable. → bloodbank-emit.
 - **Plane is the authenticated ingress exception.** Both Plane workspace
   webhooks enter the same HTTPS workflow, which verifies the raw-body HMAC and

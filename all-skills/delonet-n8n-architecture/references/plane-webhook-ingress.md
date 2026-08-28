@@ -62,10 +62,10 @@ The node maps Plane provider activity onto provider-neutral facts:
 
 | Provider provenance | Bloodbank type | Subject |
 |---|---|---|
-| `plane.board.created` | `bloodbank.v1.repo.board.created` | `bloodbank.evt.v1.repo.board.created` |
-| `plane.ticket.created` | `bloodbank.v1.repo.task.created` | `bloodbank.evt.v1.repo.task.created` |
-| `plane.ticket.updated` / `plane.ticket.transitioned` / `plane.ticket.deleted` | `bloodbank.v1.repo.task.updated` | `bloodbank.evt.v1.repo.task.updated` |
-| `plane.ticket.commented` | `bloodbank.v1.repo.task.appended` | `bloodbank.evt.v1.repo.task.appended` |
+| `plane.board.created` | `bloodbank.repo.board.created` | `bloodbank.evt.repo.board.created` |
+| `plane.ticket.created` | `bloodbank.repo.task.created` | `bloodbank.evt.repo.task.created` |
+| `plane.ticket.updated` / `plane.ticket.transitioned` / `plane.ticket.deleted` | `bloodbank.repo.task.updated` | `bloodbank.evt.repo.task.updated` |
+| `plane.ticket.commented` | `bloodbank.repo.task.appended` | `bloodbank.evt.repo.task.appended` |
 
 `data.provider_event_type` preserves provenance. The raw provider entity is
 preserved under the schema's ticket, board, or comment field. Board identity is
