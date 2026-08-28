@@ -110,11 +110,16 @@ class ProjectionState:
 def _read(path: Path) -> dict[str, object] | None:
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
+    except (OSError, ValueError):
         # A corrupt receipt must never be fatal, and must never be read as "I own
         # nothing" either -- that would make the next run prune links it wrote. The
         # caller falls back to containment, which is conservative in the safe
         # direction (it refuses to remove rather than removing wrongly).
+        #
+        # ``ValueError`` and not ``json.JSONDecodeError``: a receipt truncated or
+        # zeroed by a crash is exactly the case this exists for, and half of those
+        # are not valid UTF-8. ``UnicodeDecodeError`` and ``JSONDecodeError`` are
+        # both ``ValueError``, so one clause cannot miss the sibling.
         return None
     return raw if isinstance(raw, dict) else None
 
