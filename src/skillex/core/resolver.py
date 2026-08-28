@@ -528,6 +528,7 @@ def compose(
     # AC: "If a set skill conflicts with another set's skill, latest one wins"
     for index, set_entry in enumerate(manifest.sets):
         origin = f'sets[{index}] "{set_entry.name}"'
+        set_dir: Path | None
         if set_entry.source is not None:
             if not set_entry.source.startswith("file://"):
                 raise RefusalError(
@@ -539,9 +540,8 @@ def compose(
                         fix="clone it yourself and use a file:// source.",
                     )
                 )
-            set_dir: Path | None = Path(set_entry.source[len("file://") :])
-            if not (set_dir.is_dir() or set_dir.is_symlink()):
-                set_dir = None
+            local = Path(set_entry.source[len("file://") :])
+            set_dir = local if (local.is_dir() or local.is_symlink()) else None
         else:
             hit = find_in_roots(roots, set_entry.registry_path or f"sets/{set_entry.name}")
             set_dir = hit[1] if hit else None
@@ -557,9 +557,9 @@ def compose(
                 continue
             raise _no_registry(roots, f"sets/{set_entry.name}")
 
-        members = walk_composition(set_dir, reporter, label=f"set {set_entry.name!r}")
-        keep = set(set_entry.filter_inventory([m.name for m in members]))
-        for member in members:
+        found = walk_composition(set_dir, reporter, label=f"set {set_entry.name!r}")
+        keep = set(set_entry.filter_inventory([m.name for m in found]))
+        for member in found:
             if member.name in keep:
                 _record(bindings, shadows, reporter, _member_to_binding(member, "set", origin))
 

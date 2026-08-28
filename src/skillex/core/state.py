@@ -149,22 +149,41 @@ def load_state(root: Path) -> ProjectionState:
         return ProjectionState(root=root, absent=True)
 
     base = committed or {}
+
+    def text(key: str) -> str | None:
+        """A string field, or None when absent or the wrong shape.
+
+        Every field here comes from a JSON file on disk that another version of
+        skillex -- or a half-finished hand edit -- may have written, so nothing is
+        trusted to be the type it should be. A receipt that fails to parse must
+        degrade to "I know less", never to a crash and never to a wrong type
+        flowing into the ownership decision.
+        """
+        value = base.get(key)
+        return value if isinstance(value, str) else None
+
+    def string_list(key: str) -> list[str]:
+        value = base.get(key)
+        return [v for v in value if isinstance(v, str)] if isinstance(value, list) else []
+
+    def dict_list(key: str) -> list[dict[str, str]]:
+        value = base.get(key)
+        if not isinstance(value, list):
+            return []
+        return [
+            {str(k): str(v) for k, v in item.items()} for item in value if isinstance(item, dict)
+        ]
+
     state = ProjectionState(
         root=root,
-        scope=str(base.get("scope", "")),
-        mode=str(base.get("mode", "composed")),
-        alias_target=base.get("alias_target")
-        if isinstance(base.get("alias_target"), str)
-        else None,
+        scope=text("scope") or "",
+        mode=text("mode") or "composed",
+        alias_target=text("alias_target"),
         entries=_entries_from(base),
-        manifests=list(base.get("manifests", []))
-        if isinstance(base.get("manifests"), list)
-        else [],
-        registry_roots=list(base.get("registry_roots", []))
-        if isinstance(base.get("registry_roots"), list)
-        else [],
-        written_at=base.get("written_at") if isinstance(base.get("written_at"), str) else None,
-        generator=base.get("generator") if isinstance(base.get("generator"), str) else None,
+        manifests=dict_list("manifests"),
+        registry_roots=string_list("registry_roots"),
+        written_at=text("written_at"),
+        generator=text("generator"),
     )
     if pending is not None:
         # Union, not replace: an interrupted run's pending set is a superset of what

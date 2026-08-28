@@ -237,18 +237,20 @@ def discover_scopes(
         registry's source trees.
     """
     findings: list[Finding] = []
+    project_root: Path | None = None
 
     if project is not None:
-        project_root: Path | None = project.expanduser().resolve()
-        if not (project_root / MANIFEST_RELPATH).is_file():
+        explicit = project.expanduser().resolve()
+        if not (explicit / MANIFEST_RELPATH).is_file():
             raise RefusalError(
                 Finding(
                     code=Code.E_NO_PROJECT_MANIFEST,
-                    message=f"no manifest at {project_root / MANIFEST_RELPATH}",
-                    path=project_root,
+                    message=f"no manifest at {explicit / MANIFEST_RELPATH}",
+                    path=explicit,
                     fix="create the manifest, or drop --project to sync global only.",
                 )
             )
+        project_root = explicit
     elif scope == "global":
         project_root = None
     else:
