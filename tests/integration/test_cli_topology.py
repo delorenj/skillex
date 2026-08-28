@@ -12,7 +12,7 @@ runner = CliRunner()
 
 def test_topology_json_remains_parseable_when_report_fails(tmp_path: Path) -> None:
     (tmp_path / "all-skills").mkdir()
-    (tmp_path / "skill-sets").mkdir()
+    (tmp_path / "sets").mkdir()
     pack = tmp_path / "packs" / "broken"
     pack.mkdir(parents=True)
     (pack / "pack.toml").write_text(

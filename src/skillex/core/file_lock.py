@@ -13,6 +13,7 @@ next invocation will pick it up or reclaim.
 
 from __future__ import annotations
 
+import fcntl
 import os
 from pathlib import Path
 from types import TracebackType
@@ -25,12 +26,29 @@ class LockBusyError(RuntimeError):
 class FileLock:
     def __init__(self, path: Path) -> None:
         self._path = path
+        self._fd: int | None = None
 
     def __enter__(self) -> FileLock:
         self._path.parent.mkdir(parents=True, exist_ok=True)
+        # flock FIRST, then the PID check. The PID file alone has a TOCTOU window
+        # wide enough for two concurrent syncs to both read "no live holder" and
+        # both proceed; an advisory flock closes it. The PID check stays because it
+        # is what reclaims a lock whose holder died without unlinking, which flock
+        # cannot express (the kernel drops a dead process's flock, so a stale file
+        # with a live-looking PID would otherwise be invisible).
+        fd = os.open(self._path, os.O_RDWR | os.O_CREAT, 0o644)
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as e:
+            os.close(fd)
+            raise LockBusyError(
+                f"lock held by another skillex process at {self._path}; wait for it to finish"
+            ) from e
+        self._fd = fd
         if self._path.exists():
             existing = self._read_pid()
             if existing is not None and _pid_alive(existing):
+                self._release_fd()
                 raise LockBusyError(
                     f"lock held by pid {existing} at {self._path}; "
                     f"wait for it to finish or remove the lock file manually"
@@ -49,6 +67,16 @@ class FileLock:
             self._path.unlink(missing_ok=True)
         except OSError:
             pass
+        self._release_fd()
+
+    def _release_fd(self) -> None:
+        if self._fd is not None:
+            try:
+                fcntl.flock(self._fd, fcntl.LOCK_UN)
+                os.close(self._fd)
+            except OSError:
+                pass
+            self._fd = None
 
     def _read_pid(self) -> int | None:
         try:

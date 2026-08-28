@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import re
+from collections.abc import Sequence
 from pathlib import Path
 
 REGISTRY_ROOT_ENV = "PJ_SKILLS_REGISTRY_ROOT"
@@ -79,11 +80,71 @@ def registry_root_candidates(registry_url: str | None = None) -> list[Path]:
 
 
 def resolve_registry_root(registry_url: str | None = None) -> Path | None:
-    """First existing candidate from :func:`registry_root_candidates`, else None."""
+    """First existing candidate from :func:`registry_root_candidates`, else None.
+
+    .. warning::
+
+       This returns the first root that merely EXISTS, which is not the same as
+       the first root that carries what you asked for. On a machine with a stale
+       registry cache it confidently returns the stale clone: verified live,
+       ``~/.agents/.cache/registries/https___github_com_delorenj_skillex_git``
+       exists, still has the retired ``skill-sets/``, and has no ``sets/`` at all,
+       so every set lookup through this function resolves against a checkout that
+       cannot contain any set.
+
+       **Do not use this for resolution.** Use :func:`find_in_roots`, which walks
+       the whole ladder and stops at the first rung that actually carries the
+       requested path -- the same rule ``sync-skills.py`` already follows.
+    """
     for candidate in registry_root_candidates(registry_url):
         if candidate.is_dir():
             return candidate
     return None
+
+
+def registry_roots(registry_url: str | None = None) -> list[Path]:
+    """Every EXISTING rung of the contract ladder, in order.
+
+    ``PJ_SKILLS_REGISTRY_ROOT`` stays exclusive: when it is set,
+    :func:`registry_root_candidates` yields exactly one candidate and this
+    function can therefore return at most that one, existing or not.
+    """
+    return [c for c in registry_root_candidates(registry_url) if c.is_dir()]
+
+
+def find_in_roots(roots: Sequence[Path], relpath: str) -> tuple[Path, Path] | None:
+    """First root that actually CARRIES ``relpath``, as ``(root, path)``.
+
+    Existence is tested LEXICALLY (``is_symlink() or exists()``) so a dangling
+    symlink still counts as "this rung has it" -- the caller reports the dangle
+    with a useful message instead of silently falling through to another rung and
+    resolving to a different skill entirely.
+
+    Returns ``None`` when no rung carries it; the caller raises with the full
+    tried-list, because "not found" is only actionable if you can see where it
+    looked.
+    """
+    for root in roots:
+        candidate = root / relpath
+        if candidate.is_symlink() or candidate.exists():
+            return (root, candidate)
+    return None
+
+
+def find_manifest_root(start: Path, marker: Path = Path(".agents/skills.json")) -> Path | None:
+    """Nearest ancestor of ``start`` (inclusive) containing ``marker``, else None.
+
+    Unlike :func:`find_project_root` this does NOT treat a bare ``.git`` as a hit:
+    a git repository that does not use skillex is not a skillex project, and
+    creating a ``.agents/`` inside one would be an unrequested side effect.
+    """
+    current = start.resolve()
+    while True:
+        if (current / marker).is_file():
+            return current
+        if current.parent == current:
+            return None
+        current = current.parent
 
 
 def default_lock_path() -> Path:

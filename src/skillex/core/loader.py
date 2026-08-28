@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 import os
 import tomllib
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -27,11 +27,14 @@ from skillex.core.models import (
     PackPolicy,
     PackSource,
     ScopeConfig,
+    SetEntry,
     Skill,
+    SkillEntry,
     SkillexConfig,
     SkillFrontmatter,
     SkillsManifest,
     SlotAssignment,
+    UnsupportedFieldError,
     is_safe_component,
 )
 from skillex.core.payload import (
@@ -799,11 +802,48 @@ def resolve_inventory(pack: Pack, *, flatten: bool | None = None) -> FlattenedIn
     return flatten_inventory(pack.pack_path, pack.inventory)
 
 
-def load_skills_manifest(path: Path) -> SkillsManifest:
-    """Parse a skills.json manifest, reading the `packs[]` array (contract section 1).
+KNOWN_MANIFEST_KEYS = frozenset(
+    {"$schema", "scope", "inherit_global", "registry", "sets", "packs", "skills"}
+)
 
-    Accepts both the string shorthand (`"bmad"`, `"bmad@6.10.2"`) and the object
-    form. `skills[]` is intentionally left to the existing sync tooling.
+
+def _parse_entries[T: (PackEntry, SetEntry, SkillEntry)](
+    path: Path,
+    raw: dict[str, object],
+    key: str,
+    builder: Callable[[str | dict[str, object]], T],
+) -> tuple[T, ...]:
+    """Parse one manifest array, preserving declaration order.
+
+    Order is the whole precedence law -- a later entry overwrites an earlier one --
+    so this returns a tuple and never sorts or deduplicates.
+    """
+    items = raw.get(key, [])
+    if not isinstance(items, list):
+        raise ManifestError(f"{path}: {key!r} must be an array")
+    out: list[T] = []
+    for index, spec in enumerate(items):
+        if not isinstance(spec, str | dict):
+            raise ManifestError(f"{path}: {key}[{index}] must be a string or an object")
+        try:
+            out.append(builder(spec))
+        except UnsupportedFieldError as e:
+            # Re-raised verbatim: the authored explanation is the whole value.
+            raise ManifestError(f"{path}: {key}[{index}]: {e}") from e
+        except (ValidationError, ValueError) as e:
+            raise ManifestError(f"{path}: invalid {key}[{index}]: {e}") from e
+    return tuple(out)
+
+
+def load_skills_manifest(path: Path) -> SkillsManifest:
+    """Parse a skills.json manifest: `packs[]`, `sets[]` and `skills[]`.
+
+    Each array accepts the string shorthand and the object form. Declaration order
+    is preserved across all three because `compose()` resolves them positionally.
+
+    Unknown top-level keys are recorded rather than rejected: the published schema
+    sets no ``additionalProperties: false``, so a typo like ``"skils"`` validates
+    today and would otherwise vanish without trace.
     """
     if not path.is_file():
         raise ManifestError(f"skills manifest not found: {path}")
@@ -814,18 +854,9 @@ def load_skills_manifest(path: Path) -> SkillsManifest:
     if not isinstance(raw, dict):
         raise ManifestError(f"{path}: top level must be a JSON object")
 
-    packs_raw = raw.get("packs", [])
-    if not isinstance(packs_raw, list):
-        raise ManifestError(f"{path}: 'packs' must be an array")
-
-    entries: list[PackEntry] = []
-    for index, spec in enumerate(packs_raw):
-        if not isinstance(spec, str | dict):
-            raise ManifestError(f"{path}: packs[{index}] must be a string or an object")
-        try:
-            entries.append(PackEntry.from_spec(spec))
-        except ValidationError as e:
-            raise ManifestError(f"{path}: invalid packs[{index}]: {e}") from e
+    packs = _parse_entries(path, raw, "packs", PackEntry.from_spec)
+    sets = _parse_entries(path, raw, "sets", SetEntry.from_spec)
+    skills = _parse_entries(path, raw, "skills", SkillEntry.from_spec)
 
     try:
         return SkillsManifest(
@@ -834,7 +865,10 @@ def load_skills_manifest(path: Path) -> SkillsManifest:
             scope=raw.get("scope"),
             inherit_global=raw.get("inherit_global"),
             registry=raw.get("registry"),
-            packs=tuple(entries),
+            packs=packs,
+            sets=sets,
+            skills=skills,
+            unknown_keys=tuple(sorted(k for k in raw if k not in KNOWN_MANIFEST_KEYS)),
         )
     except ValidationError as e:
         raise ManifestError(f"invalid skills manifest at {path}: {e}") from e

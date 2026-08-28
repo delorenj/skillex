@@ -23,9 +23,7 @@ def configure_logging(log_format: Literal["console", "json"] = "console") -> Non
     if log_format == "json":
         processors.append(structlog.processors.JSONRenderer())
     else:
-        processors.append(
-            structlog.dev.ConsoleRenderer(colors=sys.stderr.isatty())
-        )
+        processors.append(structlog.dev.ConsoleRenderer(colors=sys.stderr.isatty()))
 
     structlog.configure(
         processors=processors,

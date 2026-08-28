@@ -20,8 +20,7 @@ class Adapter(Protocol):
     """Render skills into a CLI's native layout."""
 
     @property
-    def name(self) -> str:
-        ...
+    def name(self) -> str: ...
 
     def render_links(
         self,

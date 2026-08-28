@@ -34,6 +34,18 @@ Still constrained to exactly ONE safe path component - see :func:`is_safe_compon
 VERSION_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._+-]*$")
 """Accepted pack version / version-directory names, e.g. ``6.10.2``, ``6.10.1-next.31``."""
 
+PROJECTION_NAME_PATTERN = re.compile(r"^[a-z0-9]([a-z0-9._-]*[a-z0-9])?$")
+"""The name shape a skill may be PROJECTED under into an activation root.
+
+Deliberately the published schema's ``skillName`` shape (and ``topology.SAFE_NAME``),
+which permits ``.`` and ``_``, and NOT :data:`NAME_PATTERN`, which forbids both.
+
+Three "safe name" regexes exist in this codebase and they disagree. The rule that
+resolves the disagreement: **a name that validates in a manifest must project.**
+:data:`NAME_PATTERN` is the stricter shape the packs contract mandates for *new*
+canonical names, and it keeps gating :class:`Skill.name`; using it as a projection
+filter instead silently drops real, already-published skills on the floor."""
+
 _UNSAFE_COMPONENTS = frozenset({"", ".", ".."})
 
 
@@ -322,8 +334,221 @@ class PackEntry(BaseModel):
         return pack_flatten or bool(self.flatten)
 
 
+class UnsupportedFieldError(ValueError):
+    """A manifest field that exists in the schema but that sync deliberately refuses.
+
+    Distinct from a plain validation error so the loader can report it as
+    ``E_UNSUPPORTED_FIELD`` with the authored explanation intact. Silently ignoring
+    one of these would be the worst outcome: `sets[].flatten` in particular would
+    project **zero** skills and report success.
+    """
+
+
+def _refuse(field_name: str, why: str) -> None:
+    raise UnsupportedFieldError(f"{field_name} is not supported. {why}")
+
+
+class SetEntry(BaseModel):
+    """One entry of a skills.json `sets[]` array.
+
+    A set is a directory of symlinks under ``sets/<name>`` in the registry.
+    Declaring it projects every member; you never list members individually.
+
+    Four schema fields are accepted-and-refused rather than ignored -- see
+    :class:`UnsupportedFieldError` and the per-field explanations below.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    name: str
+    source: str | None = None
+    registry_path: str | None = None
+    include: tuple[str, ...] = ()
+    exclude: tuple[str, ...] = ()
+    optional: bool = False
+
+    @field_validator("name")
+    @classmethod
+    def _validate_name(cls, v: str) -> str:
+        if not PACK_NAME_PATTERN.match(v) or not is_safe_component(v):
+            raise ValueError(f"invalid set name {v!r}; must match {PACK_NAME_PATTERN.pattern}")
+        return v
+
+    @field_validator("registry_path")
+    @classmethod
+    def _validate_registry_path(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        if not is_safe_relpath(v):
+            raise ValueError(
+                f"invalid registry_path {v!r}; must be a relative, /-separated path "
+                "with no '.', '..' or empty segments"
+            )
+        return v
+
+    @field_validator("include", "exclude")
+    @classmethod
+    def _validate_filter_names(cls, v: tuple[str, ...]) -> tuple[str, ...]:
+        for name in v:
+            if not is_safe_component(name):
+                raise ValueError(f"invalid skill name {name!r}; must be one safe path component")
+        return v
+
+    @model_validator(mode="after")
+    def _validate_exclusivity(self) -> SetEntry:
+        if self.source is not None and self.registry_path is not None:
+            raise ValueError("set entry may not set both 'source' and 'registry_path'")
+        return self
+
+    @classmethod
+    def from_spec(cls, spec: str | dict[str, object]) -> SetEntry:
+        """Build an entry from the string shorthand or the object form.
+
+        The shorthand is name-only. The published schema's pattern also admits
+        ``<name>@<version>``, but that group was copy-pasted from ``packs`` -- the
+        object form has no ``version`` field, so an ``@`` shorthand is not even
+        expressible in the long form, and ``sets/`` has no version layout on disk.
+        Refused rather than silently treated as part of the name, which would
+        produce a confusing "no such set 'min-global@1.0.0'".
+        """
+        if isinstance(spec, str):
+            name, sep, version = spec.partition("@")
+            if sep:
+                _refuse(
+                    f"sets[] shorthand {spec!r}: the '@{version}' version suffix",
+                    "Sets are not versioned; the object form has no 'version' field "
+                    "and sets/ has no version layout. Use the bare set name.",
+                )
+            return cls(name=name)
+        if "flatten" in spec:
+            _refuse(
+                "sets[].flatten",
+                "The flatten walker never follows a symlink and a set is entirely "
+                "symlinks, so enabling it would project zero skills and report success. "
+                "Remove the field.",
+            )
+        if "sealed" in spec:
+            _refuse(
+                "sets[].sealed",
+                "Sealing forbids symlinks anywhere in the payload and a set is entirely "
+                "symlinks, so no set can ever be sealed. Remove the field.",
+            )
+        if "version" in spec:
+            _refuse("sets[].version", "Sets are not versioned. Remove the field.")
+        if "registry" in spec:
+            _refuse(
+                "sets[].registry (per-entry override)",
+                "Nothing in skillex clones; a second registry would resolve against a "
+                "checkout that may not exist. Use the manifest-level 'registry', "
+                "--registry-root, or PJ_SKILLS_REGISTRY_ROOT.",
+            )
+        return cls.model_validate(spec)
+
+    def filter_inventory(self, names: list[str]) -> list[str]:
+        """Apply `include` then `exclude` to a member list, preserving order."""
+        selected = [n for n in names if n in self.include] if self.include else list(names)
+        if self.exclude:
+            selected = [n for n in selected if n not in self.exclude]
+        return selected
+
+
+class SkillEntry(BaseModel):
+    """One entry of a skills.json `skills[]` array.
+
+    Four authored forms collapse into (projected name, registry-relative path):
+
+    ==============================  ==============  ==========================
+    manifest form                   projected name  path
+    ==============================  ==============  ==========================
+    ``"hindsight"``                 ``hindsight``   ``all-skills/hindsight``
+    ``"sets/min-global/hindsight"`` ``hindsight``   as written
+    ``{name, registry_path}``       ``name``        ``registry_path``
+    ``{name}``                      ``name``        ``all-skills/<name>``
+    ==============================  ==============  ==========================
+
+    The projected name is ALWAYS the declared name, never the target's basename.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    name: str
+    source: str | None = None
+    registry_path: str | None = None
+    #: The slash-form string as authored, when the entry came from that shorthand.
+    raw_path: str | None = None
+
+    @field_validator("name")
+    @classmethod
+    def _validate_name(cls, v: str) -> str:
+        if not PROJECTION_NAME_PATTERN.match(v) or not is_safe_component(v):
+            raise ValueError(
+                f"invalid skill name {v!r}; must match {PROJECTION_NAME_PATTERN.pattern}"
+            )
+        return v
+
+    @field_validator("registry_path", "raw_path")
+    @classmethod
+    def _validate_relpath(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        if not is_safe_relpath(v):
+            raise ValueError(
+                f"invalid path {v!r}; must be a relative, /-separated path "
+                "with no '.', '..' or empty segments"
+            )
+        return v
+
+    @model_validator(mode="after")
+    def _validate_exclusivity(self) -> SkillEntry:
+        if self.source is not None and self.registry_path is not None:
+            raise ValueError("skill entry may not set both 'source' and 'registry_path'")
+        return self
+
+    @classmethod
+    def from_spec(cls, spec: str | dict[str, object]) -> SkillEntry:
+        """Build an entry from the string shorthand or the object form.
+
+        The string form is validated here rather than at resolution time because
+        the published schema puts NO pattern on it: ``"/etc/passwd"`` and
+        ``"../../../../etc/passwd"`` both validate against the schema today and
+        would otherwise be joined straight onto the registry root.
+        """
+        if isinstance(spec, str):
+            if not is_safe_relpath(spec):
+                raise ValueError(
+                    f"invalid skills[] entry {spec!r}; must be a relative, /-separated "
+                    "path with no '.', '..' or empty segments"
+                )
+            if "/" in spec:
+                return cls(name=spec.rsplit("/", 1)[1], raw_path=spec)
+            return cls(name=spec)
+        if "version" in spec:
+            _refuse(
+                "skills[].version (a git ref)",
+                "Nothing in skillex clones or checks out; sync-skills.py is the only "
+                "surface allowed to clone. Remove the field.",
+            )
+        if "registry" in spec:
+            _refuse(
+                "skills[].registry (per-entry override)",
+                "Nothing in skillex clones. Use the manifest-level 'registry', "
+                "--registry-root, or PJ_SKILLS_REGISTRY_ROOT.",
+            )
+        return cls.model_validate(spec)
+
+    @property
+    def relpath(self) -> str:
+        """Registry-relative path this entry resolves to, absent a `source`."""
+        return self.registry_path or self.raw_path or f"all-skills/{self.name}"
+
+
 class SkillsManifest(BaseModel):
-    """The subset of a skills.json manifest this CLI reads."""
+    """The subset of a skills.json manifest this CLI reads.
+
+    `sets` and `skills` are TUPLES, never sets or dicts: the entire precedence law
+    is positional (a later set overwrites an earlier one), so losing declaration
+    order loses the semantics.
+    """
 
     model_config = ConfigDict(frozen=True)
 
@@ -333,6 +558,15 @@ class SkillsManifest(BaseModel):
     inherit_global: bool | None = None
     registry: str | None = None
     packs: tuple[PackEntry, ...] = ()
+    sets: tuple[SetEntry, ...] = ()
+    skills: tuple[SkillEntry, ...] = ()
+    #: Keys present in the JSON that this reader does not know. The schema sets no
+    #: ``additionalProperties: false``, so ``"skils"`` is accepted silently today.
+    unknown_keys: tuple[str, ...] = ()
+
+    @property
+    def is_empty(self) -> bool:
+        return not (self.packs or self.sets or self.skills)
 
 
 class CliAdapterConfig(BaseModel):

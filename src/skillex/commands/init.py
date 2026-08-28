@@ -41,9 +41,7 @@ project_root = ".opencode"
 def register(app: typer.Typer) -> None:
     @app.command("init")
     def init_cmd(
-        force: bool = typer.Option(
-            False, "--force", "-f", help="Overwrite existing config."
-        ),
+        force: bool = typer.Option(False, "--force", "-f", help="Overwrite existing config."),
         skills_root: Path = typer.Option(
             Path.home() / ".agents" / "skillex" / "all-skills",
             "--skills-root",
@@ -63,8 +61,7 @@ def register(app: typer.Typer) -> None:
         """Scaffold a default ~/.config/skillex/skillex.toml."""
         if config_path.exists() and not force:
             console.print(
-                f"[red]config already exists at {config_path}. "
-                f"Pass --force to overwrite.[/red]"
+                f"[red]config already exists at {config_path}. Pass --force to overwrite.[/red]"
             )
             raise typer.Exit(code=1)
 

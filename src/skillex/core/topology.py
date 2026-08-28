@@ -433,7 +433,7 @@ def check_topology(repo_root: Path, *, include_activation: bool = True) -> Topol
     root = repo_root.resolve()
     catalog_root = root / "all-skills"
     packs_root = root / "packs"
-    sets_root = root / "skill-sets"
+    sets_root = root / "sets"
     findings: list[TopologyFinding] = []
 
     catalog = _scan_catalog(root, catalog_root, findings)

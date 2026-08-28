@@ -9,6 +9,7 @@ from skillex.commands import pack as pack_cmd
 from skillex.commands import skill as skill_cmd
 from skillex.commands import slot as slot_cmd
 from skillex.commands import status as status_cmd
+from skillex.commands import sync as sync_cmd
 from skillex.commands import topology as topology_cmd
 from skillex.logging import configure_logging
 
@@ -32,6 +33,7 @@ pack_cmd.register(app)
 skill_cmd.register(app)
 slot_cmd.register(app)
 status_cmd.register(app)
+sync_cmd.register(app)
 topology_cmd.register(app)
 
 

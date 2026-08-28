@@ -14,7 +14,7 @@ def write_skill(root: Path, name: str) -> Path:
 
 def base_repo(tmp_path: Path) -> Path:
     (tmp_path / "all-skills").mkdir()
-    (tmp_path / "skill-sets").mkdir()
+    (tmp_path / "sets").mkdir()
     (tmp_path / "packs").mkdir()
     return tmp_path
 
@@ -26,7 +26,7 @@ def codes(root: Path) -> set[TopologyCode]:
 def test_manifest_only_pack_and_symlink_set_are_reference_only(tmp_path: Path) -> None:
     root = base_repo(tmp_path)
     alpha = write_skill(root, "alpha")
-    global_set = root / "skill-sets" / "global"
+    global_set = root / "sets" / "global"
     global_set.mkdir()
     (global_set / "alpha").symlink_to(alpha)
     pack = root / "packs" / "dev"
@@ -89,7 +89,7 @@ def test_skill_link_outside_catalog_is_rejected(tmp_path: Path) -> None:
     external = tmp_path / "external" / "alpha"
     external.mkdir(parents=True)
     (external / "SKILL.md").write_text("# external\n", encoding="utf-8")
-    group = root / "skill-sets" / "global"
+    group = root / "sets" / "global"
     group.mkdir()
     (group / "alpha").symlink_to(external)
 
