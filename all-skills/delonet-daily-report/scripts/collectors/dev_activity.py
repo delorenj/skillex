@@ -91,6 +91,7 @@ import argparse
 import datetime as dt
 import json
 import os
+import re
 import subprocess
 import sys
 import urllib.error
@@ -151,16 +152,45 @@ UNBORN_HEAD_MARKERS = (
     "ambiguous argument 'HEAD'",
 )
 
-DECISION_TYPE = "bloodbank.v1.repo.decision.recorded"
-SESSION_ENDED_TYPE = "bloodbank.v1.agent.session.ended"
+#: Candystore's ``type`` column carries two eras of the same names forever: the
+#: retired five-token ``bloodbank.v1.<domain>.<entity>.<action>`` on the ~713k
+#: rows already written, and the version-free four-token name on everything
+#: published since the version token was dropped. Nothing rewrites the history,
+#: so a read that matches only one shape under-reports -- matching only the new
+#: shape loses every row older than the migration, and matching only ``v1``
+#: loses every row newer than it (which is what this collector was doing: a
+#: day whose agents published seven version-free session-end events and zero
+#: ``v1`` ones rendered as a day with no sessions).
+#:
+#: So every constant below is stored canonically and every comparison goes
+#: through ``canonical_type``, which folds the two shapes together the same way
+#: Candystore's own ``SCOPE_TYPE_EXPR`` does. This is the read side; the
+#: publish side in ``scripts/run.py`` emits the new shape only.
+_VERSION_TOKEN_RE = re.compile(r"^bloodbank\.v[0-9]+\.")
+
+
+def canonical_type(event_type: Any) -> str:
+    """Fold a retired ``v<N>.`` token out of an event type.
+
+    ``bloodbank.v1.agent.session.ended`` and ``bloodbank.agent.session.ended``
+    are the same fact under two spellings and must compare equal. A non-string
+    type is not a type; it becomes ``""`` and matches nothing.
+    """
+    if not isinstance(event_type, str):
+        return ""
+    return _VERSION_TOKEN_RE.sub("bloodbank.", event_type, count=1)
+
+
+DECISION_TYPE = "bloodbank.repo.decision.recorded"
+SESSION_ENDED_TYPE = "bloodbank.agent.session.ended"
 OPERATIONAL_TYPES = frozenset(
     {
-        "bloodbank.v1.finance.sync.started",
-        "bloodbank.v1.finance.sync.failed",
-        "bloodbank.v1.finance.sync.completed",
-        "bloodbank.v1.system.process.exited",
-        "bloodbank.v1.audio.session.started",
-        "bloodbank.v1.audio.status.updated",
+        "bloodbank.finance.sync.started",
+        "bloodbank.finance.sync.failed",
+        "bloodbank.finance.sync.completed",
+        "bloodbank.system.process.exited",
+        "bloodbank.audio.session.started",
+        "bloodbank.audio.status.updated",
     }
 )
 
@@ -681,7 +711,9 @@ def peak_hour_from_heatmap(heatmap: Any) -> PeakHour | None:
 def build_decisions_text(
     events: list[dict[str, Any]], limit: int = DEFAULT_MAX_DECISIONS
 ) -> Block:
-    decisions = [event for event in events if event.get("type") == DECISION_TYPE]
+    decisions = [
+        event for event in events if canonical_type(event.get("type")) == DECISION_TYPE
+    ]
     if not decisions:
         return Block("  (no recorded decisions)", 0, 0)
     lines = []
@@ -704,7 +736,7 @@ def build_commits_text(
 ) -> Block:
     committed = []
     for event in events:
-        if event.get("type") != SESSION_ENDED_TYPE:
+        if canonical_type(event.get("type")) != SESSION_ENDED_TYPE:
             continue
         data = event.get("data")
         if isinstance(data, dict) and data.get("git_commits"):
@@ -732,7 +764,7 @@ def build_operational_notes(
     notes = []
     for event in events:
         event_type = event.get("type")
-        if event_type not in OPERATIONAL_TYPES:
+        if canonical_type(event_type) not in OPERATIONAL_TYPES:
             continue
         data = event.get("data")
         data = data if isinstance(data, dict) else {}
@@ -1117,11 +1149,13 @@ def _collect(
         for event in events
         if isinstance(event.get("correlationid"), str) and event["correlationid"].strip()
     }
-    decisions = [event for event in events if event.get("type") == DECISION_TYPE]
+    decisions = [
+        event for event in events if canonical_type(event.get("type")) == DECISION_TYPE
+    ]
     committing_sessions = [
         event
         for event in events
-        if event.get("type") == SESSION_ENDED_TYPE
+        if canonical_type(event.get("type")) == SESSION_ENDED_TYPE
         and isinstance(event.get("data"), dict)
         and event["data"].get("git_commits")
     ]

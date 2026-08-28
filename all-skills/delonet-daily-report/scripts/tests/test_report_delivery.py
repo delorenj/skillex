@@ -230,9 +230,54 @@ class HappyPathTests(CollectorTestCase):
             self.collect()
         self.assertTrue(self.requested_urls)
         url = self.requested_urls[0]
-        self.assertIn("type=bloodbank.v1.reporting.report.completed", url)
+        # Both eras of the name ride one comma-separated `type` filter. The
+        # ~713k rows written before the version token was retired keep the
+        # five-token spelling forever, so a query for either shape alone turns
+        # the other era's days into fabricated delivery gaps.
+        self.assertIn(
+            "type=bloodbank.reporting.report.completed"
+            "%2Cbloodbank.v1.reporting.report.completed",
+            url,
+        )
         self.assertIn("from=2026-08-10T00%3A00%3A00Z", url)
         self.assertIn("to=2026-08-19T00%3A00%3A00Z", url)
+
+    def test_a_config_naming_the_retired_shape_still_reads_the_new_rows(self) -> None:
+        """An operator's `event_type` override must not re-narrow the query.
+
+        Config written before the migration names `bloodbank.v1.*`. Honouring
+        it literally would hide every event published since.
+        """
+        self.assertEqual(
+            "bloodbank.reporting.report.completed"
+            ",bloodbank.v1.reporting.report.completed",
+            report_delivery.query_types("bloodbank.v1.reporting.report.completed"),
+        )
+        self.assertEqual(
+            report_delivery.query_types("bloodbank.reporting.report.completed"),
+            report_delivery.query_types("bloodbank.v1.reporting.report.completed"),
+        )
+
+    def test_history_written_under_the_retired_shape_still_agrees_with_the_archive(
+        self,
+    ) -> None:
+        """Pre-migration completion events must not read as delivery gaps.
+
+        Every archived day here also published a completion event -- just under
+        the retired five-token name, the way all 713k rows older than the
+        migration did. Matching only the current shape would report seven
+        ``archived-but-never-published`` disagreements that never happened.
+        """
+        legacy = [event(day) for day in window()]
+        for envelope in legacy:
+            envelope["type"] = "bloodbank.v1.reporting.report.completed"
+        for day in window():
+            self.publish(day)
+        with self.serve(legacy):
+            result = self.collect()
+        self.assertEqual("complete", result.status)
+        self.assertEqual("ok", result.metrics["delivery_health"])
+        self.assertEqual(0, result.metrics["days_archive_without_event"])
 
     def test_lookback_days_option_is_honoured(self) -> None:
         with self.serve([]):

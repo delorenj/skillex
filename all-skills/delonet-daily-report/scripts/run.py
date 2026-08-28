@@ -668,7 +668,7 @@ def _envelope(event_type: str, date: str, data: dict[str, Any], narration_model:
         "id": str(uuid.uuid4()),
         "source": EVENT_SOURCE,
         "type": event_type,
-        "subject": f"bloodbank.evt.v1.reporting.report.{action}",
+        "subject": f"bloodbank.evt.reporting.report.{action}",
         "time": iso(moment),
         "datacontenttype": "application/json",
         "dataschema": f"apicurio://holyfields/{event_type}/versions/1",
@@ -749,7 +749,7 @@ def completed_event(
         "delivery": delivery,
     }
     return _envelope(
-        "bloodbank.v1.reporting.report.completed",
+        "bloodbank.reporting.report.completed",
         date,
         data,
         narration.metrics.get("narrator_reported_model"),
@@ -784,7 +784,7 @@ def failed_event(
         "delivery": delivery,
     }
     return _envelope(
-        "bloodbank.v1.reporting.report.failed",
+        "bloodbank.reporting.report.failed",
         date,
         data,
         narration.metrics.get("narrator_reported_model"),

@@ -217,15 +217,15 @@ One event per run to the local Dapr sidecar (`DAPR_HTTP_PORT`, default 3504),
 written to `<artifact_dir>/<date>/report-event.json` whether or not it is
 published:
 
-- `bloodbank.v1.reporting.report.completed` when the report was published, with
+- `bloodbank.reporting.report.completed` when the report was published, with
   `outcome.sections` copied from the manifest and `outcome.status` equal to the
   status of the report that was actually published — never more.
-  The v1 schema makes `outcome.status` a function of the sections map: `partial`
+  The schema makes `outcome.status` a function of the sections map: `partial`
   is only valid when something is degraded. So a run whose sections all
   completed but whose narrator died (published as `partial`) names the degraded
   narration as its own component, `report-narration`, rather than rounding the
   envelope up to `complete`.
-- `bloodbank.v1.reporting.report.failed` when nothing completed or the publish
+- `bloodbank.reporting.report.failed` when nothing completed or the publish
   failed. A failed run never emits a `completed` event.
 - `delivery` is derived from the mirror: `delivered` only when the copy landed.
 

@@ -10,8 +10,9 @@ It reads two *independent* sources and refuses to believe either one alone:
 * the archive this pipeline writes -- ``<archive_dir>/<YYYY>/<MM>/<DD>/current.json``
   must exist, point at a generation directory that exists, and that generation's
   ``report.json`` must validate;
-* Candystore's audit trail -- ``bloodbank.v1.reporting.report.completed`` events
-  over the same window.
+* Candystore's audit trail -- ``bloodbank.reporting.report.completed`` events
+  over the same window, read under both the current four-token name and the
+  retired ``bloodbank.v1.`` spelling that history keeps (see ``query_types``).
 
 Agreement is unremarkable. **Disagreement is the whole point**, and both
 directions are defects that get named explicitly:
@@ -76,6 +77,7 @@ import argparse
 import datetime as dt
 import json
 import os
+import re
 import sys
 import urllib.error
 import urllib.request
@@ -102,7 +104,32 @@ LIVE_CONFIG = Path("~/.config/delonet-daily-report/report.json")
 EXAMPLE_CONFIG = SKILL_ROOT / "assets" / "example-config.v2.json"
 
 DEFAULT_CANDYSTORE_URL = "http://127.0.0.1:8683"
-DEFAULT_EVENT_TYPE = "bloodbank.v1.reporting.report.completed"
+DEFAULT_EVENT_TYPE = "bloodbank.reporting.report.completed"
+
+#: Candystore keeps both eras of an event name forever: the retired five-token
+#: ``bloodbank.v1.<domain>.<entity>.<action>`` on every row written before the
+#: version token was dropped, and the version-free four-token name since. This
+#: collector cross-checks the archive against *history*, so asking for one
+#: shape alone manufactures a delivery gap for the other era's days -- every
+#: pre-migration report would read "archived-but-never-published". Candystore's
+#: ``type`` filter takes a comma-separated list, so both spellings ride one
+#: query. The publish side in ``scripts/run.py`` emits the new shape only.
+_VERSION_TOKEN_RE = re.compile(r"^bloodbank\.v[0-9]+\.")
+
+
+def query_types(event_type: str) -> str:
+    """Every spelling of one event name, as Candystore's ``type`` filter value.
+
+    The configured type is honoured verbatim and joined with its canonical
+    (version-free) form and the retired ``v1`` form, so a config that still
+    names the old shape reads the new rows too.
+    """
+    canonical = _VERSION_TOKEN_RE.sub("bloodbank.", event_type, count=1)
+    shapes = [canonical]
+    for alias in (event_type, canonical.replace("bloodbank.", "bloodbank.v1.", 1)):
+        if alias not in shapes:
+            shapes.append(alias)
+    return ",".join(shapes)
 DEFAULT_LOOKBACK_DAYS = 7
 DEFAULT_HTTP_TIMEOUT = 10
 PAGE_SIZE = 500
@@ -310,7 +337,7 @@ def _fetch_events(
     for page in range(MAX_PAGES):
         query = urlencode(
             {
-                "type": event_type,
+                "type": query_types(event_type),
                 "from": _iso_z(start),
                 "to": _iso_z(end),
                 "limit": PAGE_SIZE,

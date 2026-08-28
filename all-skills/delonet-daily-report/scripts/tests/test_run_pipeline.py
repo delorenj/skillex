@@ -309,7 +309,7 @@ class EventTests(PipelineCase):
         outcome, _ = self.run_pipeline(value)
         envelope = self.envelope(outcome)
         self.assertEqual(
-            "bloodbank.v1.reporting.report.completed", envelope["type"]
+            "bloodbank.reporting.report.completed", envelope["type"]
         )
         # The defect being fixed: the predecessor wrote "complete" for all four
         # sections on every run, no matter what happened.
@@ -377,7 +377,7 @@ class EventTests(PipelineCase):
         )
         outcome, _ = self.run_pipeline(value)
         envelope = self.envelope(outcome)
-        self.assertEqual("bloodbank.v1.reporting.report.failed", envelope["type"])
+        self.assertEqual("bloodbank.reporting.report.failed", envelope["type"])
         self.assertNotIn("outcome", envelope["data"])
         self.assertEqual("no_section_completed", envelope["data"]["failure"]["code"])
         self.assertTrue(envelope["data"]["failure"]["redacted"])

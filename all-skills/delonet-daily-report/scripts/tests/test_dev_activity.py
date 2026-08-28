@@ -675,5 +675,71 @@ class StandaloneCliTests(CollectorTestCase):
         self.assertEqual("run-cli", artifact["run_id"])
 
 
+class EventNameEraTests(CollectorTestCase):
+    """Both spellings of an event name must count as the same fact.
+
+    Candystore's ``type`` column keeps two eras forever: the retired five-token
+    ``bloodbank.v1.<domain>.<entity>.<action>`` on every row written before the
+    version token was dropped, and the four-token name on everything published
+    since. Nothing rewrites history, and nothing back-fills the new shape.
+
+    This collector matched the ``v1`` spelling only, so it went quietly blind
+    the day publishers stopped using it -- a day with seven version-free
+    session-end events and zero ``v1`` ones rendered as a day with no sessions
+    and no commits. Every other test in this file feeds the ``v1`` shape and so
+    pins the other direction: dropping the old spelling would erase the archive.
+    """
+
+    def test_the_version_free_shape_is_counted(self) -> None:
+        store = FakeCandystore(
+            [
+                event(
+                    "bloodbank.repo.decision.recorded",
+                    correlationid="corr-1",
+                    data={"issue": "WID-9", "repo": "widget", "title": "Ship it"},
+                ),
+                event(
+                    "bloodbank.agent.session.ended",
+                    correlationid="corr-2",
+                    data={"git_commits": ["abc123"], "total_turns": 4},
+                ),
+                event("bloodbank.system.process.exited", data={"error": "exit 1"}),
+            ],
+            heatmap([]),
+        )
+        artifact = self.artifact(self.collect(store, self.section(), self.config()))
+
+        self.assertEqual(1, artifact["metrics"]["decision_count"])
+        self.assertEqual(1, artifact["metrics"]["commit_count"])
+        detail = "\n".join(artifact["detail"])
+        self.assertIn("[widget] WID-9: Ship it", detail)
+        self.assertIn("[widget] exited: exit 1", detail)
+
+    def test_the_two_eras_of_one_name_add_up(self) -> None:
+        """A window spanning the migration reads as one continuous history."""
+        store = FakeCandystore(
+            [
+                event(
+                    "bloodbank.v1.agent.session.ended",
+                    correlationid="corr-old",
+                    data={"git_commits": ["abc123"], "total_turns": 4},
+                ),
+                event(
+                    "bloodbank.agent.session.ended",
+                    correlationid="corr-new",
+                    data={"git_commits": ["def456"], "total_turns": 6},
+                ),
+            ],
+            heatmap([]),
+        )
+        artifact = self.artifact(self.collect(store, self.section(), self.config()))
+
+        self.assertEqual(2, artifact["metrics"]["commit_count"])
+
+    def test_a_non_string_type_matches_nothing(self) -> None:
+        self.assertEqual("", dev_activity.canonical_type(None))
+        self.assertEqual("", dev_activity.canonical_type({"type": "nope"}))
+
+
 if __name__ == "__main__":
     unittest.main()
