@@ -51,7 +51,7 @@ bloodbank:
     # real repo events fill with task/board/decision/intake/maintenance. Left
     # as-is pending the optional scope-tail phase; do not improvise a scope.
     - "bloodbank.evt.repo.skillex.>"
-    - "bloodbank.cmd.v1.agent.skillex-pm.>"
+    - "bloodbank.cmd.agent.skillex-pm.>"
   producer: "hermes-agent:skillex-pm"
 
 # Runtime repo (git-tracked HERMES_HOME, auto-checkpointed).
