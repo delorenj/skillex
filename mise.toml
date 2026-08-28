@@ -3,7 +3,15 @@ lefthook = "latest"
 
 [env]
 _.file = [".env"]
-_.path = [".mise/scripts", "agents/hermes/pm", "agents/hermes/pm/hermes"]
+# `.mise/scripts` is deliberately NOT on PATH. It still holds sync-skills.py and
+# provision-packs.py -- kept as the reference implementation the migration was read
+# against, and cited by paths.py, models.py, pack.py and environment.py -- but a
+# retired projector that answers to its bare name is a loaded gun: `sync-skills.py
+# --scope global` resolves zero skills against a sets-only manifest and then prunes
+# every link skillex wrote, exiting 0. Nothing invokes any script here by bare name
+# (every task uses an absolute '{{config_root}}/.mise/scripts/...' path, and the two
+# scripts find each other via Path(__file__).resolve().parent), so this costs nothing.
+_.path = ["agents/hermes/pm", "agents/hermes/pm/hermes"]
 
 # This block will handle the linking of
 # agent files to the main AGENTS.md file.
