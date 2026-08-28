@@ -379,7 +379,9 @@ def test_unresolvable_set_member_is_dropped_but_unresolvable_skill_is_an_error(
 
     with pytest.raises(RefusalError) as excinfo:
         compose_global(sandbox, skills=["ghost"])
-    assert excinfo.value.finding.code is Code.E_NO_REGISTRY
+    # E_SKILL_MISSING, not E_NO_REGISTRY: the checkouts are fine, the NAME is wrong.
+    # The two codes send a reader to two different places.
+    assert excinfo.value.finding.code is Code.E_SKILL_MISSING
 
 
 def test_a_skills_entry_pointing_at_a_non_skill_is_an_error(sandbox, registry):
@@ -406,7 +408,9 @@ def test_an_unsafe_shorthand_fails_the_whole_manifest(sandbox, run_sync_json):
     code, payload = run_sync_json(cwd=outside(sandbox))
 
     assert code == 2
-    assert [f["code"] for f in payload["findings"]] == [Code.E_MANIFEST_PARSE.value]
+    # E_MANIFEST_INVALID, not E_MANIFEST_PARSE: the JSON is well-formed, it just
+    # says something impossible. Both exit 2; the code says where to look.
+    assert [f["code"] for f in payload["findings"]] == [Code.E_MANIFEST_INVALID.value]
 
 
 def test_resolve_skill_entry_re_checks_the_relpath_itself(registry):

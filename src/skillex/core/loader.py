@@ -66,7 +66,22 @@ class PackError(LoaderError):
 
 
 class ManifestError(LoaderError):
-    """Raised when a skills.json manifest is missing or malformed."""
+    """Raised when a skills.json manifest is missing or structurally wrong.
+
+    "Structurally wrong" means it parsed as JSON but says something the reader
+    cannot act on: `packs` is not an array, an entry is neither a string nor an
+    object, a field fails validation.
+    """
+
+
+class ManifestParseError(ManifestError):
+    """Raised when a skills.json manifest is not valid JSON at all.
+
+    A subclass so every existing ``except ManifestError`` still catches it, while
+    a caller that wants to say "your JSON is broken" rather than "your manifest
+    says something impossible" can tell the two apart. They send a reader to
+    different places: one to a bracket, the other to a value.
+    """
 
 
 class SkillError(LoaderError):
@@ -850,7 +865,7 @@ def load_skills_manifest(path: Path) -> SkillsManifest:
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as e:
-        raise ManifestError(f"failed to parse {path}: {e}") from e
+        raise ManifestParseError(f"failed to parse {path}: {e}") from e
     if not isinstance(raw, dict):
         raise ManifestError(f"{path}: top level must be a JSON object")
 

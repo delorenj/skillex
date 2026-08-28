@@ -82,7 +82,6 @@ class Code(StrEnum):
     E_SYMLINK_CYCLE = "E_SYMLINK_CYCLE"
     E_ALIAS_WOULD_DISCARD = "E_ALIAS_WOULD_DISCARD"
     E_CLI_ALIAS_WRONG_TARGET = "E_CLI_ALIAS_WRONG_TARGET"
-    E_STRICT = "E_STRICT"
 
     # -- warnings -----------------------------------------------------------
     W_SET_MEMBER_DANGLING = "W_SET_MEMBER_DANGLING"

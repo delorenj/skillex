@@ -34,8 +34,13 @@ from skillex.core.diagnostics import (
     Severity,
     exit_code_for,
 )
+from skillex.core.environment import (
+    check_gitignored,
+    check_incumbent_engine,
+    check_rival_lockfile,
+)
 from skillex.core.file_lock import FileLock, LockBusyError
-from skillex.core.loader import ManifestError, load_skills_manifest
+from skillex.core.loader import ManifestError, ManifestParseError, load_skills_manifest
 from skillex.core.models import SkillsManifest, UnsupportedFieldError
 from skillex.core.projection import (
     Action,
@@ -48,7 +53,7 @@ from skillex.core.projection import (
     preflight,
 )
 from skillex.core.resolver import Binding, Desired, compose
-from skillex.core.scope import Scope, ScopeKind, discover_scopes
+from skillex.core.scope import Scope, ScopeKind, discover_scopes, global_scope
 from skillex.core.state import ProjectionState, forget, load_state
 from skillex.paths import default_lock_path, registry_roots
 
@@ -347,6 +352,24 @@ def register(app: typer.Typer) -> None:
             managed = managed_roots(roots)
             global_bindings: OrderedDict[str, Binding] | None = None
 
+            # The global map is computed whenever a project might INHERIT it, even
+            # when global is not being written. `inherit_global` defaults to true, so
+            # skipping this under --scope project would compile an EMPTY project map
+            # and then prune every link a previous full sync had put there -- turning
+            # a narrowing flag into a destructive one. Narrowing WHAT IS WRITTEN must
+            # never change WHAT IS RESOLVED.
+            writes_global = any(t.kind is ScopeKind.GLOBAL for t in plan.scopes)
+            inherits = not no_inherit and any(t.kind is ScopeKind.PROJECT for t in plan.scopes)
+            if inherits and not writes_global:
+                donor = global_scope()
+                donor_manifest = _load(donor.manifest_path)
+                donor_roots = (
+                    registry_roots(donor_manifest.registry) if donor_manifest.registry else roots
+                )
+                # A throwaway reporter: findings about a scope this run is not
+                # touching are noise, not news.
+                global_bindings = compose(donor_manifest, donor, donor_roots, Reporter()).bindings
+
             # ---- PREFLIGHT: resolve and diff BOTH scopes before writing either.
             for target in plan.scopes:
                 reporter.scope = target.label
@@ -384,6 +407,13 @@ def register(app: typer.Typer) -> None:
                     skip_occupied=skip_occupied,
                     prune=prune,
                 )
+                # Who ELSE writes here. Read-only, never fatal, and run at plan
+                # time so --dry-run surfaces them too -- a rival writer is most
+                # worth knowing about before you commit to a sync, not after.
+                check_gitignored(target.root, reporter)
+                check_incumbent_engine([target.base] if target.base else [*scoped_roots], reporter)
+                if target.kind is ScopeKind.GLOBAL:
+                    check_rival_lockfile(Path.home(), reporter)
                 results.append(ScopeResult(target, manifest, desired, state, current, rplan))
             reporter.scope = None
         except RefusalError as refusal:
@@ -395,16 +425,18 @@ def register(app: typer.Typer) -> None:
             # refuses it on purpose". Both are config errors (exit 2); only the code
             # tells a script which one it is -- and E_UNSUPPORTED_FIELD exists in the
             # enum precisely to be that code.
-            unsupported = isinstance(e.__cause__, UnsupportedFieldError)
-            reporter.emit(
-                Code.E_UNSUPPORTED_FIELD if unsupported else Code.E_MANIFEST_PARSE,
-                str(e),
-                fix=(
-                    "remove the field; the message above says what it would have done."
-                    if unsupported
-                    else "fix the JSON, or check it against skills.schema.json."
-                ),
-            )
+            if isinstance(e.__cause__, UnsupportedFieldError):
+                manifest_code = Code.E_UNSUPPORTED_FIELD
+                remedy = "remove the field; the message above says what it would have done."
+            elif isinstance(e, ManifestParseError):
+                manifest_code = Code.E_MANIFEST_PARSE
+                remedy = "fix the JSON syntax."
+            else:
+                # Parsed fine, says something impossible. A different problem, and a
+                # different place to look, so a different code.
+                manifest_code = Code.E_MANIFEST_INVALID
+                remedy = "check the manifest against skills.schema.json."
+            reporter.emit(manifest_code, str(e), fix=remedy)
         except LockBusyError as e:
             err_console.print(f"[red]{e}[/red]")
             raise typer.Exit(EXIT_LOCK_BUSY) from e

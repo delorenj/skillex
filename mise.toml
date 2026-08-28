@@ -15,10 +15,14 @@ _.path = [".mise/scripts", "agents/hermes/pm", "agents/hermes/pm/hermes"]
 script = "'{{config_root}}/.mise/scripts/materialize-env.sh'"
 [[hooks.enter]]
 script = "'{{config_root}}/.mise/scripts/link-agentfiles.sh' '{{config_root}}'"
-[[hooks.enter]]
-script = "python3 '{{config_root}}/.mise/scripts/provision-packs.py' --root '{{config_root}}'"
-[[hooks.enter]]
-script = "python3 '{{config_root}}/.mise/scripts/sync-skills.py' --scope project --root '{{config_root}}'"
+# NOTE: there is deliberately no skills enter hook.
+#
+# Two used to live here (provision-packs.py, then sync-skills.py --scope project)
+# and they rewrote .agents/skills on every `cd` into this repo. That made manual
+# verification impossible -- you could not observe a projection you had just made,
+# because entering the directory to look at it rebuilt it first -- and it meant a
+# projector with no sets[] support ran unattended against a sets-only manifest.
+# `skillex sync` is a command you run, not a thing that happens to you.
 
 [tasks.install]
 description = "Install dependencies with uv"
@@ -52,14 +56,23 @@ task = "skills:sync"
 description = "Symlink all agent files to AGENTS.md"
 run = "'{{config_root}}/.mise/scripts/link-agentfiles.sh' '{{config_root}}'"
 
+# --scope project, deliberately. [[watch_files]] fires this task whenever
+# .agents/skills.json is saved, and `skillex sync` defaults to reconciling the
+# GLOBAL root as well as the project one. A file-watch that silently rebuilds the
+# machine-wide projection every time you edit a project manifest is not something
+# you would ever ask for; it is also a behavior change from the engine this
+# replaced, which was project-only. Run `skillex sync` yourself for both.
 [tasks."skills:sync"]
-description = "Sync skills from manifest to local CLI dirs"
-depends = ["skills:provision:packs"]
-run = "python3 '{{config_root}}/.mise/scripts/sync-skills.py' --scope project --root '{{config_root}}'"
+description = "Reconcile this project's .agents/skills from its manifest"
+run = "uv run skillex sync --scope project --project '{{config_root}}'"
 
-[tasks."skills:provision:packs"]
-description = "Provision every Skillex pack declared in .agents/skills.json"
-run = "python3 '{{config_root}}/.mise/scripts/provision-packs.py' --root '{{config_root}}'"
+[tasks."skills:sync:preview"]
+description = "Show what a sync would change here, without changing it"
+run = "uv run skillex sync --scope project --project '{{config_root}}' --dry-run"
+
+# `skills:provision:packs` is gone with the engine that needed it. Pack members
+# now resolve during `skillex sync` itself -- there is no separate provisioning
+# step to forget, and nothing writes a projection except the reconciler.
 
 # >>> mise-versioning >>>  (managed block — do not edit by hand; re-run init to update)
 [tasks."version"]
@@ -113,9 +126,9 @@ run = ["uv sync", "lefthook install"]
 # Preview first. This projection is shared by every CLI and every project on the
 # box, so see what a sync would remove before it removes anything.
 [tasks."skills:sync:global:preview"]
-description = "Report what a global skill sync would remove, without removing it"
-run = "python3 '{{config_root}}/.mise/scripts/sync-skills.py' --scope global --reconcile-dry-run"
+description = "Report what a global skill sync would change, without changing it"
+run = "uv run skillex sync --scope global --dry-run"
 
 [tasks."skills:sync:global"]
-description = "Sync ~/.agents/skills.json into the shared global skill farm"
-run = "python3 '{{config_root}}/.mise/scripts/sync-skills.py' --scope global"
+description = "Reconcile ~/.agents/skills from ~/.agents/skills.json"
+run = "uv run skillex sync --scope global"

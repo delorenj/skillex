@@ -40,7 +40,7 @@ from skillex.core.models import (
     is_safe_relpath,
 )
 from skillex.core.scope import Scope, ScopeKind, is_within
-from skillex.paths import find_in_roots
+from skillex.paths import RegistryHit, find_in_roots
 
 Stage = Literal["inherited", "set", "skill", "pack"]
 
@@ -95,15 +95,45 @@ class Desired:
             self.shadows = []
 
 
-def _no_registry(tried: list[Path], what: str) -> RefusalError:
+def _missing(code: Code, tried: list[Path], what: str, name: str | None = None) -> RefusalError:
+    """ "I looked here, here and here, and it was in none of them."
+
+    The code distinguishes the three cases a reader must act on differently:
+    ``E_NO_REGISTRY`` means there is no checkout at all (fix your environment),
+    while ``E_SET_MISSING`` / ``E_SKILL_MISSING`` mean the checkouts are fine and
+    the *name* is wrong (fix your manifest). Collapsing them onto one code sends
+    you looking in the wrong place, which is the whole cost of a bad error.
+    """
     return RefusalError(
         Finding(
-            code=Code.E_NO_REGISTRY,
+            code=code,
             message=f"no registry checkout contains {what}",
-            detail=tuple(f"{p}  {'exists' if p.is_dir() else 'absent'}" for p in tried)
+            name=name,
+            detail=tuple(
+                f"{p}  {'exists, but has no ' + what if p.is_dir() else 'does not exist'}"
+                for p in tried
+            )
             or ("the registry ladder is empty",),
             fix="check the name, pass --registry-root, or set PJ_SKILLS_REGISTRY_ROOT.",
         )
+    )
+
+
+def _report_skipped(reporter: Reporter, hit: RegistryHit, what: str) -> None:
+    """Warn when resolution walked past a checkout that exists.
+
+    Silence here is how a stale clone stays invisible for months: the ladder finds
+    the path one rung further down, everything works, and nobody learns that the
+    cache the operator believes is authoritative has been wrong since a rename.
+    """
+    if not hit.skipped:
+        return
+    reporter.emit(
+        Code.W_STALE_REGISTRY_CANDIDATE,
+        f"{what} resolved from {hit.root}, past {len(hit.skipped)} earlier checkout(s)",
+        path=hit.root,
+        detail=tuple(f"skipped {p} (exists, but has no {what})" for p in hit.skipped),
+        fix="refresh or remove the stale checkout, or pin one with PJ_SKILLS_REGISTRY_ROOT.",
     )
 
 
@@ -161,6 +191,7 @@ def resolve_skill_entry(
     entry: SkillEntry,
     index: int,
     roots: list[Path],
+    reporter: Reporter | None = None,
 ) -> Binding:
     """Resolve one ``skills[]`` entry.
 
@@ -207,8 +238,10 @@ def resolve_skill_entry(
             )
         hit = find_in_roots(roots, rel)
         if hit is None:
-            raise _no_registry(roots, rel)
-        target = hit[1]
+            raise _missing(Code.E_SKILL_MISSING, roots, rel, entry.name)
+        if reporter is not None:
+            _report_skipped(reporter, hit, rel)
+        target = hit.path
 
     if not (target / SKILL_FILENAME).is_file():
         raise RefusalError(
@@ -337,7 +370,7 @@ def expand_pack(
                         fix="add the skill to all-skills/, or remove it from pack.toml.",
                     )
                 )
-            target = hit[1]
+            target = hit.path
         else:
             raise RefusalError(
                 Finding(
@@ -441,7 +474,7 @@ def compose(
         )
 
     if not roots:
-        raise _no_registry([], "the registry")
+        raise _missing(Code.E_NO_REGISTRY, [], "the registry")
 
     # --- STEP A: a pack short-circuits everything. -------------------------
     # AC: "If a pack is defined, it will trump all above and replace the skills/ path."
@@ -472,9 +505,11 @@ def compose(
                 fix="remove sets[]/skills[], or remove packs[].",
             )
         hit = find_in_roots(roots, entry.registry_path or f"packs/{entry.name}")
+        if hit is not None:
+            _report_skipped(reporter, hit, f"packs/{entry.name}")
         if hit is None:
             if not entry.optional:
-                raise _no_registry(roots, f"packs/{entry.name}")
+                raise _missing(Code.E_PACK_MISSING, roots, f"packs/{entry.name}", entry.name)
             reporter.emit(
                 Code.W_PACK_MISSING,
                 f"optional pack {entry.name!r} not found; continuing without it",
@@ -482,7 +517,7 @@ def compose(
                 fix="add it to the registry, or remove the entry.",
             )
         else:
-            registry_root = hit[0]
+            registry_root = hit.root
             try:
                 pack_dir = resolve_pack_dir(registry_root / "packs", entry.name, entry.version)
             except PackError as e:
@@ -544,7 +579,9 @@ def compose(
             set_dir = local if (local.is_dir() or local.is_symlink()) else None
         else:
             hit = find_in_roots(roots, set_entry.registry_path or f"sets/{set_entry.name}")
-            set_dir = hit[1] if hit else None
+            if hit is not None:
+                _report_skipped(reporter, hit, f"sets/{set_entry.name}")
+            set_dir = hit.path if hit else None
 
         if set_dir is None:
             if set_entry.optional:
@@ -555,7 +592,7 @@ def compose(
                     fix="add it to the registry, or remove the entry.",
                 )
                 continue
-            raise _no_registry(roots, f"sets/{set_entry.name}")
+            raise _missing(Code.E_SET_MISSING, roots, f"sets/{set_entry.name}", set_entry.name)
 
         found = walk_composition(set_dir, reporter, label=f"set {set_entry.name!r}")
         keep = set(set_entry.filter_inventory([m.name for m in found]))
@@ -570,7 +607,12 @@ def compose(
     # This loop runs after every set, so an individual entry wins regardless of
     # where `skills` sits relative to `sets` in the JSON.
     for index, skill_entry in enumerate(manifest.skills):
-        _record(bindings, shadows, reporter, resolve_skill_entry(skill_entry, index, roots))
+        _record(
+            bindings,
+            shadows,
+            reporter,
+            resolve_skill_entry(skill_entry, index, roots, reporter),
+        )
 
     return _finalize(Desired("composed", bindings, None, shadows), scope, reporter)
 

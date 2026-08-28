@@ -587,3 +587,51 @@ def test_cli_explicit_project_without_a_manifest_is_a_config_error(
     assert code == EXIT_CONFIG
     assert codes_in(payload) == [Code.E_NO_PROJECT_MANIFEST.value]
     assert not sandbox.global_root.exists()
+
+
+# ---------------------------------------------------------------------------
+# narrowing what is WRITTEN must not change what is RESOLVED
+# ---------------------------------------------------------------------------
+
+
+def test_scope_project_still_inherits_the_global_map(
+    sandbox, registry, write_catalog, write_set, run_sync_json
+) -> None:
+    """``--scope project`` narrows the WRITE set, never the resolution.
+
+    Regression. ``inherit_global`` defaults to true, and the global map used to be
+    computed only as a side effect of global being in the write set. Under
+    ``--scope project`` it was therefore never computed, so the project map came
+    out EMPTY -- and because an empty desired map prunes, a project root a previous
+    full sync had populated would be emptied. A flag that means "touch less" turned
+    into one that deleted more.
+    """
+    write_catalog(registry, "alpha", "beta")
+    write_set(registry, "base", [("link", "alpha", registry / "all-skills" / "alpha")])
+    sandbox.write_global_manifest(sets=["base"])
+    project = sandbox.project("proj", manifest={"inherit_global": True, "skills": []})
+
+    code, payload = run_sync_json(
+        "--scope", "project", "--project", str(project), "--dry-run", cwd=project
+    )
+
+    assert code == 0
+    assert [s["scope"] for s in payload["scopes"]] == ["project"], "global must not be written"
+    assert {op["name"] for op in payload["scopes"][0]["ops"]} == {"alpha"}
+
+
+def test_scope_project_with_no_inherit_is_empty_not_accidental(
+    sandbox, registry, write_catalog, write_set, run_sync_json
+) -> None:
+    """The empty result must come from ``--no-inherit``, not from a skipped scope."""
+    write_catalog(registry, "alpha")
+    write_set(registry, "base", [("link", "alpha", registry / "all-skills" / "alpha")])
+    sandbox.write_global_manifest(sets=["base"])
+    project = sandbox.project("proj", manifest={"inherit_global": True, "skills": []})
+
+    code, payload = run_sync_json(
+        "--scope", "project", "--project", str(project), "--no-inherit", "--dry-run", cwd=project
+    )
+
+    assert code == 0
+    assert payload["scopes"][0]["ops"] == []

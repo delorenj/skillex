@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import os
 import re
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
+from dataclasses import dataclass
 from pathlib import Path
 
 REGISTRY_ROOT_ENV = "PJ_SKILLS_REGISTRY_ROOT"
@@ -112,8 +113,32 @@ def registry_roots(registry_url: str | None = None) -> list[Path]:
     return [c for c in registry_root_candidates(registry_url) if c.is_dir()]
 
 
-def find_in_roots(roots: Sequence[Path], relpath: str) -> tuple[Path, Path] | None:
-    """First root that actually CARRIES ``relpath``, as ``(root, path)``.
+@dataclass(frozen=True)
+class RegistryHit:
+    """Where a registry-relative path was found, and what was passed over first."""
+
+    root: Path
+    path: Path
+    #: Rungs that EXIST but do not carry the requested path, in ladder order.
+    #:
+    #: Never empty by accident: a non-empty list means resolution silently walked
+    #: past a checkout the operator may believe is authoritative. On this machine
+    #: that is the norm -- ``~/.agents/.cache/registries/<sanitized-url>`` exists,
+    #: still carries the retired ``skill-sets/``, and has no ``sets/`` at all, so
+    #: every set resolves one rung further down than a reader would guess.
+    skipped: tuple[Path, ...] = ()
+
+    def __iter__(self) -> Iterator[Path]:
+        """Unpack as ``(root, path)`` so existing call sites keep working."""
+        yield self.root
+        yield self.path
+
+    def __getitem__(self, index: int) -> Path:
+        return (self.root, self.path)[index]
+
+
+def find_in_roots(roots: Sequence[Path], relpath: str) -> RegistryHit | None:
+    """First root that actually CARRIES ``relpath``.
 
     Existence is tested LEXICALLY (``is_symlink() or exists()``) so a dangling
     symlink still counts as "this rung has it" -- the caller reports the dangle
@@ -124,10 +149,12 @@ def find_in_roots(roots: Sequence[Path], relpath: str) -> tuple[Path, Path] | No
     tried-list, because "not found" is only actionable if you can see where it
     looked.
     """
+    skipped: list[Path] = []
     for root in roots:
         candidate = root / relpath
         if candidate.is_symlink() or candidate.exists():
-            return (root, candidate)
+            return RegistryHit(root=root, path=candidate, skipped=tuple(skipped))
+        skipped.append(root)
     return None
 
 
