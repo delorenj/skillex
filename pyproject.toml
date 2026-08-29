@@ -12,13 +12,23 @@ dependencies = [
   "pydantic>=2.10.0",
   "structlog>=24.4.0",
   "python-frontmatter>=1.1.0",
+  # Direct since core/provenance.py imports it to read .source.yaml. It was
+  # already present transitively via python-frontmatter; an undeclared direct
+  # import is how a transitive dependency drop breaks a release.
+  "pyyaml>=6.0",
 ]
 
 [project.scripts]
 skillex = "skillex.cli:app"
 
 [dependency-groups]
-dev = ["pytest>=8.3.0", "pytest-cov>=6.0.0", "ruff>=0.8.0", "mypy>=1.14.0"]
+dev = [
+    "pytest>=8.3.0",
+    "pytest-cov>=6.0.0",
+    "ruff>=0.8.0",
+    "mypy>=1.14.0",
+    "types-pyyaml>=6.0.12.20260815",
+]
 
 [build-system]
 requires = ["hatchling"]

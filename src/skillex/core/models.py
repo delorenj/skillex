@@ -542,6 +542,263 @@ class SkillEntry(BaseModel):
         return self.registry_path or self.raw_path or f"all-skills/{self.name}"
 
 
+VERSION_REF_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/+-]*$")
+"""A pinned upstream version: a git tag, branch, or commit SHA.
+
+Deliberately NOT :data:`VERSION_PATTERN` (which forbids ``/`` and so cannot
+express ``origin/main`` or ``release/1.4``) and deliberately narrower than git's
+own ``check-ref-format`` in two ways that matter for safety: it must not start
+with ``-`` (a ref that becomes a command-line flag) and it may not contain ``..``
+(git's range operator, which would silently turn a pin into a diff).
+"""
+
+_REPO_SCHEMES = ("https://", "http://", "ssh://", "git://", "git@", "file://")
+
+
+class SourceSkill(BaseModel):
+    """One skill taken from an external source: (catalog name, directory in the repo).
+
+    The two halves are separate because on this machine they disagree twice, in
+    opposite directions:
+
+    * ``momo`` -- the source directory is named ``skill`` and the catalog name is
+      ``momo``, so the name cannot be the basename;
+    * ``project-jangler`` -- the source directory *is* ``project-jangler`` but its
+      ``SKILL.md`` frontmatter says ``name: pjangler``, so the name cannot be the
+      frontmatter either.
+
+    The catalog name therefore comes from the manifest and only from the manifest.
+    ``dir`` merely defaults to it.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    name: str
+    dir: str | None = None
+
+    @field_validator("name")
+    @classmethod
+    def _validate_name(cls, v: str) -> str:
+        if not PROJECTION_NAME_PATTERN.match(v) or not is_safe_component(v):
+            raise ValueError(
+                f"invalid catalog name {v!r}; must match {PROJECTION_NAME_PATTERN.pattern}"
+            )
+        return v
+
+    @field_validator("dir")
+    @classmethod
+    def _validate_dir(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        if not is_safe_component(v):
+            raise ValueError(f"invalid source directory {v!r}; must be one safe path component")
+        return v
+
+    @classmethod
+    def from_spec(cls, spec: str | dict[str, object]) -> SourceSkill:
+        """``"mise-tasks"`` or ``{name = "momo", dir = "skill"}``."""
+        if isinstance(spec, str):
+            return cls(name=spec)
+        return cls.model_validate(spec)
+
+    @property
+    def relpath(self) -> str:
+        """Directory name inside the source's ``subdir``."""
+        return self.dir or self.name
+
+
+class SourceEntry(BaseModel):
+    """One ``[[source]]`` table of ``all-skills/sources.toml``.
+
+    A source names an external git repository that AUTHORS skills. `skillex vendor`
+    reads them out of that repository at ``version`` -- from an already-present
+    local object database, never over the network -- and lands them under
+    ``all-skills/`` as real, committed content.
+
+    ``subdir`` defaults to ``"skills"``: the repo's root-level skills directory is
+    the convention, and the manifest only has to say otherwise for a repo that
+    breaks it (``momo`` keeps its single skill in ``skill/``).
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    name: str
+    repo: str
+    version: str
+    subdir: str = "skills"
+    checkout: str | None = None
+    skills: tuple[SourceSkill, ...] = ()
+    include: tuple[str, ...] = ()
+    exclude: tuple[str, ...] = ()
+    optional: bool = False
+
+    @field_validator("name")
+    @classmethod
+    def _validate_name(cls, v: str) -> str:
+        if not PACK_NAME_PATTERN.match(v) or not is_safe_component(v):
+            raise ValueError(f"invalid source name {v!r}; must match {PACK_NAME_PATTERN.pattern}")
+        return v
+
+    @field_validator("repo")
+    @classmethod
+    def _validate_repo(cls, v: str) -> str:
+        if not v.startswith(_REPO_SCHEMES):
+            raise ValueError(
+                f"invalid repo {v!r}; must start with one of {', '.join(_REPO_SCHEMES)}. "
+                "It is a provenance identity recorded in every receipt, never a URL "
+                "skillex dials."
+            )
+        return v
+
+    @field_validator("version")
+    @classmethod
+    def _validate_version(cls, v: str) -> str:
+        if not VERSION_REF_PATTERN.match(v) or ".." in v:
+            raise ValueError(
+                f"invalid version {v!r}; must be a git tag, branch or commit SHA matching "
+                f"{VERSION_REF_PATTERN.pattern} and containing no '..'"
+            )
+        return v
+
+    @field_validator("subdir")
+    @classmethod
+    def _validate_subdir(cls, v: str) -> str:
+        # "" is the repo root, which is how a repo with no skills/ directory at all
+        # is expressed. Anything else must be a safe relative path.
+        if v and not is_safe_relpath(v):
+            raise ValueError(
+                f"invalid subdir {v!r}; must be a relative, /-separated path with no "
+                "'.', '..' or empty segments (or \"\" for the repository root)"
+            )
+        return v
+
+    @field_validator("checkout")
+    @classmethod
+    def _validate_checkout(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        if not is_safe_component(v):
+            raise ValueError(
+                f"invalid checkout id {v!r}; must be one safe path component. It is a "
+                "LOGICAL id resolved against the local ladder, never a path -- "
+                "sources.toml is committed and may not contain a machine path."
+            )
+        return v
+
+    @field_validator("include", "exclude")
+    @classmethod
+    def _validate_filter_names(cls, v: tuple[str, ...]) -> tuple[str, ...]:
+        for name in v:
+            if not is_safe_component(name):
+                raise ValueError(f"invalid skill name {name!r}; must be one safe path component")
+        return v
+
+    @model_validator(mode="after")
+    def _validate_exclusivity(self) -> SourceEntry:
+        if self.skills and (self.include or self.exclude):
+            raise ValueError(
+                "source may not set both an explicit 'skills' list and 'include'/'exclude'; "
+                "the list is already the selection"
+            )
+        seen: set[str] = set()
+        for skill in self.skills:
+            if skill.name in seen:
+                raise ValueError(f"duplicate catalog name {skill.name!r} in source {self.name!r}")
+            seen.add(skill.name)
+        return self
+
+    @classmethod
+    def from_spec(cls, spec: dict[str, object]) -> SourceEntry:
+        """Build a source from one ``[[source]]`` table, refusing five near-misses."""
+        for field_name in ("clone", "fetch", "auto_fetch"):
+            if field_name in spec:
+                _refuse(
+                    f"source.{field_name}",
+                    "skillex never clones and never fetches; sync-skills.py is the only "
+                    "surface allowed to clone (paths.py). Check the repository out "
+                    "yourself -- `vendor` prints the exact command -- or set "
+                    "'optional = true'. Remove the field.",
+                )
+        if "url" in spec:
+            _refuse("source.url", "Renamed to 'repo'. Remove the field.")
+        if "ref" in spec:
+            _refuse(
+                "source.ref",
+                "Renamed to 'version', which already accepts a tag, a branch or a "
+                "commit SHA. Two fields could disagree about the pin. Remove the field.",
+            )
+        if "path" in spec:
+            _refuse(
+                "source.path",
+                "Ambiguous between the local checkout and the in-repo directory. Use "
+                "'subdir' for the directory inside the repository; the local checkout "
+                "is resolved from the machine, never from this committed file.",
+            )
+        for field_name in ("skills", "include", "exclude"):
+            value = spec.get(field_name)
+            if value is not None and not isinstance(value, list):
+                raise ValueError(f"source.{field_name} must be an array")
+        raw_skills = spec.get("skills")
+        if isinstance(raw_skills, list):
+            spec = dict(spec)
+            spec["skills"] = [
+                SourceSkill.from_spec(item)
+                if isinstance(item, str | dict)
+                else _bad_skill_spec(item)
+                for item in raw_skills
+            ]
+        return cls.model_validate(spec)
+
+    @property
+    def checkout_id(self) -> str:
+        """Logical checkout this source resolves through. Defaults to its name.
+
+        Two sources may share one: ``33GOD`` owns skills at two unrelated paths
+        (``33god-platform/skills`` and ``krebs/skills``), which is two ``[[source]]``
+        tables over one repository and one working copy.
+        """
+        return self.checkout or self.name
+
+    def tree_path(self, skill: SourceSkill) -> str:
+        """Repo-root-relative path of one skill's directory."""
+        return f"{self.subdir}/{skill.relpath}" if self.subdir else skill.relpath
+
+    def filter_inventory(self, names: list[str]) -> list[str]:
+        """Apply `include` then `exclude` to a discovered member list, preserving order."""
+        selected = [n for n in names if n in self.include] if self.include else list(names)
+        if self.exclude:
+            selected = [n for n in selected if n not in self.exclude]
+        return selected
+
+
+def _bad_skill_spec(item: object) -> SourceSkill:
+    raise ValueError(
+        f"source.skills[] entry must be a string or a table, got {type(item).__name__}"
+    )
+
+
+class SourcesManifest(BaseModel):
+    """A parsed ``sources.toml``.
+
+    ``sources`` is a TUPLE for the same reason the other manifests use one: order
+    is authored and reporting follows it.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    path: Path
+    version: int = 1
+    sources: tuple[SourceEntry, ...] = ()
+    unknown_keys: tuple[str, ...] = ()
+
+    @property
+    def is_empty(self) -> bool:
+        return not self.sources
+
+    def by_name(self) -> dict[str, SourceEntry]:
+        return {entry.name: entry for entry in self.sources}
+
+
 class SkillsManifest(BaseModel):
     """The subset of a skills.json manifest this CLI reads.
 

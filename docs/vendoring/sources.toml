@@ -1,0 +1,78 @@
+# External skill sources vendored into this catalog.
+#
+# Each [[source]] names a git repository that AUTHORS skills. `skillex vendor sync`
+# reads the declared skills out of that repository AT `version` -- from an object
+# database that is already on this machine, never over the network -- and lands
+# them under all-skills/ as real, committed content. Authoring continues in the
+# home repo; the catalog holds a pinned copy so every entry resolves on every
+# machine.
+#
+# Nothing here is a machine path and nothing here is ever cloned or fetched.
+# `sync-skills.py` remains the only surface allowed to clone. The local directory
+# for each `checkout` id is resolved per-machine; see
+# $XDG_CONFIG_HOME/skillex/sources.local.toml and `skillex vendor list`.
+#
+# `subdir` defaults to "skills" -- the repo's root-level skills directory -- and is
+# only stated where a repository breaks that convention.
+#
+# NOTE: 33GOD/skills/ appears NOWHERE below, deliberately. It is a farm of 16
+# absolute symlinks into the nested submodules, not a skill tree; declaring it
+# would vendor 16 path strings. `skillex vendor` refuses it by name
+# (E_SOURCE_ENTRY_IS_LINK). The four repositories that actually own the content
+# are declared instead.
+
+version = 1
+
+# --------------------------------------------------------------- pjangler ----
+# The only source with a usable semver tag series, so it gets a real tag pin.
+# Discovery takes all 9 skills under skills/; skills/.system/ is skipped because
+# a leading "." is never a skill.
+#
+# `agent-fleet-operations` and `projects` are ALREADY real directories in the
+# catalog, byte-identical to pjangler and recording nothing about where they came
+# from -- an unmanaged fork whose correctness today is luck. The first sync needs
+# `--adopt` to take them over; after that they are managed like the rest.
+[[source]]
+name     = "pjangler"
+repo     = "git@github.com:delorenj/pjangler.git"
+version  = "v1.4.2"
+checkout = "pjangler"
+
+# -------------------------------------------------------------- bloodbank ----
+# Only date-stamped baselines exist as tags, so the version is a branch and the
+# PIN is the resolved commit recorded in each skill's .source.yaml.
+[[source]]
+name     = "bloodbank"
+repo     = "git@github.com:delorenj/bloodbank.git"
+version  = "main"
+checkout = "bloodbank"
+
+# ------------------------------------------------------------------- momo ----
+# momo has no skills/ directory at all: its single skill is the top-level `skill/`
+# directory, and the catalog name is `momo`. Both halves are stated explicitly
+# because neither the basename nor the SKILL.md frontmatter can be trusted to
+# produce the projected name.
+[[source]]
+name     = "momo"
+repo     = "git@github.com:delorenj/momo.git"
+version  = "main"
+checkout = "momo"
+subdir   = ""
+skills   = [{ name = "momo", dir = "skill" }]
+
+# ---------------------------------------------------------- 33GOD (twice) ----
+# 33GOD owns skills at two unrelated paths, so it is two sources sharing one
+# checkout id. Neither is `skills/`.
+[[source]]
+name     = "33god-platform"
+repo     = "git@github.com:delorenj/33GOD.git"
+version  = "main"
+checkout = "33GOD"
+subdir   = "33god-platform/skills"
+
+[[source]]
+name     = "krebs"
+repo     = "git@github.com:delorenj/33GOD.git"
+version  = "main"
+checkout = "33GOD"
+subdir   = "krebs/skills"

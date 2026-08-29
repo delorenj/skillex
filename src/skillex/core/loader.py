@@ -34,6 +34,8 @@ from skillex.core.models import (
     SkillFrontmatter,
     SkillsManifest,
     SlotAssignment,
+    SourceEntry,
+    SourcesManifest,
     UnsupportedFieldError,
     is_safe_component,
 )
@@ -100,6 +102,20 @@ class DuplicateSkillError(LoaderError):
 
 class SkillReferenceError(LoaderError):
     """Raised when a pack references a skill that does not exist."""
+
+
+class SourcesError(LoaderError):
+    """Raised when a sources.toml is missing or says something impossible."""
+
+
+class SourcesParseError(SourcesError):
+    """Raised when a sources.toml is not valid TOML at all.
+
+    A subclass for the same reason :class:`ManifestParseError` is one: every
+    ``except SourcesError`` still catches it, while the caller can report "your
+    TOML is broken" separately from "that field cannot mean what it says". They
+    send a reader to different places.
+    """
 
 
 def load_config(path: Path) -> SkillexConfig:
@@ -887,3 +903,66 @@ def load_skills_manifest(path: Path) -> SkillsManifest:
         )
     except ValidationError as e:
         raise ManifestError(f"invalid skills manifest at {path}: {e}") from e
+
+
+#: Top-level keys `sources.toml` defines. Anything else is recorded, not rejected.
+KNOWN_SOURCES_KEYS = frozenset({"version", "source"})
+
+
+def load_sources_manifest(path: Path) -> SourcesManifest:
+    """Parse ``all-skills/sources.toml`` into a :class:`SourcesManifest`.
+
+    Same five invariants as :func:`load_pack_manifest`, which is the only other
+    hand-authored TOML this codebase reads: stdlib ``tomllib``, an explicit utf-8
+    decode, ``raw.get(<section>, default)`` per block rather than indexing,
+    ``TOMLDecodeError`` re-raised as a :class:`LoaderError` subclass carrying the
+    path, and ``ValidationError`` re-raised as the same.
+
+    TOML and not JSON because this file is authored and reviewed by a human: it
+    takes comments, and every skill it declares wants one saying why.
+    """
+    if not path.is_file():
+        raise SourcesError(f"sources manifest not found: {path}")
+    try:
+        raw = tomllib.loads(path.read_text(encoding="utf-8"))
+    except tomllib.TOMLDecodeError as e:
+        raise SourcesParseError(f"failed to parse {path}: {e}") from e
+    except OSError as e:
+        raise SourcesError(f"cannot read {path}: {e}") from e
+
+    version = raw.get("version", 1)
+    if not isinstance(version, int) or isinstance(version, bool):
+        raise SourcesError(f"{path}: 'version' must be an integer")
+
+    items = raw.get("source", [])
+    if not isinstance(items, list):
+        raise SourcesError(f"{path}: 'source' must be an array of tables")
+
+    entries: list[SourceEntry] = []
+    for index, spec in enumerate(items):
+        if not isinstance(spec, dict):
+            raise SourcesError(f"{path}: source[{index}] must be a table")
+        try:
+            entries.append(SourceEntry.from_spec(spec))
+        except UnsupportedFieldError as e:
+            # Verbatim, exactly as _parse_entries does it: the authored explanation
+            # is the whole value of accepting-and-refusing rather than ignoring.
+            raise SourcesError(f"{path}: source[{index}]: {e}") from e
+        except (ValidationError, ValueError) as e:
+            raise SourcesError(f"{path}: invalid source[{index}]: {e}") from e
+
+    seen_sources: set[str] = set()
+    for entry in entries:
+        if entry.name in seen_sources:
+            raise SourcesError(f"{path}: duplicate source name {entry.name!r}")
+        seen_sources.add(entry.name)
+
+    try:
+        return SourcesManifest(
+            path=path.resolve(),
+            version=version,
+            sources=tuple(entries),
+            unknown_keys=tuple(sorted(k for k in raw if k not in KNOWN_SOURCES_KEYS)),
+        )
+    except ValidationError as e:
+        raise SourcesError(f"invalid sources manifest at {path}: {e}") from e

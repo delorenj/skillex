@@ -83,6 +83,32 @@ class Code(StrEnum):
     E_ALIAS_WOULD_DISCARD = "E_ALIAS_WOULD_DISCARD"
     E_CLI_ALIAS_WRONG_TARGET = "E_CLI_ALIAS_WRONG_TARGET"
 
+    # -- external sources / vendoring --------------------------------------
+    #: `skillex vendor` copies skills out of a foreign git repository into
+    #: ``all-skills/`` as real committed content. Its refusals split the same way
+    #: everything else here does: a bad ``sources.toml`` is exit 2 (edit a file),
+    #: a repository or catalog that holds something we will not touch is exit 3
+    #: (move files, or push your edit upstream).
+    E_SOURCES_PARSE = "E_SOURCES_PARSE"
+    E_SOURCES_INVALID = "E_SOURCES_INVALID"
+    E_SOURCE_UNKNOWN = "E_SOURCE_UNKNOWN"
+    E_SOURCE_SUBDIR_MISSING = "E_SOURCE_SUBDIR_MISSING"
+    E_SOURCE_SKILL_MISSING = "E_SOURCE_SKILL_MISSING"
+    E_VENDOR_NAME_COLLISION = "E_VENDOR_NAME_COLLISION"
+    E_VENDOR_CATALOG_INVALID = "E_VENDOR_CATALOG_INVALID"
+    E_SOURCE_CHECKOUT_MISSING = "E_SOURCE_CHECKOUT_MISSING"
+    E_SOURCE_NOT_A_REPO = "E_SOURCE_NOT_A_REPO"
+    E_SOURCE_REF_UNKNOWN = "E_SOURCE_REF_UNKNOWN"
+    E_SOURCE_ENTRY_IS_LINK = "E_SOURCE_ENTRY_IS_LINK"
+    E_SOURCE_ENTRY_IS_SUBMODULE = "E_SOURCE_ENTRY_IS_SUBMODULE"
+    E_SOURCE_UNSAFE_MEMBER = "E_SOURCE_UNSAFE_MEMBER"
+    E_SOURCE_NOT_A_SKILL = "E_SOURCE_NOT_A_SKILL"
+    E_VENDOR_LOCAL_EDITS = "E_VENDOR_LOCAL_EDITS"
+    E_VENDOR_WOULD_CLOBBER = "E_VENDOR_WOULD_CLOBBER"
+    E_VENDOR_NOT_VENDORED = "E_VENDOR_NOT_VENDORED"
+    E_VENDOR_STAGE_DIRTY = "E_VENDOR_STAGE_DIRTY"
+    E_RELINK_AMBIGUOUS = "E_RELINK_AMBIGUOUS"
+
     # -- warnings -----------------------------------------------------------
     W_SET_MEMBER_DANGLING = "W_SET_MEMBER_DANGLING"
     W_SET_MEMBER_UNSAFE_NAME = "W_SET_MEMBER_UNSAFE_NAME"
@@ -108,6 +134,15 @@ class Code(StrEnum):
     W_MANIFEST_UNKNOWN_KEY = "W_MANIFEST_UNKNOWN_KEY"
     W_PROJECTION_NOT_GITIGNORED = "W_PROJECTION_NOT_GITIGNORED"
     W_INCUMBENT_ENGINE_ACTIVE = "W_INCUMBENT_ENGINE_ACTIVE"
+    W_SOURCE_REF_IS_BRANCH = "W_SOURCE_REF_IS_BRANCH"
+    W_SOURCE_REMOTE_MISMATCH = "W_SOURCE_REMOTE_MISMATCH"
+    W_SOURCE_OPTIONAL_MISSING = "W_SOURCE_OPTIONAL_MISSING"
+    W_VENDOR_LOCAL_EDITS = "W_VENDOR_LOCAL_EDITS"
+    W_VENDOR_PIN_STALE = "W_VENDOR_PIN_STALE"
+    W_VENDOR_UNRECORDED = "W_VENDOR_UNRECORDED"
+    W_VENDOR_ORPHANED = "W_VENDOR_ORPHANED"
+    W_VENDOR_DROPPED_SOURCE_YAML = "W_VENDOR_DROPPED_SOURCE_YAML"
+    W_RELINK_NO_CATALOG_ENTRY = "W_RELINK_NO_CATALOG_ENTRY"
 
     # -- info (-v only) -----------------------------------------------------
     #: A rival installer's lock file is INFO, not a warning, and the distinction
@@ -130,6 +165,8 @@ class Code(StrEnum):
     I_SKILL_OVERRIDES_SET = "I_SKILL_OVERRIDES_SET"
     I_PROJECT_BELOW_CWD = "I_PROJECT_BELOW_CWD"
     I_SIBLING_PROJECTS = "I_SIBLING_PROJECTS"
+    I_VENDOR_UNCHANGED = "I_VENDOR_UNCHANGED"
+    I_VENDOR_RELINKED = "I_VENDOR_RELINKED"
 
 
 #: Warnings ``--strict`` promotes to errors.
@@ -173,6 +210,37 @@ _CONFIG_ERRORS: frozenset[Code] = frozenset(
         Code.E_PACK_DUPLICATE_MEMBER,
         Code.E_TARGET_NOT_A_SKILL,
         Code.E_NO_PROJECT_MANIFEST,
+        # Vendoring: everything you fix by editing sources.toml (or by passing a
+        # different --source / --catalog) is a 2. Everything you fix by touching a
+        # repository or moving bytes on disk is a 3 and is deliberately absent.
+        Code.E_SOURCES_PARSE,
+        Code.E_SOURCES_INVALID,
+        Code.E_SOURCE_UNKNOWN,
+        Code.E_SOURCE_SUBDIR_MISSING,
+        Code.E_SOURCE_SKILL_MISSING,
+        Code.E_VENDOR_NAME_COLLISION,
+        Code.E_VENDOR_CATALOG_INVALID,
+    }
+)
+
+#: Warnings ``skillex vendor --strict`` promotes, and ``skillex sync --strict``
+#: deliberately does not.
+#:
+#: :data:`STRICT_PROMOTES` is a *topology* gate -- its own comment reserves it for
+#: ADR-0001 violations and excludes anything that "describes the environment, not
+#: the composition". Every warning here describes the environment: a moving ref, a
+#: pin that has fallen behind, a catalog entry someone hand-edited. They are worth
+#: failing a vendoring run over and worthless as a topology signal, and `sync`
+#: cannot emit any of them, so putting them in the shared set would be dead weight
+#: in the one place a reader looks to learn what ``--strict`` means.
+VENDOR_STRICT_PROMOTES: frozenset[Code] = frozenset(
+    {
+        Code.W_SOURCE_REF_IS_BRANCH,
+        Code.W_SOURCE_REMOTE_MISMATCH,
+        Code.W_VENDOR_LOCAL_EDITS,
+        Code.W_VENDOR_PIN_STALE,
+        Code.W_VENDOR_UNRECORDED,
+        Code.W_VENDOR_ORPHANED,
     }
 )
 
@@ -325,6 +393,7 @@ __all__ = [
     "EXIT_PARTIAL",
     "EXIT_REFUSED",
     "STRICT_PROMOTES",
+    "VENDOR_STRICT_PROMOTES",
     "Code",
     "Finding",
     "RefusalError",

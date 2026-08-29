@@ -11,6 +11,7 @@ from skillex.commands import slot as slot_cmd
 from skillex.commands import status as status_cmd
 from skillex.commands import sync as sync_cmd
 from skillex.commands import topology as topology_cmd
+from skillex.commands import vendor as vendor_cmd
 from skillex.logging import configure_logging
 
 app = typer.Typer(
@@ -35,6 +36,7 @@ slot_cmd.register(app)
 status_cmd.register(app)
 sync_cmd.register(app)
 topology_cmd.register(app)
+vendor_cmd.register(app)
 
 
 def main() -> None:

@@ -27,6 +27,23 @@ uv run skillex topology check --root . --sources-only --json
 The current migration backlog is recorded in
 [docs/architecture/topology-migration.md](docs/architecture/topology-migration.md).
 
+## Vendoring external skill repositories
+
+A skill authored in another repository can be *vendored* into `all-skills/` as
+real, committed content pinned to a version, so the catalog resolves on every
+machine while authoring stays where it belongs. See
+[docs/VENDORING.md](docs/VENDORING.md).
+
+```bash
+uv run skillex vendor list             # declared sources and where they resolve here
+uv run skillex vendor sync -n          # plan; writes nothing
+uv run skillex vendor status           # verify the catalog against its own pins, offline
+```
+
+Nothing is ever cloned or fetched: sources are read from a local checkout's git
+objects, and a version that is not present is a refusal carrying the `git fetch`
+to run.
+
 ## Experimental: BMAD HTML Workspace Skill
 
 This repo now includes an experimental skill scaffold at `skills/bmad-html-workspace/` for teams that want a single-file HTML "project cockpit" instead of fragmented Markdown outputs.

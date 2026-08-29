@@ -1,0 +1,19 @@
+# $XDG_CONFIG_HOME/skillex/sources.local.toml -- MACHINE-LOCAL, never committed.
+#
+# sources.toml is committed and shared, so it may not contain a path. This file is
+# the one honest home for the fact that IS about this disk: which directory each
+# logical checkout id lives in. On delo's machine every source is a nested
+# submodule of ~/code/33GOD, which is a property of this checkout and of nothing
+# else.
+#
+# Resolution ladder, highest first:
+#   1. --checkout ID=PATH        (exclusive)
+#   2. $SKILLEX_SOURCE_<ID>      (exclusive)
+#   3. this file
+#   4. $SKILLEX_SOURCE_ROOT/<id>, default ~/code/<id>
+
+[checkouts]
+"33GOD"   = "~/code/33GOD"
+pjangler  = "~/code/33GOD/pjangler"
+bloodbank = "~/code/33GOD/bloodbank"
+momo      = "~/code/33GOD/momo"

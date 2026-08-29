@@ -50,6 +50,16 @@ The following invariants are mandatory:
    activation records the Git revision of the canonical `all-skills` repository
    together with the pack manifest revision. Versioned packs pin a composition;
    they do not vendor another skill tree.
+
+   *Amendment (2026-08-29, `skillex vendor`).* A skill whose upstream lives in
+   another repository adds a **third** pin alongside catalog-rev and
+   pack-manifest-rev: the resolved upstream commit, recorded in
+   `all-skills/<name>/.source.yaml`. This is consistent with the invariant rather
+   than an exception to it, because the vendored bytes land in `all-skills/` as
+   the one writable definition — the pin says where they came from, it does not
+   create a second place they live. `all-skills/sources.toml` declares the
+   sources; nothing is fetched, and `skillex vendor status` verifies the pin
+   offline from the catalog alone.
 5. **Composition expands to a flat name map.** Set and pack membership compiles
    to `canonical-name -> all-skills/<canonical-name>`. Duplicate names or two
    different targets for one name are errors.
@@ -151,8 +161,14 @@ definitions* without reducing agentpack capabilities.
 1. [x] Add `skillex topology check` with stable rule codes and JSON output.
 2. [x] Revise the editable architecture diagram to show the write boundary,
    reference-only packs, both activation modes, and CLI aliases.
-3. [ ] Import or retire linked definitions currently exposed through
-   `all-skills/`.
+3. [~] Import or retire linked definitions currently exposed through
+   `all-skills/`. **Machinery landed 2026-08-29**: `skillex vendor` copies a
+   declared external repo's skills into `all-skills/` as real, pinned content
+   (`docs/VENDORING.md`). This is the *execution* of this item, not an exception
+   to invariant 1: after the migration there are zero symlinks in `all-skills/`.
+   The content migration itself is a deliberate, reviewed commit in
+   `delorenj/skills` and is not yet run — `docs/vendoring/sources.toml` is the
+   ready declaration, and a dry run classifies all 15 as `replace-link`.
 4. [ ] Promote Hermes snapshot leaves into `all-skills/`, reconcile name
    collisions, flatten its manifest to canonical names, and delete the payload.
 5. [ ] Replace real definitions in `skill-sets/` with canonical references.
