@@ -140,8 +140,8 @@ tab-bar plugin itself (fork `zellij:tab-bar`, or adopt zj-radar / zellaude below
 | Source | Carries pane id? |
 |---|---|
 | Inside the pane: `$ZELLIJ_PANE_ID`, `$ZELLIJ_SESSION_NAME` | **Yes** — authoritative |
-| `deckard.evt.v1.attention` (NATS) | **Yes** — `zellij_pane_id`, `zellij_session_name` |
-| `bloodbank.evt.v1.agent.>` (NATS) | **No** |
+| `deckard.evt.attention` (NATS) | **Yes** — `zellij_pane_id`, `zellij_session_name` |
+| `bloodbank.evt.agent.>` (NATS) | **No** |
 
 A field census over 85 live bloodbank envelopes, grepping every field name for
 `pane|tab|zellij|pid|tty|mux`, found **nothing**. There, `data.working_directory` plus
@@ -159,14 +159,14 @@ Already working, and worth reusing rather than duplicating:
 |---|---|
 | `claude-notify` → `paplay` + ntfy push | audible + phone |
 | `nlp hook notification` → Redis → Nanoleaf hex | **physical light wall** |
-| deckard attention hook → `deckard.evt.v1.attention` → amber key | Stream Deck |
+| deckard attention hook → `deckard.evt.attention` → amber key | Stream Deck |
 | `zellij pipe zellij-attention::waiting::$ZELLIJ_PANE_ID` | **dead** — plugin never loaded |
 
 One event stream already feeds a Stream Deck and a light wall. **The tab bar is the
 third consumer that was never written.** Prefer subscribing to the existing stream over
 inventing a fourth path.
 
-Note `bloodbank.v1.agent.session.ended` is misleadingly named: the Claude adapter maps
+Note `bloodbank.agent.session.ended` is misleadingly named: the Claude adapter maps
 its `Stop` hook to it, and `Stop` fires at the end of *every* assistant turn. It means
 "the agent stopped and is waiting for you", it fires many times per session, and it
 fires under `--dangerously-skip-permissions`.

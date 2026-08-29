@@ -92,9 +92,9 @@ RUSTC="$T/bin/rustc" "$T/bin/cargo" build --release --target wasm32-wasip1
 ```
 
 **7. Attribution: bus events carry no pane id.**
-A field census over 85 live `bloodbank.evt.v1.agent.>` envelopes found no
+A field census over 85 live `bloodbank.evt.agent.>` envelopes found no
 `pane|tab|zellij|pid|tty` field at all. `data.working_directory` plus `actor.cli` is the
-only attribution available there. The `deckard.evt.v1.attention` subject *does* carry
+only attribution available there. The `deckard.evt.attention` subject *does* carry
 `zellij_pane_id`. Inside a pane, `$ZELLIJ_PANE_ID` and `$ZELLIJ_SESSION_NAME` are real
 and are the correct source.
 

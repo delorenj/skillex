@@ -10,7 +10,7 @@ ledger write + outbox insert   (same transaction)
         ▼
 waxd drains every 10 s → natsclient → JetStream PubAck → outbox.published_at set
         ▼
-nats://127.0.0.1:4222 → Candystore 127.0.0.1:8683 (archives bloodbank.evt.v1.>)
+nats://127.0.0.1:4222 → Candystore 127.0.0.1:8683 (archives bloodbank.evt.>)
 ```
 
 Publishing is **fail-open**: a dead bus never stops a recording or a
@@ -41,7 +41,7 @@ events were published successfully and archived in Candystore throughout the
 five-day title-slug outage. Nobody was watching.
 
 The one channel that does fire is `bloodbank-event-toaster`, which forwards
-**every** `bloodbank.evt.v1.>` envelope to `ntfy.delo.sh/bloodbank` at priority 5.
+**every** `bloodbank.evt.>` envelope to `ntfy.delo.sh/bloodbank` at priority 5.
 Measured: **20,327 toasts in 24 h, 95.9 % of them `agent.tool.*`, and 10 (0.05 %)
 audio failures.** A signal placed in that topic is destroyed by the noise.
 
@@ -59,7 +59,7 @@ change, not part of a Wax fix.
 
 ## Subjects
 
-`bloodbank.evt.v1.audio.*` in flow order: `session.started` →
+`bloodbank.evt.audio.*` in flow order: `session.started` →
 (`session.ended` | `session.failed` | `session.canceled`) → `file.recorded` →
 `file.sent` → `transcription.started` →
 (`transcription.completed` | `transcription.failed`) →
