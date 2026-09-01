@@ -35,7 +35,14 @@ version = 1
 [[source]]
 name     = "pjangler"
 repo     = "git@github.com:delorenj/pjangler.git"
-version  = "v1.4.2"
+version  = "5f27761fb1c0b298146cb3eeae30f3687e448f97"
+# Pinned to a SHA, not to v1.4.2. That tag is the NEWEST tag pjangler has and it
+# is still 4 files behind main: config-mutation-safety.md, pm-deployment.md,
+# pm-deployment-contract.json and secret-migration.md were added after it and
+# never tagged. Vendoring the tag silently ROLLED BACK content the catalog
+# already had and broke 6 tests in test_hermes_pm_skill_contract.py, which read
+# three of those four files. A tag looks more rigorous than a branch; it is only
+# more rigorous if someone keeps cutting them.
 checkout = "pjangler"
 
 # -------------------------------------------------------------- bloodbank ----
