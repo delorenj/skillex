@@ -1,0 +1,57 @@
+{
+  "name": "@delorenj/skillex",
+  "version": "0.1.1",
+  "description": "Canonical skill catalog and activation management for agentic CLIs.",
+  "type": "module",
+  "license": "MIT",
+  "author": "Jarad DeLorenzo",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/delorenj/skillex.git"
+  },
+  "engines": {
+    "node": ">=24"
+  },
+  "bin": {
+    "skillex": "dist/cli.js"
+  },
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./package.json": "./package.json",
+    "./schemas/result.schema.json": "./schemas/result.schema.json",
+    "./schemas/skills.schema.json": "./skills.schema.json"
+  },
+  "files": [
+    "dist/**/*.js",
+    "dist/**/*.d.ts",
+    "schemas/result.schema.json",
+    "skills.schema.json"
+  ],
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "lint": "biome check src scripts tests/node schemas package.json tsconfig.json tsconfig.build.json biome.json",
+    "format": "biome check --write src scripts tests/node schemas package.json tsconfig.json tsconfig.build.json biome.json",
+    "typecheck": "tsc --noEmit",
+    "test": "npm run build && node --test tests/node/*.test.mjs",
+    "check": "npm run lint && npm run typecheck && npm test",
+    "prepack": "npm run build",
+    "prepublishOnly": "npm run check"
+  },
+  "dependencies": {
+    "commander": "^15.0.0"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.5.12",
+    "@types/node": "^24.13.3",
+    "esbuild": "^0.28.2",
+    "typescript": "^5.9.3"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

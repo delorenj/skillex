@@ -1,6 +1,6 @@
 # CLI Revamp
 
-Status: ready for implementation; this document plans the work and does not claim the Node CLI is implemented.
+Status: implementation in progress. SKRILL-10 provides the Node package foundation; operational commands and active-consumer migration remain open. See [foundation evidence](../implementation/cli-node-foundation.md).
 Owner: Jarad DeLorenzo. Planned 2026-09-06; finalized 2026-09-08.
 Board: Skillex (`SKRILL`), workspace `33god`.
 Delivery breakdown: [CLI Revamp tickets](../tasks/cli-revamp-tickets.md).

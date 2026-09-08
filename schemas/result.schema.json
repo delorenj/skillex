@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/delorenj/skillex/main/schemas/result.schema.json",
+  "title": "Skillex command result, version 2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "command", "ok", "exit", "data", "findings"],
+  "properties": {
+    "schema": { "const": 2 },
+    "command": { "type": "string", "minLength": 1 },
+    "ok": { "type": "boolean" },
+    "exit": { "enum": [0, 1, 2, 3, 4, 5, 6, 130] },
+    "data": {},
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["code", "severity", "message"],
+        "properties": {
+          "code": { "type": "string", "pattern": "^[EWI]_.+$" },
+          "severity": { "enum": ["error", "warning", "info"] },
+          "message": { "type": "string" },
+          "path": { "type": "string" },
+          "fix": { "type": "string" },
+          "scope": { "type": "string" },
+          "name": { "type": "string" },
+          "detail": { "type": "array", "items": { "type": "string" } }
+        }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "exit": { "const": 0 } } },
+      "then": {
+        "properties": {
+          "ok": { "const": true },
+          "findings": {
+            "items": { "properties": { "severity": { "not": { "const": "error" } } } }
+          }
+        }
+      },
+      "else": { "properties": { "ok": { "const": false } } }
+    }
+  ]
+}

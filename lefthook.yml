@@ -20,6 +20,8 @@ pre-commit:
 pre-push:
   parallel: false
   jobs:
+    - name: node-check
+      run: npm run check
     - name: lint
       run: uv run ruff check .
     - name: typecheck

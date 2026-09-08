@@ -33,23 +33,59 @@ script = "'{{config_root}}/.mise/scripts/link-agentfiles.sh' '{{config_root}}'"
 # `skillex sync` is a command you run, not a thing that happens to you.
 
 [tasks.install]
-description = "Install dependencies with uv"
-run = "uv sync"
+description = "Install Node dependencies and the Python migration reference"
+run = ["npm ci", "uv sync"]
 
 [tasks.test]
-description = "Run the test suite"
-run = "uv run pytest"
+description = "Test the installed Node package and Python characterization suite"
+depends = ["node:test", "python:test"]
 
 [tasks.lint]
-description = "Lint with ruff"
-run = "uv run ruff check ."
+description = "Check Node formatting and lint both implementations"
+depends = ["node:lint", "python:lint"]
 
 [tasks.fmt]
-description = "Format with ruff"
-run = "uv run ruff format ."
+description = "Format Node and Python source without touching skill definitions"
+depends = ["node:fmt", "python:fmt"]
 
 [tasks.tc]
-description = "Typecheck with mypy"
+description = "Typecheck the shared Node core and Python migration reference"
+depends = ["node:tc", "python:tc"]
+
+[tasks."node:test"]
+description = "Build and test an isolated npm tarball installation with Node's test runner"
+run = "npm test"
+
+[tasks."node:lint"]
+description = "Check Node source, tests, and package configuration with Biome"
+run = "npm run lint"
+
+[tasks."node:fmt"]
+description = "Format Node source, tests, and package configuration with Biome"
+run = "npm run format"
+
+[tasks."node:tc"]
+description = "Typecheck the Node CLI and public core API with TypeScript"
+run = "npm run typecheck"
+
+[tasks."node:check"]
+description = "Run all Node lint, type, build, and installed-package checks"
+run = "npm run check"
+
+[tasks."python:test"]
+description = "Run Python characterization tests until legacy retirement"
+run = "uv run pytest"
+
+[tasks."python:lint"]
+description = "Lint the Python migration reference with Ruff"
+run = "uv run ruff check ."
+
+[tasks."python:fmt"]
+description = "Format the Python migration reference with Ruff"
+run = "uv run ruff format ."
+
+[tasks."python:tc"]
+description = "Typecheck the Python migration reference with mypy"
 run = "uv run mypy src/skillex"
 
 [[watch_files]]
@@ -110,7 +146,11 @@ run = "'{{config_root}}/.mise/scripts/versioning.sh' sync"
 # <<< mise-versioning <<<
 
 [tasks.build]
-description = "Build distribution"
+description = "Build the Node executable and shared core declarations into dist/"
+run = "npm run build"
+
+[tasks."python:build"]
+description = "Build the Python distribution until legacy retirement"
 run = "uv build"
 
 [tasks.check]
@@ -122,8 +162,8 @@ description = "Audit strict single-source ownership (expected red until migratio
 run = "uv run skillex topology check --root '{{config_root}}'"
 
 [tasks.setup]
-description = "Install dependencies and git hooks"
-run = ["uv sync", "lefthook install"]
+description = "Install Node and Python dependencies and git hooks"
+run = ["npm ci", "uv sync", "lefthook install"]
 
 # PJAN-84: the GLOBAL projection — ~/.agents/skills.json into skill-sets/global,
 # which every CLI on this machine reads through a single dir-level alias. It

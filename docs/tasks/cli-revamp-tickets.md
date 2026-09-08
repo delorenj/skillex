@@ -4,9 +4,9 @@ Created and verified 2026-09-08 in Skillex (`SKRILL`), workspace `33god`.
 
 **Epic: [SKRILL-9 — CLI Revamp](https://plane.delo.sh/33god/projects/5aa8ec5c-3c66-49f9-b900-cca8a8446b65/issues/dd33b6f7-da3b-4a42-a4fa-94518ea341e9).**
 
-Thirteen child stories: twelve new Backlog issues plus the existing SKRILL-8, whose original request, Todo state, and urgent priority are preserved. The epic is represented as a parent issue with the descriptive `epic` label because native issue types are unavailable on this Plane instance.
+Thirteen child stories were created: twelve new Backlog issues plus the existing SKRILL-8, whose original request, Todo state, and urgent priority were preserved. The epic is represented as a parent issue with the descriptive `epic` label because native issue types are unavailable on this Plane instance.
 
-The [specification](../plan/cli-revamp.md) defines the retained behavior, new interfaces, defaults, and retirement gates. Implementation has not begun. Dependencies are recorded as clickable issue links in each description; these are not native blocker relations.
+The [specification](../plan/cli-revamp.md) defines the retained behavior, new interfaces, defaults, and retirement gates. SKRILL-10's package foundation is implemented and validated; see the [acceptance evidence](../implementation/cli-node-foundation.md). The remaining stories are open. Dependencies are recorded as clickable issue links in each description; these are not native blocker relations.
 
 | Order | Ticket | Priority | Size / points | Depends on |
 | --- | --- | --- | --- | --- |

@@ -2,7 +2,46 @@
 
 CLI-agnostic skill package manager. Define every skill once, compose it by reference, and expose the same activation root to every agentic CLI.
 
-**Status:** MVP in progress. See `docs/prd/skillex-mvp.md` and `docs/plan/skillex-mvp-plan.md`.
+**Status:** Node CLI revamp in progress. The package foundation supports help,
+version, structured errors, and an importable core. Operational commands still
+use the Python CLI while the remaining [CLI Revamp tickets](docs/tasks/cli-revamp-tickets.md)
+implement the [accepted command surface](docs/plan/cli-revamp.md).
+
+## Node development
+
+Use Node 24 or newer. From this checkout:
+
+```bash
+npm ci
+npm run check
+node dist/cli.js --help
+node dist/cli.js --version --json
+```
+
+`npm run check` runs Biome, TypeScript, the build, and tests against an isolated
+installation of the npm tarball. Those tests run the executable with only Node
+on its PATH and check that the catalog, activation roots, and user state stay
+unchanged. `npm pack` builds a publishable `@delorenj/skillex` tarball containing
+the runtime, declarations, and schemas. The npm package has no Python or uv
+dependency.
+
+The ESM core exports `makeResult`, `ExitCode`, `JSON_SCHEMA_VERSION`, `VERSION`,
+and their public types. JSON output follows
+[result schema 2](schemas/result.schema.json):
+
+```json
+{"schema":2,"command":"version","ok":true,"exit":0,"data":{"version":"0.1.1"},"findings":[]}
+```
+
+Process exits are 0 success, 1 execution failure, 2 configuration/arguments,
+3 refusal, 4 partial result, 5 lock contention, 6 drift, and 130 interruption.
+With `--json`, stdout contains one result envelope and stderr is empty. Human
+output puts errors on stderr.
+
+`mise run check` and the pre-push hook run both Node and Python checks during
+the migration. `mise run build` builds the Node package; `mise run python:build`
+retains the Python distribution build. `uv run skillex` continues to select the
+Python implementation until the consumer cutover tickets are complete.
 
 ## Architecture
 
