@@ -35,7 +35,7 @@ version = 1
 [[source]]
 name     = "pjangler"
 repo     = "git@github.com:delorenj/pjangler.git"
-version  = "5f27761fb1c0b298146cb3eeae30f3687e448f97"
+version  = "c505a0889f21eaf025c14d575e4e9531f4a4ef3f"
 # Pinned to a SHA, not to v1.4.2. That tag is the NEWEST tag pjangler has and it
 # is still 4 files behind main: config-mutation-safety.md, pm-deployment.md,
 # pm-deployment-contract.json and secret-migration.md were added after it and
