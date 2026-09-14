@@ -1,6 +1,7 @@
 # CLI Revamp
 
 Status: implementation in progress. SKRILL-10 provides the Node package foundation, SKRILL-11 adds canonical manifest resolution, SKRILL-12 provides catalog inspection, creation, and import commands, SKRILL-13 adds set and pack management, SKRILL-14 implements activation reconciliation, SKRILL-15 adds immediate scope selection and inheritance commands, SKRILL-16 adds status, explanations, and source/runtime diagnostics, SKRILL-17 adds offline upstream vendoring, and SKRILL-8 adds Hermes profile projection. Catalog migration, consumer integration and cutover, and Python retirement remain open. See [foundation evidence](../implementation/cli-node-foundation.md), [resolver evidence](../implementation/cli-manifest-resolution.md), [catalog evidence](../implementation/cli-catalog.md), [composition evidence](../implementation/cli-compositions.md), [reconciliation evidence](../implementation/cli-reconciliation.md), [selection evidence](../implementation/cli-selections.md), [diagnostic evidence](../implementation/cli-diagnostics.md), [vendoring evidence](../implementation/cli-vendoring.md), and [profile evidence](../implementation/cli-profiles.md).
+SKRILL-18 now provides [migration tooling](../implementation/cli-migration.md); its committed catalog conversion remains in progress.
 Owner: Jarad DeLorenzo. Planned 2026-09-06; finalized 2026-09-08.
 Board: Skillex (`SKRILL`), workspace `33god`.
 Delivery breakdown: [CLI Revamp tickets](../tasks/cli-revamp-tickets.md).

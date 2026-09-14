@@ -30,7 +30,7 @@ export interface ReceiptSnapshot<T> {
 
 /** Internal target binding; public activation entry points keep their existing namespace and path. */
 export interface ReceiptBinding {
-  readonly namespace: "activations" | "profiles";
+  readonly namespace: "activations" | "profiles" | "migrations";
   readonly targetParts: readonly string[];
 }
 
@@ -168,7 +168,7 @@ async function contextFor(
   binding: ReceiptBinding = activationBinding,
 ): Promise<Context> {
   if (
-    !["activations", "profiles"].includes(binding.namespace) ||
+    !["activations", "profiles", "migrations"].includes(binding.namespace) ||
     !binding.targetParts.length ||
     binding.targetParts.some(
       (part) =>

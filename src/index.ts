@@ -64,6 +64,13 @@ export type {
 export { SkillexError } from "./core/error.js";
 export { type LockOptions, withLock } from "./core/lock.js";
 export { isSkillName, isVersionComponent, parseManifest, readManifest } from "./core/manifest.js";
+export { migrate } from "./core/migration.js";
+export type {
+  MigrationItem,
+  MigrationMapping,
+  MigrationOptions,
+  MigrationResult,
+} from "./core/migration-types.js";
 export {
   addPackSkills,
   createPack,

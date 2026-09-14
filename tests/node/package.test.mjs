@@ -265,6 +265,7 @@ describe("published Node package", () => {
         type ProfileOptions, type ProfileSyncOptions, type ProfileListResult,
         type ProfileShowResult, type ProfileSyncResult, type ProfileLocation,
         type ProfileCandidate, type ProfileLocalEntry, type ProfileChange,
+        migrate, type MigrationOptions, type MigrationMapping, type MigrationResult,
         type Diagnostic, type ResultEnvelope, type Resolution, type ResolveOptions,
         type SkillListData, type SkillShowData,
       } from '${packageName}';
@@ -346,6 +347,11 @@ describe("published Node package", () => {
       });
       // @ts-expect-error Profile sync requires an explicit project; ambient CWD is insufficient.
       syncProfile('builder', profileOptions);
+      const migrationMapping: MigrationMapping = { version: 1, references: { 'packs/old/removed': null }, packs: { 'packs/old': { name: 'old', version: '0.1.0' } } };
+      const migrationOptions: MigrationOptions = { registryRoot: '/catalog', project: '/project', apply: false, mapping: migrationMapping };
+      const migration: Promise<ResultEnvelope<MigrationResult | null>> = migrate(migrationOptions);
+      // @ts-expect-error Migration mappings require a known schema version.
+      const invalidMapping: MigrationMapping = { version: 2 };
       // @ts-expect-error Public result types must preserve the data payload shape.
       result.data.missing;
       // @ts-expect-error Diagnostic severity is a fixed vocabulary.

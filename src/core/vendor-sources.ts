@@ -163,6 +163,20 @@ export async function readVendorSources(
       path,
       fix: "Declare the upstream sources in all-skills/sources.toml; onboard prepared declarations through skillex migrate.",
     });
+  const sources = parseVendorSourcesText(text, path);
+  for (const id of Object.keys(options.checkouts ?? {})) {
+    if (!sources.some((source) => source.checkout === id))
+      fail("E_SOURCE_CHECKOUT_UNKNOWN", `No declared source uses checkout ID ${id}.`, {
+        path,
+        fix: "Use a declared logical checkout ID with --checkout ID=PATH.",
+      });
+  }
+  checkVendorSignal(options);
+  return { path, registry, version: 1, sources };
+}
+
+/** Internal parser shared with explicit migration of a prepared declaration. */
+export function parseVendorSourcesText(text: string, path: string): readonly VendorSource[] {
   let raw: Record<string, unknown>;
   try {
     raw = parseToml(text);
@@ -178,15 +192,7 @@ export async function readVendorSources(
   const sources = ((raw.source ?? []) as unknown[]).map((source) => parseSource(source, path));
   if (new Set(sources.map((source) => source.name)).size !== sources.length)
     invalid(path, "Source names must be unique.");
-  for (const id of Object.keys(options.checkouts ?? {})) {
-    if (!sources.some((source) => source.checkout === id))
-      fail("E_SOURCE_CHECKOUT_UNKNOWN", `No declared source uses checkout ID ${id}.`, {
-        path,
-        fix: "Use a declared logical checkout ID with --checkout ID=PATH.",
-      });
-  }
-  checkVendorSignal(options);
-  return { path, registry, version: 1, sources };
+  return sources;
 }
 
 export function selectVendorSources(
