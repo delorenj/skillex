@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import {
   chmod,
   lstat,
@@ -10,6 +10,7 @@ import {
   readFile,
   readlink,
   realpath,
+  rename,
   rm,
   symlink,
   writeFile,
@@ -396,6 +397,96 @@ test("an explicitly renamed manifest-less pack preserves all content before reti
     "Preserved pack support\n",
   );
   assert.equal((await verifyPack("legacy-bundle", f.options)).exit, 0);
+});
+
+test("a case-only pack rename recovers interrupted publication and preserves canonical spelling", async (t) => {
+  const f = await fixture(t);
+  await f.skill(f.canonical("alpha"));
+  const source = f.pack("CaseBundle");
+  const destination = f.pack("casebundle");
+  await f.file(join(source, "run.sh"), "#!/bin/sh\nprintf preserved\n", 0o755);
+  await symlink("../../all-skills/alpha", join(source, "alpha"));
+  const original = await lstat(source, { bigint: true });
+  const caseFolded = existsSync(destination);
+  const options = {
+    ...f.options,
+    mapping: {
+      version: 1,
+      packs: { "packs/CaseBundle": { name: "casebundle", version: "1.0.0" } },
+    },
+  };
+  const before = await snapshot(f.root);
+  resultIs(await migrate(options), 0);
+  assert.deepEqual(await snapshot(f.root), before);
+  const interrupted = await migrate({
+    ...options,
+    apply: true,
+    signal: {
+      get aborted() {
+        try {
+          return JSON.parse(readFileSync(registryReceipt(f), "utf8")).data.phase === "ready";
+        } catch {
+          return false;
+        }
+      },
+    },
+  });
+  resultIs(interrupted, 130, "E_INTERRUPTED");
+  const pending = JSON.parse(await readFile(registryReceipt(f), "utf8"));
+  const operation = pending.data.operations[0];
+  assert.equal(operation.path, destination);
+  assert.ok(operation.after);
+  if (caseFolded) {
+    // A case-insensitive filesystem aliases the two spellings. Simulate a
+    // crash after the original entry was parked but before publication.
+    assert.equal(pending.data.operations.length, 1);
+    assert.equal(operation.before.root.dev, String(original.dev));
+    assert.equal(operation.before.root.ino, String(original.ino));
+    assert.ok(operation.parked);
+    await rename(operation.path, operation.parked);
+  } else {
+    // On a case-sensitive filesystem, the independent new destination can
+    // publish first. Simulate a crash before the old spelling is retired.
+    assert.equal(pending.data.operations.length, 2);
+    assert.equal(operation.before, null);
+    await rename(operation.stage, operation.path);
+  }
+  resultIs(await migrate({ ...options, apply: true }), 0);
+  assert.deepEqual(await readdir(join(f.registryRoot, "packs")), ["casebundle"]);
+  assert.equal(
+    await readFile(join(destination, "run.sh"), "utf8"),
+    "#!/bin/sh\nprintf preserved\n",
+  );
+  assert.equal((await lstat(join(destination, "run.sh"))).mode & 0o777, 0o755);
+  assert.equal((await verifyPack("casebundle", f.options)).exit, 0);
+  assert.equal(JSON.parse(await readFile(registryReceipt(f), "utf8")).data.phase, "complete");
+  const converged = await snapshot(f.root);
+  assert.deepEqual(resultIs(await migrate({ ...options, apply: true }), 0).applied, []);
+  assert.deepEqual(await snapshot(f.root), converged);
+});
+
+test("mapped composition renames refuse a distinct existing destination even with identical content", async (t) => {
+  const f = await fixture(t);
+  const source = f.pack("CaseBundle");
+  await f.file(join(source, "README.md"), "Preserved support\n");
+  // Two differently cased entries can coexist only on a case-sensitive
+  // filesystem; elsewhere use a distinct mapped name for the same refusal.
+  const name = existsSync(f.pack("casebundle")) ? "casebundle-other" : "casebundle";
+  const destination = f.pack(name);
+  await f.file(join(destination, "README.md"), "Preserved support\n");
+  const before = await snapshot(f.root);
+  const result = await migrate({
+    ...f.options,
+    apply: true,
+    mapping: { version: 1, packs: { "packs/CaseBundle": { name, version: "1.0.0" } } },
+  });
+  resultIs(result, 3, "E_MIGRATION_COMPOSITION");
+  assert.ok(
+    result.findings.some(
+      (finding) => finding.code === "E_MIGRATION_COMPOSITION" && finding.path === destination,
+    ),
+  );
+  assert.deepEqual(await snapshot(f.root), before);
 });
 
 test("explicitly retiring the stale Kurzgesagt creator reference preserves other creator definitions", async (t) => {

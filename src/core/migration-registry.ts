@@ -89,6 +89,24 @@ function canonicalPath(plan: Plan, name: string): string {
 function payloadDigest(entries: readonly MigrationEntry[]): string {
   return migrationTreeDigest(entries.filter((entry) => entry.path !== ".source.yaml"));
 }
+async function sameCaseOnlyEntry(
+  source: string,
+  destination: string,
+  before: MigrationTreeEvidence,
+): Promise<boolean> {
+  if (
+    dirname(source) !== dirname(destination) ||
+    basename(source) === basename(destination) ||
+    basename(source).toLowerCase() !== basename(destination).toLowerCase()
+  )
+    return false;
+  const names = await readdir(dirname(source));
+  // A case-folded lookup must name the existing source directory entry, not
+  // a distinct entry with matching content or a hard-linked symbolic link.
+  if (!names.includes(basename(source)) || names.includes(basename(destination))) return false;
+  const destinationTree = await captureMigrationTree(destination);
+  return JSON.stringify(destinationTree?.evidence) === JSON.stringify(before);
+}
 function externalSource(plan: Plan, source: string): void {
   if (!isWithin(plan.registry.root, source)) plan.externalRoots.add(source);
   if (isWithin(source, plan.registry.root))
@@ -916,10 +934,13 @@ async function composition(plan: Plan, path: string, kind: "set" | "pack"): Prom
     ],
     dependsOn: dependencies,
   };
-  plan.items.push(item);
+  const itemIndex = plan.items.push(item) - 1;
   if (!hasBlocker && changed) {
     if (destination !== path) {
-      if (await migrationLstat(destination))
+      const destinationExists = await migrationLstat(destination);
+      const caseOnly =
+        destinationExists && (await sameCaseOnlyEntry(path, destination, before.evidence));
+      if (destinationExists && !caseOnly)
         refuse(
           destination,
           "E_MIGRATION_COMPOSITION",
@@ -931,17 +952,25 @@ async function composition(plan: Plan, path: string, kind: "set" | "pack"): Prom
         path: destination,
         target: path,
       };
-      plan.items.push(createItem);
-      plan.operations.push({ item: createItem, before: null, entries });
-      plan.operations.push({
-        item: {
-          ...item,
-          action: "retire-legacy-composition",
-          dependsOn: [...dependencies, createItem.id],
-        },
-        before: before.evidence,
-        entries: null,
-      });
+      if (caseOnly) {
+        // The normal staged replacement parks the exact original entry and
+        // publishes its replacement with the requested spelling. A separate
+        // retirement would resolve to, and could remove, the new entry.
+        plan.items[itemIndex] = createItem;
+        plan.operations.push({ item: createItem, before: before.evidence, entries });
+      } else {
+        plan.items.push(createItem);
+        plan.operations.push({ item: createItem, before: null, entries });
+        plan.operations.push({
+          item: {
+            ...item,
+            action: "retire-legacy-composition",
+            dependsOn: [...dependencies, createItem.id],
+          },
+          before: before.evidence,
+          entries: null,
+        });
+      }
     } else plan.operations.push({ item, before: before.evidence, entries });
   }
 }
