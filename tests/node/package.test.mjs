@@ -248,6 +248,9 @@ describe("published Node package", () => {
         createSet, addSetSkills, removeSetSkills, listSets, showSet,
         createPack, addPackSkills, removePackSkills, listPacks, showPack, verifyPack,
         withLock, type LockOptions, type CompositionDetails,
+        planSync, sync, type SyncOptions, type SyncPlan, type SyncResult,
+        readActivationReceipt, writeActivationReceipt, type ReceiptSnapshot,
+        aliasPaths, GLOBAL_CLI_ALIASES, PROJECT_CLI_ALIASES,
         type Diagnostic, type ResultEnvelope, type Resolution, type ResolveOptions,
         type SkillListData, type SkillShowData,
       } from '${packageName}';
@@ -285,6 +288,14 @@ describe("published Node package", () => {
       const composition: CompositionDetails = { kind: 'set', name: 'example', path: '/catalog/sets/example', skills: [] };
       const lockOptions: LockOptions = { stateHome: '/state', timeoutMs: 200, env: {} };
       const locked: Promise<{ value: number }> = withLock('resource', async () => ({ value: 42 }), lockOptions);
+      const syncOptions: SyncOptions = { scope: 'both', registryRoot: '/catalog', home: '/home/example', project: '/project', stateHome: '/state', dryRun: true, exitCode: true, signal: { aborted: false } };
+      const preview: Promise<ResultEnvelope<SyncPlan | null>> = planSync(syncOptions);
+      const activation: Promise<ResultEnvelope<SyncResult | null>> = sync(syncOptions);
+      const receipt: Promise<ReceiptSnapshot<{ generation: number }>> = readActivationReceipt('/project', { stateHome: '/state' });
+      receipt.then(snapshot => writeActivationReceipt(snapshot, { generation: 1 }, { stateHome: '/state' }));
+      const aliases: readonly string[] = aliasPaths('/project', 'project');
+      const globalAliases: readonly string[] = GLOBAL_CLI_ALIASES;
+      const projectAliases: readonly string[] = PROJECT_CLI_ALIASES;
       // @ts-expect-error Public result types must preserve the data payload shape.
       result.data.missing;
       // @ts-expect-error Diagnostic severity is a fixed vocabulary.

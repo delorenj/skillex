@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { Command, CommanderError } from "commander";
 import { registerCompositionCommands } from "./commands/compositions.js";
+import { registerSyncCommand } from "./commands/sync.js";
 import {
   createSkill,
   ExitCode,
@@ -199,6 +200,7 @@ function mutationText(
 }
 
 registerCompositionCommands(program, { emit, help });
+registerSyncCommand(program, { emit });
 
 // Stop each parser at its subcommand so a parent cannot consume a local flag
 // such as pack create --version. Repeat shared flags at each level to retain
