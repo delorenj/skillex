@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { link, mkdir, readdir, realpath, rename, rmdir, symlink, unlink } from "node:fs/promises";
+import { mkdir, readdir, realpath, rename, rmdir, symlink, unlink } from "node:fs/promises";
 import { basename, dirname, join, relative, resolve, sep } from "node:path";
 import { promisify } from "node:util";
 import {
@@ -665,15 +665,33 @@ async function recover(work: ScopeWork): Promise<void> {
   for (const [path, expected] of work.directories)
     await requireIdentity(physicalPath(path, recovery), expected);
   if (recovery.restore) {
-    if (await entry(journal.path))
-      refuse(journal.path, "Foreign content blocks restoration of the parked root.");
-    if (journal.previous) await inspectOwnedNode(journal.parked, journal.previous);
-    await rename(journal.parked, journal.path);
+    if (journal.previous)
+      await publishPrepared(work, journal.parked, journal.path, journal.previous, work.directories);
   }
   if (journal.next && (await entry(journal.stage))) await removeNode(journal.stage, journal.next);
   if (journal.previous && (await entry(journal.parked)))
     await removeNode(journal.parked, journal.previous);
   await writeActivationReceipt(work.snapshot, recovery.data, work.receiptOptions);
+}
+
+async function publishPrepared(
+  work: ScopeWork,
+  staged: string,
+  destination: string,
+  node: OwnedNode,
+  directories: ReadonlyMap<string, EntryIdentity>,
+): Promise<void> {
+  await checkParents(work, staged, directories);
+  await checkParents(work, destination, directories);
+  await inspectOwnedNode(staged, node);
+  if (await entry(destination))
+    refuse(destination, "Foreign content blocks activation publication.");
+  // rename preserves the staged symlink inode on every supported platform.
+  // link() follows the source symlink on macOS, so it cannot publish aliases.
+  // The lock and immediate absence check guard cooperating writers; this is
+  // not an atomic no-clobber primitive against nonparticipating external writes.
+  await rename(staged, destination);
+  await requireIdentity(destination, node.identity);
 }
 
 async function stageNode(
@@ -806,13 +824,7 @@ async function executeScope(
       await inspectOwnedNode(stage, next);
       await verifyOperationSources(work, operation);
       checkCancelled(work.options, operation.path);
-      if (await entry(operation.path))
-        refuse(operation.path, "Foreign content blocks activation publication.");
-      if (next.identity.kind === "link") {
-        await link(stage, operation.path);
-        await unlink(stage);
-      } else await rename(stage, operation.path);
-      await requireIdentity(operation.path, next.identity);
+      await publishPrepared(work, stage, operation.path, next, directories);
     }
     if (operation.previous) await removeNode(parked, operation.previous);
     data = replaceOwnership(data, operation.path, next);

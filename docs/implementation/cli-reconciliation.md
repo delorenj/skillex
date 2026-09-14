@@ -77,6 +77,13 @@ The selected activation and CLI alias destinations must share the staging
 directory's filesystem. Cross-device changes fail during preflight with
 `E_ACTIVATION_FILESYSTEM`, before any activation or state writes.
 
+Publication renames the prepared object after checking its identity, destination
+parents, sources, and destination absence. This preserves the journaled symlink
+inode on Linux and macOS; macOS's
+[hard-link operation follows the source symlink](https://github.com/apple-oss-distributions/xnu/blob/main/bsd/man/man2/link.2).
+The ownership lock coordinates Skillex writers. It does not make the final
+absence check and rename atomic against unrelated filesystem writers.
+
 The first Ctrl-C requests cancellation at a safe boundary and reports exit 130.
 If writes have started, the result includes the completed changes and a partial
 application finding. The next sync verifies the saved journal, recovers owned
@@ -100,8 +107,8 @@ other integrations with their own installation lifecycle.
 
 ## Acceptance evidence
 
-Node 24.15.0 and 26.5.0 each pass 432 tests, with one filesystem-owner test
-skipped because it requires root. This includes 32 reconciliation cases,
+Node 24.15.0 and 26.5.0 each pass 434 tests, with one filesystem-owner test
+skipped because it requires root. This includes 34 reconciliation cases,
 26 receipt cases, and 23 installed sync CLI cases. The installed package's
 public declarations also compile in an isolated TypeScript consumer without
 Node type dependencies. Biome and TypeScript checks pass.
@@ -111,7 +118,9 @@ idempotency, pack transitions, alias reachability, exact owned pruning,
 foreign-content survival, and real catalog/pack Git revision receipts.
 Injected failures exercise root replacement, source changes after journaling,
 cross-device refusal, and preserving global stale links when a project addition
-fails. Child processes prove contention, interrupted publication, dead-writer
+fails. Publication tests cover symlink-hard-link refusal and foreign content
+appearing after a journal save. Child processes prove contention, interrupted
+publication, dead-writer
 recovery with changed manifest intent, and installed CLI SIGINT handling.
 
 The retained Python reference passes 890 tests, with five missing-pack fixture

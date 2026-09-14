@@ -441,10 +441,11 @@ import { syncBuiltinESMExports } from 'node:module';
 import { basename, join } from 'node:path';
 const options = JSON.parse(process.argv[1]);
 const mode = process.argv[2];
-const original = fs.link;
-fs.link = async (...args) => {
+const original = fs.rename;
+fs.rename = async (...args) => {
+  const staged = basename(args[0]).startsWith('.skillex-tmp-') && basename(args[0]).endsWith('-new');
   const destination = args[1];
-  const selected = mode.startsWith('root') ? destination === join(options.project ?? options.cwd, '.agents', 'skills') : basename(destination) === 'beta';
+  const selected = staged && (mode.startsWith('root') ? destination === join(options.project ?? options.cwd, '.agents', 'skills') : basename(destination) === 'beta');
   if (selected) {
     if (mode === 'published-kill') { await original(...args); process.exit(75); }
     if (mode === 'foreign') await fs.writeFile(destination, 'Foreign interference\\n');
@@ -582,10 +583,15 @@ const mode = process.argv[2];
 const root = join(options.cwd, '.agents', 'skills');
 const originalStat = fs.lstat;
 const originalRename = fs.rename;
+const originalLink = fs.link;
 const controller = new AbortController();
 if (mode === 'cancel') options.signal = controller.signal;
 let reads = 0;
 let changed = false;
+fs.link = async (...args) => {
+  if (mode === 'followed-hardlink' && (await originalStat(args[0])).isSymbolicLink()) throw Object.assign(new Error('Directory hard links are not permitted'), { code: 'EPERM' });
+  return originalLink(...args);
+};
 fs.lstat = async (...args) => {
   if (mode === 'root-swap' && args[0] === root && ++reads === 5) {
     await originalRename(root, join(options.cwd, 'parked-original'));
@@ -605,6 +611,7 @@ fs.rename = async (...args) => {
       if (mode === 'source-skill') await fs.unlink(join(options.registryRoot, 'all-skills', 'beta', 'SKILL.md'));
       if (mode === 'source-pack') await fs.unlink(join(options.registryRoot, 'packs', 'tools', '1.0.0', 'skills', 'alpha'));
       if (mode === 'cancel') controller.abort();
+      if (mode === 'foreign-after-journal') await fs.writeFile(receipt.data.pending.path, 'Foreign arrival before publication\\n');
     }
   }
   return result;
@@ -755,4 +762,37 @@ it("refuses cross-device alias staging during readonly preflight", async (t) => 
   assert.match(refusal.fix, /same local filesystem/);
   assert.deepEqual(snapshot(f.root), before);
   assert.equal(existsSync(f.stateHome), false);
+});
+
+it("publishes owned aliases when hard-linking symbolic links is unsupported", async (t) => {
+  const f = fixture(t);
+  f.skill("alpha");
+  f.manifest("project", { inherit_global: false, skills: ["alpha"] });
+  const result = ok(injectBoundary({ ...f.options, scope: "project" }, "followed-hardlink"));
+  const ownership = receipt(result).value.data.links;
+  for (const relativePath of PROJECT_CLI_ALIASES) {
+    const path = join(f.project, relativePath);
+    assert.equal(realpathSync(path), activation(f.project));
+    assert.equal(ownership[path].ino, String(lstatSync(path, { bigint: true }).ino));
+    assert.equal(ownership[path].raw, readlinkSync(path));
+  }
+  assert.deepEqual(ok(await planSync({ ...f.options, scope: "project" })).changes, []);
+});
+
+it("refuses a foreign entry that arrives after journaling before guarded publication", async (t) => {
+  const f = fixture(t);
+  f.skill("beta");
+  const options = { ...f.options, scope: "project" };
+  f.manifest("project", { inherit_global: false });
+  ok(await sync(options));
+  f.manifest("project", { inherit_global: false, skills: ["beta"] });
+  const result = injectBoundary(options, "foreign-after-journal");
+  finding(result, "E_ACTIVATION_CONFLICT", 4);
+  finding(result, "E_SYNC_PARTIAL", 4);
+  assert.equal(
+    readFileSync(join(activation(f.project), "beta"), "utf8"),
+    "Foreign arrival before publication\n",
+  );
+  assert.ok(!receipt(result.data).value.data.links[join(activation(f.project), "beta")]);
+  assert.ok(receipt(result.data).value.data.pending);
 });
