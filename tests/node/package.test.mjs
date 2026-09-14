@@ -245,6 +245,9 @@ describe("published Node package", () => {
         ExitCode, JSON_SCHEMA_VERSION, VERSION, makeResult,
         discoverRegistry, parseManifest, resolveSelection,
         createSkill, importSkill, listSkills, showSkill,
+        createSet, addSetSkills, removeSetSkills, listSets, showSet,
+        createPack, addPackSkills, removePackSkills, listPacks, showPack, verifyPack,
+        withLock, type LockOptions, type CompositionDetails,
         type Diagnostic, type ResultEnvelope, type Resolution, type ResolveOptions,
         type SkillListData, type SkillShowData,
       } from '${packageName}';
@@ -268,6 +271,20 @@ describe("published Node package", () => {
       const detail: Promise<ResultEnvelope<SkillShowData | null>> = showSkill('example', { registryRoot: '/catalog' });
       createSkill('example', { registryRoot: '/catalog', dryRun: true, description: 'Example skill.' });
       importSkill('/source/example', 'imported-example', { registryRoot: '/catalog', dryRun: true });
+      createSet('example', { registryRoot: '/catalog', dryRun: true });
+      addSetSkills('example', ['one'], { registryRoot: '/catalog', dryRun: true });
+      removeSetSkills('example', ['one'], { registryRoot: '/catalog', dryRun: true });
+      listSets({ registryRoot: '/catalog' });
+      showSet('example', { registryRoot: '/catalog' });
+      createPack('example', '1.0.0', { registryRoot: '/catalog', dryRun: true, description: 'Example pack' });
+      addPackSkills('example@1.0.0', ['one'], { registryRoot: '/catalog', dryRun: true });
+      removePackSkills('example@1.0.0', ['one'], { registryRoot: '/catalog', dryRun: true });
+      listPacks({ registryRoot: '/catalog' });
+      showPack('example@1.0.0', { registryRoot: '/catalog' });
+      verifyPack('example@1.0.0', { registryRoot: '/catalog' });
+      const composition: CompositionDetails = { kind: 'set', name: 'example', path: '/catalog/sets/example', skills: [] };
+      const lockOptions: LockOptions = { stateHome: '/state', timeoutMs: 200, env: {} };
+      const locked: Promise<{ value: number }> = withLock('resource', async () => ({ value: 42 }), lockOptions);
       // @ts-expect-error Public result types must preserve the data payload shape.
       result.data.missing;
       // @ts-expect-error Diagnostic severity is a fixed vocabulary.

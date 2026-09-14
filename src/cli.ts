@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { Command, CommanderError } from "commander";
+import { registerCompositionCommands } from "./commands/compositions.js";
 import {
   createSkill,
   ExitCode,
@@ -29,6 +30,7 @@ const program = new Command()
   .version(VERSION, "-V, --version", "Show the installed package version.")
   .option("--json", "Emit a structured result on stdout.")
   .option("--registry-root <path>", "Use this local registry checkout for catalog operations.")
+  .enablePositionalOptions()
   .allowExcessArguments(false)
   .configureOutput({
     writeOut: (text) => {
@@ -196,6 +198,47 @@ function mutationText(
     : summary;
 }
 
+registerCompositionCommands(program, { emit, help });
+
+// Stop each parser at its subcommand so a parent cannot consume a local flag
+// such as pack create --version. Repeat shared flags at each level to retain
+// their supported placement before or after the command and its arguments.
+function registerSharedOptions(parent: Command): void {
+  for (const command of parent.commands) {
+    command
+      .enablePositionalOptions()
+      .option("--json", "Emit a structured result on stdout.")
+      .option("--registry-root <path>", "Use this local registry checkout.")
+      .version(
+        VERSION,
+        command.options.some((option) => option.long === "--version") ? "-V" : "-V, --version",
+        "Show the installed package version.",
+      );
+    registerSharedOptions(command);
+  }
+}
+
+registerSharedOptions(program);
+
+function parseSharedOptions(): string[] {
+  // Parse shared flags once across command levels. Besides preserving their
+  // last-occurrence precedence, this prevents a missing local option value
+  // (for example --query --json) from consuming an output or registry flag.
+  const shared = new Command()
+    .option("--json")
+    .option("--registry-root <path>")
+    .configureOutput({ writeOut: () => {}, writeErr: () => {} })
+    .exitOverride();
+  const parsed = shared.parseOptions(flags);
+  const { registryRoot } = shared.opts<CliOptions>();
+  if (registryRoot !== undefined) program.setOptionValue("registryRoot", registryRoot);
+  return [
+    ...parsed.operands,
+    ...parsed.unknown,
+    ...(terminator === -1 ? [] : args.slice(terminator)),
+  ];
+}
+
 try {
   if (Number(process.versions.node.split(".")[0]) < 24) {
     emit(
@@ -212,7 +255,7 @@ try {
       }),
     );
   } else {
-    await program.parseAsync(args, { from: "user" });
+    await program.parseAsync(parseSharedOptions(), { from: "user" });
     if (!handled) help(program);
   }
 } catch (error) {

@@ -1,6 +1,6 @@
 # CLI Revamp
 
-Status: implementation in progress. SKRILL-10 provides the Node package foundation, SKRILL-11 adds canonical manifest resolution, and SKRILL-12 provides catalog inspection, creation, and import commands. Composition management, activation, and active-consumer migration remain open. See [foundation evidence](../implementation/cli-node-foundation.md), [resolver evidence](../implementation/cli-manifest-resolution.md), and [catalog evidence](../implementation/cli-catalog.md).
+Status: implementation in progress. SKRILL-10 provides the Node package foundation, SKRILL-11 adds canonical manifest resolution, SKRILL-12 provides catalog inspection, creation, and import commands, and SKRILL-13 adds set and pack management. Activation and active-consumer migration remain open. See [foundation evidence](../implementation/cli-node-foundation.md), [resolver evidence](../implementation/cli-manifest-resolution.md), [catalog evidence](../implementation/cli-catalog.md), and [composition evidence](../implementation/cli-compositions.md).
 Owner: Jarad DeLorenzo. Planned 2026-09-06; finalized 2026-09-08.
 Board: Skillex (`SKRILL`), workspace `33god`.
 Delivery breakdown: [CLI Revamp tickets](../tasks/cli-revamp-tickets.md).

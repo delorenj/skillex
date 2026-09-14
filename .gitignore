@@ -13,6 +13,9 @@ build/
 htmlcov/
 _bmad/_memory/
 
+# Atomic pack-manifest staging files can survive an interrupted source edit.
+.pack.toml.*.tmp
+
 # Generated source-command shims should not be committed as skill-set entries.
 skill-sets/*/source-command-*
 agents/hermes/pm/runtime/

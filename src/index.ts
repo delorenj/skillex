@@ -15,9 +15,28 @@ export {
   createSkill,
   importSkill,
 } from "./core/catalog-write.js";
+export type {
+  CompositionChange,
+  CompositionDetails,
+  CompositionMutationData,
+  CompositionOptions,
+  PackListData,
+  PackShowData,
+  SetListData,
+  SetShowData,
+} from "./core/composition-types.js";
 export { discoverRegistry, discoverScopes } from "./core/discovery.js";
 export { SkillexError } from "./core/error.js";
+export { type LockOptions, withLock } from "./core/lock.js";
 export { isSkillName, isVersionComponent, parseManifest, readManifest } from "./core/manifest.js";
+export {
+  addPackSkills,
+  createPack,
+  listPacks,
+  removePackSkills,
+  showPack,
+  verifyPack,
+} from "./core/packs.js";
 export { resolveSelection } from "./core/resolution.js";
 export {
   type Diagnostic,
@@ -47,4 +66,5 @@ export type {
   SkillsManifest,
   WriteScope,
 } from "./core/selection.js";
+export { addSetSkills, createSet, listSets, removeSetSkills, showSet } from "./core/sets.js";
 export { VERSION } from "./version.js";
