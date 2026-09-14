@@ -28,7 +28,19 @@ export interface ReceiptSnapshot<T> {
   readonly document?: ReceiptDocument<T>;
 }
 
+/** Internal target binding; public activation entry points keep their existing namespace and path. */
+export interface ReceiptBinding {
+  readonly namespace: "activations" | "profiles";
+  readonly targetParts: readonly string[];
+}
+
+const activationBinding: ReceiptBinding = Object.freeze({
+  namespace: "activations",
+  targetParts: Object.freeze([".agents", "skills"]),
+});
+
 interface Context {
+  readonly binding: ReceiptBinding;
   readonly scopeRoot: string;
   readonly scopeIdentity: BigIntStats;
   readonly activationRoot: string;
@@ -150,7 +162,32 @@ async function canonicalEvenIfMissing(path: string): Promise<string> {
   }
 }
 
-async function contextFor(scopeRoot: string, options: ReceiptOptions): Promise<Context> {
+async function contextFor(
+  scopeRoot: string,
+  options: ReceiptOptions,
+  binding: ReceiptBinding = activationBinding,
+): Promise<Context> {
+  if (
+    !["activations", "profiles"].includes(binding.namespace) ||
+    !binding.targetParts.length ||
+    binding.targetParts.some(
+      (part) =>
+        !part ||
+        part === "." ||
+        part === ".." ||
+        part.includes("/") ||
+        part.includes("\\") ||
+        part.includes("\0"),
+    )
+  )
+    fail(
+      "E_RECEIPT_CONFIG",
+      "Receipt target binding must use a known namespace and safe path components.",
+    );
+  const capturedBinding: ReceiptBinding = Object.freeze({
+    namespace: binding.namespace,
+    targetParts: Object.freeze([...binding.targetParts]),
+  });
   const home = pathOption(options.home ?? homedir(), homedir(), "home");
   const env = options.env ?? process.env;
   const stateHome = pathOption(
@@ -161,19 +198,20 @@ async function contextFor(scopeRoot: string, options: ReceiptOptions): Promise<C
   const canonicalScope = await realpath(pathOption(scopeRoot, home, "scopeRoot"));
   const scopeIdentity = await lstat(canonicalScope, { bigint: true });
   realOwned(canonicalScope, scopeIdentity, true, false);
-  const activationRoot = join(canonicalScope, ".agents", "skills");
+  const activationRoot = join(canonicalScope, ...capturedBinding.targetParts);
   const key = createHash("sha256").update(activationRoot).digest("hex");
   const forbiddenRoots: string[] = [];
   for (const root of options.forbiddenRoots ?? []) {
     forbiddenRoots.push(await canonicalEvenIfMissing(pathOption(root, home, "forbiddenRoots")));
   }
   return {
+    binding: capturedBinding,
     scopeRoot: canonicalScope,
     scopeIdentity,
     activationRoot,
     home,
     stateHome,
-    path: join(stateHome, "skillex", "activations", "v2", `${key}.json`),
+    path: join(stateHome, "skillex", capturedBinding.namespace, "v2", `${key}.json`),
     forbiddenRoots,
   };
 }
@@ -333,9 +371,18 @@ export async function readActivationReceipt<T = unknown>(
   scopeRoot: string,
   options: ReceiptOptions = {},
 ): Promise<ReceiptSnapshot<T>> {
+  return readBoundReceipt<T>(scopeRoot, activationBinding, options);
+}
+
+/** Internal shared state IO; callers supply a fixed target binding, never user-directed receipt paths. */
+export async function readBoundReceipt<T = unknown>(
+  scopeRoot: string,
+  binding: ReceiptBinding,
+  options: ReceiptOptions = {},
+): Promise<ReceiptSnapshot<T>> {
   let path = scopeRoot;
   try {
-    const context = await contextFor(scopeRoot, options);
+    const context = await contextFor(scopeRoot, options, binding);
     path = context.path;
     const parents = await inspectParents(context);
     const file = await readStored(path);
@@ -416,6 +463,15 @@ export async function writeActivationReceipt<T>(
   data: T,
   options: ReceiptOptions = {},
 ): Promise<ReceiptSnapshot<T>> {
+  return writeBoundReceipt(previous, data, options);
+}
+
+/** Writes retain the original binding and exact opaque snapshot evidence. */
+export async function writeBoundReceipt<T>(
+  previous: ReceiptSnapshot<T>,
+  data: T,
+  options: ReceiptOptions = {},
+): Promise<ReceiptSnapshot<T>> {
   const prior = evidence.get(previous);
   if (!prior)
     refused(
@@ -433,10 +489,14 @@ export async function writeActivationReceipt<T>(
     const selected = hasLocation
       ? options
       : { ...options, home: prior.context.home, stateHome: prior.context.stateHome, env: {} };
-    const context = await contextFor(previous.scopeRoot, {
-      ...selected,
-      forbiddenRoots: [...prior.context.forbiddenRoots, ...(options.forbiddenRoots ?? [])],
-    });
+    const context = await contextFor(
+      previous.scopeRoot,
+      {
+        ...selected,
+        forbiddenRoots: [...prior.context.forbiddenRoots, ...(options.forbiddenRoots ?? [])],
+      },
+      prior.context.binding,
+    );
     if (
       context.path !== prior.context.path ||
       context.scopeRoot !== prior.context.scopeRoot ||

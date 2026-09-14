@@ -261,6 +261,10 @@ describe("published Node package", () => {
         listVendorSources, showVendorSource, inspectVendorStatus, syncVendorSources,
         type VendorOptions, type VendorSyncOptions, type VendorSourceListResult,
         type VendorSourceShowResult, type VendorStatusResult, type VendorSyncResult,
+        listProfiles, showProfile, syncProfile,
+        type ProfileOptions, type ProfileSyncOptions, type ProfileListResult,
+        type ProfileShowResult, type ProfileSyncResult, type ProfileLocation,
+        type ProfileCandidate, type ProfileLocalEntry, type ProfileChange,
         type Diagnostic, type ResultEnvelope, type Resolution, type ResolveOptions,
         type SkillListData, type SkillShowData,
       } from '${packageName}';
@@ -326,6 +330,22 @@ describe("published Node package", () => {
       const vendorStatus: Promise<ResultEnvelope<VendorStatusResult | null>> = inspectVendorStatus(vendorOptions);
       const vendorSyncOptions: VendorSyncOptions = { ...vendorOptions, stateHome: '/state', dryRun: true, adopt: true, discardLocalEdits: true, prune: true, timeoutMs: 200 };
       const vendorSync: Promise<ResultEnvelope<VendorSyncResult | null>> = syncVendorSources(vendorSyncOptions);
+      const profileOptions: ProfileOptions = { hermesRoot: '/hermes', registryRoot: '/catalog', home: '/home/example', cwd: '/unrelated', stateHome: '/state', signal: { aborted: false }, timeoutMs: 200 };
+      const profileList: Promise<ResultEnvelope<ProfileListResult | null>> = listProfiles(profileOptions);
+      const profileShow: Promise<ResultEnvelope<ProfileShowResult | null>> = showProfile('builder', { ...profileOptions, project: '/project' });
+      const profileSyncOptions: ProfileSyncOptions = { ...profileOptions, project: '/project', dryRun: true };
+      const profileSync: Promise<ResultEnvelope<ProfileSyncResult | null>> = syncProfile('builder', profileSyncOptions);
+      profileSync.then(result => {
+        if (result.data === null) return;
+        const location: ProfileLocation = result.data.profile;
+        const managed: readonly ProfileCandidate[] | null = result.data.managed;
+        const preserved: readonly ProfileLocalEntry[] = result.data.preserved;
+        const changes: readonly ProfileChange[] = result.data.changes;
+        const applied: readonly ProfileChange[] = result.data.applied;
+        const project: string = result.data.project;
+      });
+      // @ts-expect-error Profile sync requires an explicit project; ambient CWD is insufficient.
+      syncProfile('builder', profileOptions);
       // @ts-expect-error Public result types must preserve the data payload shape.
       result.data.missing;
       // @ts-expect-error Diagnostic severity is a fixed vocabulary.

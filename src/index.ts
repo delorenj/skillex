@@ -72,6 +72,20 @@ export {
   showPack,
   verifyPack,
 } from "./core/packs.js";
+export type {
+  HermesRootSelection,
+  ProfileCandidate,
+  ProfileChange,
+  ProfileListResult,
+  ProfileLocalEntry,
+  ProfileLocation,
+  ProfileOptions,
+  ProfileShowResult,
+  ProfileSummary,
+  ProfileSyncOptions,
+  ProfileSyncResult,
+} from "./core/profile-types.js";
+export { listProfiles, showProfile, syncProfile } from "./core/profiles.js";
 export { planSync, sync } from "./core/reconciliation.js";
 export type {
   SyncChange,

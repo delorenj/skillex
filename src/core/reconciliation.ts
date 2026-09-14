@@ -130,7 +130,11 @@ function change(
   return { scope, action, path, ...(target === undefined ? {} : { target }) };
 }
 
-async function sourceRevision(kind: SourceRevision["kind"], path: string): Promise<SourceRevision> {
+/** Internal shared revision evidence for scope and profile receipts. */
+export async function sourceRevision(
+  kind: SourceRevision["kind"],
+  path: string,
+): Promise<SourceRevision> {
   try {
     const { stdout } = await runFile("git", ["-C", path, "rev-parse", "HEAD"], {
       encoding: "utf8",
