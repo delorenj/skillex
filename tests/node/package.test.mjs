@@ -212,6 +212,30 @@ describe("published Node package", () => {
     assert.equal(result.stderr, "");
   });
 
+  it("resolves canonical selections through the installed core without Python", () => {
+    const result = fixture.runModule(`
+      import assert from 'node:assert/strict';
+      import { discoverRegistry, parseManifest, resolveSelection, SkillexError } from '${packageName}';
+      const manifest = parseManifest({ skills: ['preserved-skill'] }, '/example/skills.json');
+      assert.equal(manifest.inheritGlobal, true);
+      assert.deepEqual(manifest.skills, [{ name: 'preserved-skill' }]);
+      assert.throws(() => parseManifest({ flatten: true }, '/example/skills.json'), SkillexError);
+      const result = await resolveSelection({ scope: 'global' });
+      assert.equal(result.exit, 0, JSON.stringify(result.findings));
+      assert.equal(result.data.scopes[0].bindings[0].name, 'preserved-skill');
+      assert.equal(result.data.scopes[0].registry.source, 'environment');
+      // An npm install has no catalog. With explicit discovery inputs and no
+      // override, it must report that absence rather than claim package assets.
+      await assert.rejects(
+        discoverRegistry({ home: process.env.HOME, cwd: process.cwd(), env: {} }),
+        (error) => error instanceof SkillexError && error.findings[0].code === 'E_REGISTRY_NOT_FOUND',
+      );
+    `);
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.stdout, "");
+    assert.equal(result.stderr, "");
+  });
+
   it("provides usable public declarations to an isolated TypeScript consumer", () => {
     const consumerFile = join(fixture.consumer, "consumer.mts");
     writeFileSync(
@@ -219,7 +243,8 @@ describe("published Node package", () => {
       `
       import {
         ExitCode, JSON_SCHEMA_VERSION, VERSION, makeResult,
-        type Diagnostic, type ResultEnvelope,
+        discoverRegistry, parseManifest, resolveSelection,
+        type Diagnostic, type ResultEnvelope, type Resolution, type ResolveOptions,
       } from '${packageName}';
       const diagnostic: Diagnostic = {
         code: 'E_EXAMPLE', severity: 'error', message: 'Example failure',
@@ -232,6 +257,11 @@ describe("published Node package", () => {
       const findings: readonly Diagnostic[] = result.findings;
       const version: string = result.data.version;
       makeResult('example', null, { exit: ExitCode.CONFIG, findings: [diagnostic] });
+      const options: ResolveOptions = { scope: 'project', registryRoot: '/catalog', env: {} };
+      const resolution: Promise<ResultEnvelope<Resolution | null>> = resolveSelection(options);
+      const manifest = parseManifest({ skills: ['example'] }, '/example/skills.json');
+      const names: readonly { name: string }[] = manifest.skills;
+      const discovery = discoverRegistry(options);
       // @ts-expect-error Public result types must preserve the data payload shape.
       result.data.missing;
       // @ts-expect-error Diagnostic severity is a fixed vocabulary.

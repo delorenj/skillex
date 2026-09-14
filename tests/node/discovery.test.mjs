@@ -1,0 +1,433 @@
+import assert from "node:assert/strict";
+import {
+  lstat,
+  mkdir,
+  mkdtemp,
+  readdir,
+  readFile,
+  readlink,
+  realpath,
+  rm,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { dirname, join, parse } from "node:path";
+import test from "node:test";
+import {
+  discoverRegistry,
+  discoverScopes,
+  resolveSelection,
+  SkillexError,
+} from "@delorenj/skillex";
+
+async function fixture(t) {
+  const root = await realpath(await mkdtemp(join(tmpdir(), "skillex-discovery-")));
+  const home = join(root, "home");
+  const cwd = join(home, "work", "project");
+  await mkdir(cwd, { recursive: true });
+  t.after(() => rm(root, { recursive: true, force: true }));
+  return {
+    root,
+    home,
+    cwd,
+    scopes: { home, cwd },
+    registry: { home, cwd, env: {}, installedRoot: join(root, "uninstalled") },
+  };
+}
+
+async function manifest(root, text = "{}") {
+  const path = join(root, ".agents", "skills.json");
+  await mkdir(dirname(path), { recursive: true });
+  await writeFile(path, text);
+  return path;
+}
+
+async function checkout(root) {
+  await mkdir(join(root, "all-skills"), { recursive: true });
+  return root;
+}
+
+function failure(code) {
+  return (error) => {
+    assert.ok(error instanceof SkillexError);
+    assert.ok(error.findings.some((finding) => finding.code === code));
+    assert.ok(error.findings.every((finding) => finding.fix));
+    return true;
+  };
+}
+
+async function snapshot(root) {
+  const result = {};
+  const visit = async (path, name) => {
+    const entry = await lstat(path);
+    if (entry.isSymbolicLink()) result[name] = { link: await readlink(path) };
+    else if (entry.isDirectory()) {
+      result[name] = { directory: true, mode: entry.mode };
+      for (const child of (await readdir(path)).sort())
+        await visit(join(path, child), join(name, child));
+    } else result[name] = { bytes: (await readFile(path)).toString("base64"), mode: entry.mode };
+  };
+  await visit(root, ".");
+  return result;
+}
+
+test("nested cwd selects the nearest project and global write scopes", async (t) => {
+  const f = await fixture(t);
+  const projectPath = await manifest(f.cwd);
+  await manifest(join(f.home, "work"));
+  const nested = join(f.cwd, "src", "commands");
+  await mkdir(nested, { recursive: true });
+  const result = await discoverScopes({ ...f.scopes, cwd: nested });
+  assert.deepEqual(result.project, {
+    scope: "project",
+    root: f.cwd,
+    path: projectPath,
+    exists: true,
+  });
+  assert.deepEqual(result.writeScopes, ["global", "project"]);
+  assert.equal(result.global.root, f.home);
+  assert.equal(result.global.exists, false);
+});
+
+test("project-only writes retain the global inheritance source", async (t) => {
+  const f = await fixture(t);
+  const globalPath = await manifest(f.home);
+  await manifest(f.cwd);
+  const result = await discoverScopes({ ...f.scopes, scope: "project" });
+  assert.deepEqual(result.writeScopes, ["project"]);
+  assert.deepEqual(result.global, {
+    scope: "global",
+    root: f.home,
+    path: globalPath,
+    exists: true,
+  });
+});
+
+test("global-only discovery ignores project paths and nested manifest errors", async (t) => {
+  const f = await fixture(t);
+  await mkdir(join(f.cwd, ".agents", "skills.json"), { recursive: true });
+  const result = await discoverScopes({
+    ...f.scopes,
+    scope: "global",
+    cwd: join(f.root, "missing-cwd"),
+    project: join(f.root, "missing-project"),
+  });
+  assert.equal(result.project, undefined);
+  assert.deepEqual(result.writeScopes, ["global"]);
+});
+
+for (const mode of ["independent", "pack"]) {
+  for (const brokenGlobal of ["directory", "broken-link", "non-directory-parent"]) {
+    test(`${mode} project defers dormant global ${brokenGlobal} validation`, async (t) => {
+      const f = await fixture(t);
+      const registryRoot = await checkout(join(f.root, "registry"));
+      const skill = join(registryRoot, "all-skills", "local");
+      await mkdir(skill);
+      await writeFile(join(skill, "SKILL.md"), "---\nname: local\ndescription: Fixture\n---\n");
+      if (mode === "pack") {
+        const pack = join(registryRoot, "packs", "chosen", "1.0.0");
+        await mkdir(pack, { recursive: true });
+        await writeFile(
+          join(pack, "pack.toml"),
+          '[pack]\nname = "chosen"\nversion = "1.0.0"\n[freeform]\nskills = ["local"]\n',
+        );
+      }
+      await manifest(
+        f.cwd,
+        JSON.stringify(
+          mode === "pack"
+            ? { packs: ["chosen@1.0.0"] }
+            : { inherit_global: false, skills: ["local"] },
+        ),
+      );
+      const globalPath = join(f.home, ".agents", "skills.json");
+      if (brokenGlobal === "non-directory-parent") {
+        await writeFile(dirname(globalPath), "not a directory");
+      } else {
+        await mkdir(dirname(globalPath));
+        if (brokenGlobal === "directory") await mkdir(globalPath);
+        else await symlink(join(f.root, "missing-global-manifest"), globalPath);
+      }
+      const before = await snapshot(f.root);
+      const options = { ...f.registry, registryRoot, scope: "project" };
+      const discovery = await discoverScopes(options);
+      assert.equal(discovery.global.exists, true);
+      const result = await resolveSelection(options);
+      assert.equal(result.exit, 0, JSON.stringify(result.findings));
+      assert.deepEqual(result.data.writeScopes, ["project"]);
+      assert.deepEqual(
+        result.data.scopes.map((scope) => scope.scope),
+        ["project"],
+      );
+      assert.deepEqual(
+        result.data.scopes[0].bindings.map((binding) => binding.name),
+        ["local"],
+      );
+      // The same broken input remains a failure when global becomes a write target.
+      const requiredGlobal = await resolveSelection({ ...options, scope: "both" });
+      assert.equal(requiredGlobal.ok, false);
+      assert.ok(
+        requiredGlobal.findings.some((finding) =>
+          ["E_MANIFEST_INVALID", "E_MANIFEST_MISSING"].includes(finding.code),
+        ),
+        JSON.stringify(requiredGlobal.findings),
+      );
+      assert.deepEqual(await snapshot(f.root), before);
+    });
+  }
+}
+
+test("HOME's manifest is never adopted as a project", async (t) => {
+  const f = await fixture(t);
+  await manifest(f.home);
+  const result = await discoverScopes(f.scopes);
+  assert.equal(result.project, undefined);
+  assert.deepEqual(result.writeScopes, ["global"]);
+});
+
+for (const gitKind of ["directory", "file"]) {
+  test(`a nested .git ${gitKind} prevents adopting the outer manifest`, async (t) => {
+    const f = await fixture(t);
+    await manifest(f.cwd);
+    const nested = join(f.cwd, "nested");
+    await mkdir(join(nested, "src"), { recursive: true });
+    if (gitKind === "file") await writeFile(join(nested, ".git"), "gitdir: /unused/metadata\n");
+    else await mkdir(join(nested, ".git"));
+    const result = await discoverScopes({ ...f.scopes, cwd: join(nested, "src") });
+    assert.equal(result.project, undefined);
+    assert.deepEqual(result.writeScopes, ["global"]);
+    await manifest(nested);
+    const own = await discoverScopes({ ...f.scopes, cwd: join(nested, "src") });
+    assert.equal(own.project.root, nested);
+  });
+}
+
+test("explicit project selects its own root instead of searching ancestors", async (t) => {
+  const f = await fixture(t);
+  await manifest(f.cwd);
+  const chosen = join(f.home, "chosen");
+  await manifest(chosen);
+  const result = await discoverScopes({ ...f.scopes, project: "../../chosen", scope: "both" });
+  assert.equal(result.project.root, chosen);
+  assert.deepEqual(result.writeScopes, ["global", "project"]);
+  await assert.rejects(
+    discoverScopes({ ...f.scopes, project: ".agents" }),
+    failure("E_NO_PROJECT_MANIFEST"),
+  );
+});
+
+test("explicit project errors distinguish a missing directory and manifest", async (t) => {
+  const f = await fixture(t);
+  await assert.rejects(
+    discoverScopes({ ...f.scopes, project: "missing" }),
+    failure("E_PROJECT_ROOT"),
+  );
+  await assert.rejects(
+    discoverScopes({ ...f.scopes, project: "." }),
+    failure("E_NO_PROJECT_MANIFEST"),
+  );
+});
+
+test("explicit HOME and filesystem-root project targets are refused", async (t) => {
+  const f = await fixture(t);
+  await manifest(f.home);
+  for (const project of [f.home, parse(f.root).root]) {
+    await assert.rejects(discoverScopes({ ...f.scopes, project }), failure("E_PROJECT_ROOT"));
+  }
+});
+
+for (const scope of ["project", "both"]) {
+  test(`${scope} requires a project manifest`, async (t) => {
+    const f = await fixture(t);
+    await assert.rejects(discoverScopes({ ...f.scopes, scope }), failure("E_NO_PROJECT_MANIFEST"));
+  });
+}
+
+test("scope discovery reports invalid manifest paths instead of walking past them", async (t) => {
+  const f = await fixture(t);
+  await manifest(join(f.home, "work"));
+  await mkdir(join(f.cwd, ".agents", "skills.json"), { recursive: true });
+  await assert.rejects(discoverScopes(f.scopes), failure("E_MANIFEST_PATH"));
+});
+
+test("scope discovery canonicalizes an explicit symlinked project root", async (t) => {
+  const f = await fixture(t);
+  await manifest(f.cwd);
+  const alias = join(f.home, "project-alias");
+  await symlink(f.cwd, alias);
+  const result = await discoverScopes({ ...f.scopes, project: alias });
+  assert.equal(result.project.root, f.cwd);
+});
+
+test("explicit registry root outranks environment, URL cache, and checkout", async (t) => {
+  const f = await fixture(t);
+  const chosen = await checkout(join(f.root, "selected"));
+  const environment = await checkout(join(f.root, "environment"));
+  await checkout(f.cwd);
+  const result = await discoverRegistry({
+    ...f.registry,
+    registryRoot: chosen,
+    env: { PJ_SKILLS_REGISTRY_ROOT: environment },
+    registry: "https://example.test/registry.git",
+  });
+  assert.deepEqual(result, { root: chosen, source: "argument", searched: [chosen] });
+});
+
+test("an environment registry root is exclusive and accepts relative paths", async (t) => {
+  const f = await fixture(t);
+  const chosen = await checkout(join(f.cwd, "catalog"));
+  await checkout(join(f.home, "code", "skillex"));
+  const result = await discoverRegistry({
+    ...f.registry,
+    env: { PJ_SKILLS_REGISTRY_ROOT: "catalog" },
+  });
+  assert.deepEqual(result, { root: chosen, source: "environment", searched: [chosen] });
+});
+
+test("explicit and environment overrides never fall through when empty or incomplete", async (t) => {
+  const f = await fixture(t);
+  const fallback = await checkout(join(f.home, "code", "skillex"));
+  for (const root of ["", "missing", f.cwd]) {
+    await assert.rejects(
+      discoverRegistry({
+        ...f.registry,
+        registryRoot: root,
+        env: { PJ_SKILLS_REGISTRY_ROOT: fallback },
+      }),
+      failure("E_REGISTRY_ROOT"),
+    );
+    await assert.rejects(
+      discoverRegistry({ ...f.registry, env: { PJ_SKILLS_REGISTRY_ROOT: root } }),
+      failure("E_REGISTRY_ROOT"),
+    );
+  }
+});
+
+test("registry root supports home expansion and resolves root symlinks canonically", async (t) => {
+  const f = await fixture(t);
+  const chosen = await checkout(join(f.home, "catalog"));
+  const alias = join(f.home, "registry-alias");
+  await symlink(chosen, alias);
+  const result = await discoverRegistry({ ...f.registry, registryRoot: "~/registry-alias" });
+  assert.deepEqual(result, { root: chosen, source: "argument", searched: [alias] });
+});
+
+test("configured cache uses the legacy byte-compatible URL name and outranks cwd", async (t) => {
+  const f = await fixture(t);
+  const registry = "https://example.test/org/registry.git?ref=a-b";
+  const cache = await checkout(
+    join(
+      f.home,
+      ".agents",
+      ".cache",
+      "registries",
+      "https___example_test_org_registry_git_ref_a_b",
+    ),
+  );
+  await checkout(f.cwd);
+  const result = await discoverRegistry({ ...f.registry, registry });
+  assert.deepEqual(result, { root: cache, source: "cache", searched: [cache] });
+});
+
+test("missing configured cache falls through to a discovered enclosing checkout", async (t) => {
+  const f = await fixture(t);
+  await checkout(f.cwd);
+  const nested = join(f.cwd, "src", "commands");
+  await mkdir(nested, { recursive: true });
+  const result = await discoverRegistry({
+    ...f.registry,
+    cwd: nested,
+    registry: "https://example.test/registry.git",
+  });
+  assert.equal(result.root, f.cwd);
+  assert.equal(result.source, "checkout");
+  assert.equal(
+    result.searched[0],
+    join(f.home, ".agents", ".cache", "registries", "https___example_test_registry_git"),
+  );
+  assert.deepEqual(result.searched.slice(1), [nested, dirname(nested), f.cwd]);
+});
+
+test("installed checkout outranks the fallback checkout", async (t) => {
+  const f = await fixture(t);
+  const installed = await checkout(join(f.root, "installed"));
+  await checkout(join(f.home, "code", "skillex"));
+  const result = await discoverRegistry({ ...f.registry, installedRoot: installed });
+  assert.equal(result.root, installed);
+  assert.equal(result.source, "installed");
+  assert.equal(result.searched.at(-1), installed);
+});
+
+test("an installed npm package without a catalog is skipped for the fallback checkout", async (t) => {
+  const f = await fixture(t);
+  const installed = join(f.root, "npm-package");
+  await mkdir(join(installed, "dist"), { recursive: true });
+  await writeFile(join(installed, "package.json"), '{"name":"@delorenj/skillex"}');
+  const fallback = await checkout(join(f.home, "code", "skillex"));
+  const result = await discoverRegistry({ ...f.registry, installedRoot: installed });
+  assert.equal(result.root, fallback);
+  assert.equal(result.source, "fallback");
+  assert.deepEqual(result.searched.slice(-2), [installed, fallback]);
+});
+
+test("no local catalog reports all searched candidates without creating a cache", async (t) => {
+  const f = await fixture(t);
+  const before = await snapshot(f.root);
+  await assert.rejects(
+    discoverRegistry({ ...f.registry, registry: "https://example.test/missing.git" }),
+    (error) => {
+      failure("E_REGISTRY_NOT_FOUND")(error);
+      const finding = error.findings[0];
+      assert.equal(
+        finding.detail[0],
+        join(f.home, ".agents", ".cache", "registries", "https___example_test_missing_git"),
+      );
+      assert.equal(finding.detail.at(-1), join(f.home, "code", "skillex"));
+      return true;
+    },
+  );
+  assert.deepEqual(await snapshot(f.root), before);
+});
+
+test("all-skills must be a real directory rather than an activation-style symlink", async (t) => {
+  const f = await fixture(t);
+  const catalog = join(f.root, "catalog");
+  await mkdir(catalog);
+  await symlink(catalog, join(f.cwd, "all-skills"));
+  await checkout(join(f.home, "code", "skillex"));
+  await assert.rejects(
+    discoverRegistry({ ...f.registry, registryRoot: f.cwd }),
+    failure("E_REGISTRY_ROOT"),
+  );
+  await assert.rejects(discoverRegistry(f.registry), failure("E_REGISTRY_ROOT"));
+});
+
+test("broken symlinks and non-directory parents produce IO errors instead of fallback", async (t) => {
+  const f = await fixture(t);
+  await checkout(join(f.home, "code", "skillex"));
+  const broken = join(f.root, "broken");
+  await symlink(join(f.root, "absent"), broken);
+  await assert.rejects(
+    discoverRegistry({ ...f.registry, registryRoot: broken }),
+    failure("E_PATH_READ"),
+  );
+  const file = join(f.root, "file");
+  await writeFile(file, "not a directory");
+  await assert.rejects(
+    discoverRegistry({ ...f.registry, registryRoot: join(file, "child") }),
+    failure("E_PATH_READ"),
+  );
+});
+
+test("successful discovery leaves every fixture file and link unchanged", async (t) => {
+  const f = await fixture(t);
+  const registryRoot = await checkout(join(f.root, "catalog"));
+  await manifest(f.home);
+  await manifest(f.cwd);
+  await symlink("../catalog", join(f.root, "catalog", "untouched-link"));
+  const before = await snapshot(f.root);
+  await discoverScopes({ ...f.scopes, scope: "project" });
+  await discoverRegistry({ ...f.registry, registryRoot });
+  assert.deepEqual(await snapshot(f.root), before);
+});

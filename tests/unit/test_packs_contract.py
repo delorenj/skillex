@@ -1117,15 +1117,14 @@ class TestCanonicalSchemaIsPublished:
         props = doc["properties"]
         assert props["packs"]["type"] == "array"
         assert props["skills"]["type"] == "array"
-        # Section 1: a manifest is valid with any ONE of the three arrays alone.
-        # `sets` is load-bearing here, not cosmetic: the live global manifest
-        # declares only `sets`, and before it was added that manifest validated
-        # solely because of a vestigial `"skills": []`.
-        assert doc["anyOf"] == [
-            {"required": ["skills"]},
-            {"required": ["sets"]},
-            {"required": ["packs"]},
-        ]
+        # CLI Revamp permits empty/default-inheriting and exclusion-only
+        # manifests. The Node schema tests validate these cases against Ajv;
+        # publishing no longer requires a vestigial selection array.
+        assert props["exclude"]["$ref"] == "#/definitions/skillNames"
+        assert doc["definitions"]["skillNames"]["type"] == "array"
+        assert not doc.get("required")
+        assert "anyOf" not in doc
+        assert doc["additionalProperties"] is False
 
     def test_schema_declares_sets(self) -> None:
         doc = json.loads(self.schema_path.read_text(encoding="utf-8"))

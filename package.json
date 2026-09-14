@@ -34,8 +34,8 @@
   ],
   "scripts": {
     "build": "node scripts/build.mjs",
-    "lint": "biome check src scripts tests/node schemas package.json tsconfig.json tsconfig.build.json biome.json",
-    "format": "biome check --write src scripts tests/node schemas package.json tsconfig.json tsconfig.build.json biome.json",
+    "lint": "biome check src scripts tests/node schemas skills.schema.json package.json tsconfig.json tsconfig.build.json biome.json",
+    "format": "biome check --write src scripts tests/node schemas skills.schema.json package.json tsconfig.json tsconfig.build.json biome.json",
     "typecheck": "tsc --noEmit",
     "test": "npm run build && node --test tests/node/*.test.mjs",
     "check": "npm run lint && npm run typecheck && npm test",
@@ -43,11 +43,15 @@
     "prepublishOnly": "npm run check"
   },
   "dependencies": {
-    "commander": "^15.0.0"
+    "ajv": "^8.20.0",
+    "commander": "^15.0.0",
+    "semver": "^7.8.5",
+    "smol-toml": "^1.8.0"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.12",
     "@types/node": "^24.13.3",
+    "@types/semver": "^7.8.0",
     "esbuild": "^0.28.2",
     "typescript": "^5.9.3"
   },
