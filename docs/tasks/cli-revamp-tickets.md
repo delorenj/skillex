@@ -6,7 +6,7 @@ Created and verified 2026-09-08 in Skillex (`SKRILL`), workspace `33god`.
 
 Thirteen child stories were created: twelve new Backlog issues plus the existing SKRILL-8, whose original request, Todo state, and urgent priority were preserved. The epic is represented as a parent issue with the descriptive `epic` label because native issue types are unavailable on this Plane instance.
 
-The [specification](../plan/cli-revamp.md) defines the retained behavior, new interfaces, defaults, and retirement gates. SKRILL-10's package foundation and SKRILL-11's canonical resolver are implemented and validated; see the [foundation evidence](../implementation/cli-node-foundation.md) and [resolver evidence](../implementation/cli-manifest-resolution.md). The remaining stories are open. Dependencies are recorded as clickable issue links in each description; these are not native blocker relations.
+The [specification](../plan/cli-revamp.md) defines the retained behavior, new interfaces, defaults, and retirement gates. SKRILL-10's package foundation, SKRILL-11's canonical resolver, and SKRILL-12's catalog commands are implemented and validated; see the [foundation evidence](../implementation/cli-node-foundation.md), [resolver evidence](../implementation/cli-manifest-resolution.md), and [catalog evidence](../implementation/cli-catalog.md). The remaining stories are open. Dependencies are recorded as clickable issue links in each description; these are not native blocker relations.
 
 | Order | Ticket | Priority | Size / points | Depends on |
 | --- | --- | --- | --- | --- |

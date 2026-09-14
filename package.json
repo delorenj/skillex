@@ -46,7 +46,8 @@
     "ajv": "^8.20.0",
     "commander": "^15.0.0",
     "semver": "^7.8.5",
-    "smol-toml": "^1.8.0"
+    "smol-toml": "^1.8.0",
+    "yaml": "^2.9.1"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.12",

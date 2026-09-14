@@ -1,3 +1,20 @@
+export { listSkills, showSkill } from "./core/catalog.js";
+export type {
+  ListSkillsOptions,
+  SkillDetails,
+  SkillListData,
+  SkillMetadata,
+  SkillReference,
+  SkillShowData,
+} from "./core/catalog-types.js";
+export {
+  type CatalogChange,
+  type CatalogWriteOptions,
+  type CatalogWriteResult,
+  type CreateSkillOptions,
+  createSkill,
+  importSkill,
+} from "./core/catalog-write.js";
 export { discoverRegistry, discoverScopes } from "./core/discovery.js";
 export { SkillexError } from "./core/error.js";
 export { isSkillName, isVersionComponent, parseManifest, readManifest } from "./core/manifest.js";

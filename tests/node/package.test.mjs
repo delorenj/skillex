@@ -244,7 +244,9 @@ describe("published Node package", () => {
       import {
         ExitCode, JSON_SCHEMA_VERSION, VERSION, makeResult,
         discoverRegistry, parseManifest, resolveSelection,
+        createSkill, importSkill, listSkills, showSkill,
         type Diagnostic, type ResultEnvelope, type Resolution, type ResolveOptions,
+        type SkillListData, type SkillShowData,
       } from '${packageName}';
       const diagnostic: Diagnostic = {
         code: 'E_EXAMPLE', severity: 'error', message: 'Example failure',
@@ -262,6 +264,10 @@ describe("published Node package", () => {
       const manifest = parseManifest({ skills: ['example'] }, '/example/skills.json');
       const names: readonly { name: string }[] = manifest.skills;
       const discovery = discoverRegistry(options);
+      const catalog: Promise<ResultEnvelope<SkillListData | null>> = listSkills({ registryRoot: '/catalog', query: 'example' });
+      const detail: Promise<ResultEnvelope<SkillShowData | null>> = showSkill('example', { registryRoot: '/catalog' });
+      createSkill('example', { registryRoot: '/catalog', dryRun: true, description: 'Example skill.' });
+      importSkill('/source/example', 'imported-example', { registryRoot: '/catalog', dryRun: true });
       // @ts-expect-error Public result types must preserve the data payload shape.
       result.data.missing;
       // @ts-expect-error Diagnostic severity is a fixed vocabulary.

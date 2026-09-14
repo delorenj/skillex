@@ -77,5 +77,8 @@ All 175 Node tests pass on both Node 24.15.0 and 26.5.0. The combined
 The retained Python suite passes 890 tests; five existing BMAD fixture-dependent
 tests remain skipped. Ruff and mypy pass, with 42 Python source files checked.
 
+The [hosted matrix](https://github.com/delorenj/skillex/actions/runs/34830026509)
+passed all four Linux/macOS and Node 24/26 jobs for landed commit `d4c605a`.
+
 SKRILL-12 adds catalog commands next. Scope mutation, reconciliation, installed
 consumer cutover, and Python retirement remain open in the epic.
