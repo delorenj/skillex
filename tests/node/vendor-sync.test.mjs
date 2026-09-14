@@ -49,8 +49,12 @@ function fixture(t) {
   };
   const repo = "https://example.invalid/vendor-core.git";
   function git(...args) {
+    return gitInput(undefined, ...args);
+  }
+  function gitInput(input, ...args) {
     const result = spawnSync("git", ["-C", upstream, ...args], {
       encoding: "utf8",
+      input,
       env: {
         ...process.env,
         GIT_CONFIG_NOSYSTEM: "1",
@@ -121,6 +125,7 @@ function fixture(t) {
     repo,
     pin,
     git,
+    gitInput,
     skill,
     commit,
     sources,
@@ -283,28 +288,43 @@ it("refuses symlink farms, nested symlinks, gitlinks, malformed metadata, and no
         symlinkSync("SKILL.md", join(f.upstream, "skills", "alpha", "alias.md"));
       if (kind === "yaml")
         f.file(join(f.upstream, "skills", "alpha", "SKILL.md"), "---\ndescription: [broken\n---\n");
-      if (kind === "utf8")
-        writeFileSync(
-          Buffer.concat([
-            Buffer.from(`${join(f.upstream, "skills", "alpha")}/`),
-            Buffer.from([255]),
-          ]),
-          "bad name",
-        );
       if (kind === "gitlink")
         f.git("update-index", "--add", "--cacheinfo", `160000,${f.pin},skills/module`);
-      if (kind === "gitlink") f.git("commit", "-qm", "gitlink fixture");
-      const pin = kind === "gitlink" ? f.git("rev-parse", "HEAD") : f.commit();
-      if (kind === "utf8")
-        rmSync(
+      let pin;
+      if (kind === "utf8") {
+        // Git tree names are bytes; APFS cannot materialize an invalid UTF-8 filename.
+        const blob = f.git("rev-parse", `${f.pin}:skills/alpha/SKILL.md`);
+        const skillTree = f.gitInput(
           Buffer.concat([
-            Buffer.from(`${join(f.upstream, "skills", "alpha")}/`),
-            Buffer.from([255]),
+            Buffer.from(`100644 blob ${blob}\tSKILL.md\0`),
+            Buffer.from(`100644 blob ${blob}\t`),
+            Buffer.from([255, 0]),
           ]),
+          "mktree",
+          "-z",
         );
+        const skillsTree = f.gitInput(
+          Buffer.from(`040000 tree ${skillTree}\talpha\0`),
+          "mktree",
+          "-z",
+        );
+        const rootTree = f.gitInput(
+          Buffer.from(`040000 tree ${skillsTree}\tskills\0`),
+          "mktree",
+          "-z",
+        );
+        pin = f.git("commit-tree", rootTree, "-p", f.pin, "-m", "Invalid UTF-8 tree fixture");
+      } else if (kind === "gitlink") {
+        f.git("commit", "-qm", "gitlink fixture");
+        pin = f.git("rev-parse", "HEAD");
+      } else pin = f.commit();
       f.sources([{ name: "fixture", repo: f.repo, version: pin, checkout: "fixture" }]);
       const result = await immutable(f, () => syncVendorSources(f.options));
       assert.ok([2, 3].includes(result.exit), JSON.stringify(result));
+      if (kind === "utf8") {
+        assert.equal(result.exit, 2);
+        assert.ok(result.findings.some((finding) => finding.code === "E_INVALID_UTF8"));
+      }
       assert.ok(result.findings.some((finding) => finding.path && finding.fix));
       assert.equal(existsSync(f.stateHome), false);
     });
