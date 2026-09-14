@@ -20,7 +20,12 @@ import { hostname } from "node:os";
 import { basename, dirname, join, relative } from "node:path";
 import test from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
-import { readActivationReceipt, withLock, writeActivationReceipt } from "@delorenj/skillex";
+import {
+  readActivationReceipt,
+  validateActivationStateLocation,
+  withLock,
+  writeActivationReceipt,
+} from "@delorenj/skillex";
 
 const moduleUrl = import.meta.resolve("@delorenj/skillex");
 
@@ -97,6 +102,34 @@ test("first and repeated reads discover a stable path without creating state", a
   assert.deepEqual(second, first);
   await absent(f.stateHome);
   assert.deepEqual(await readdir(f.scope), []);
+});
+
+test("location-only validation creates nothing and ignores unhealthy activation receipts", async (t) => {
+  const f = await fixture(t);
+  await validateActivationStateLocation(f.scope, f.options);
+  await absent(f.stateHome);
+  const snapshot = await readActivationReceipt(f.scope, f.options);
+  await placeDocument(snapshot, "unrelated broken activation receipt");
+  await validateActivationStateLocation(f.scope, f.options);
+  assert.equal(await readFile(snapshot.path, "utf8"), "unrelated broken activation receipt");
+});
+
+test("location-only validation still rejects source roots and symlinked state parents", async (t) => {
+  const f = await fixture(t);
+  await mkdir(join(f.scope, ".git"));
+  await rejected(
+    validateActivationStateLocation(f.scope, { ...f.options, stateHome: join(f.scope, "state") }),
+    "E_RECEIPT_UNSAFE_PATH",
+  );
+  await absent(join(f.scope, "state"));
+  await rejected(
+    validateActivationStateLocation(f.scope, { ...f.options, forbiddenRoots: [f.stateHome] }),
+    "E_RECEIPT_UNSAFE_PATH",
+  );
+  await absent(f.stateHome);
+  await symlink(f.home, f.stateHome);
+  await rejected(validateActivationStateLocation(f.scope, f.options), "E_RECEIPT_UNSAFE_PATH");
+  assert.deepEqual(await readdir(f.home), []);
 });
 
 test("writes return fresh complete snapshots, replace atomically, and retain mode 600", async (t) => {

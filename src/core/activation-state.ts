@@ -313,6 +313,21 @@ function snapshot<T>(
   return value;
 }
 
+/** Validate state placement without creating anything or inspecting activation receipt contents. */
+export async function validateActivationStateLocation(
+  scopeRoot: string,
+  options: ReceiptOptions = {},
+): Promise<void> {
+  let path = scopeRoot;
+  try {
+    const context = await contextFor(scopeRoot, options);
+    path = context.path;
+    await inspectParents(context);
+  } catch (error) {
+    ioFailure(error, path);
+  }
+}
+
 /** Read and validate local v2 state without creating directories or adopting legacy receipts. */
 export async function readActivationReceipt<T = unknown>(
   scopeRoot: string,

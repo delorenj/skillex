@@ -41,7 +41,7 @@ import type {
   SyncResult,
   SyncScopePlan,
 } from "./reconciliation-types.js";
-import { resolveSelection } from "./resolution.js";
+import { resolveSelectionWithManifests } from "./resolution.js";
 import { type Diagnostic, ExitCode, makeResult, type ResultEnvelope } from "./result.js";
 import type { Resolution, ResolvedScope, ScopeName } from "./selection.js";
 
@@ -566,9 +566,13 @@ async function buildScope(
 }
 
 /** Read-only internal preparation; callers must not retain it across lock acquisitions. */
-export async function prepareSyncUnlocked(options: SyncOptions = {}): Promise<PreparedSync> {
+export async function prepareSyncUnlocked(
+  options: SyncOptions = {},
+  proposed: ReadonlyMap<string, unknown> = new Map(),
+  expected: ReadonlyMap<string, unknown> = new Map(),
+): Promise<PreparedSync> {
   checkCancelled(options);
-  const resolved = await resolveSelection(options);
+  const resolved = await resolveSelectionWithManifests(options, proposed, expected);
   checkCancelled(options);
   if (!resolved.ok || !resolved.data)
     throw new SkillexError(
@@ -852,6 +856,7 @@ async function executeScope(
 /** Internal C06 boundary: caller holds the activation lock; this function re-resolves intent itself. */
 export async function reconcileUnlocked(
   options: SyncOptions = {},
+  expected: ReadonlyMap<string, unknown> = new Map(),
 ): Promise<ResultEnvelope<SyncResult | null>> {
   let prepared: PreparedSync | undefined;
   let wrote = false;
@@ -861,7 +866,7 @@ export async function reconcileUnlocked(
     if (completed) applied.push(completed);
   };
   try {
-    prepared = await prepareSyncUnlocked(options);
+    prepared = await prepareSyncUnlocked(options, new Map(), expected);
     for (const work of prepared.scopes) {
       if (work.recovery) {
         mark();
@@ -869,7 +874,7 @@ export async function reconcileUnlocked(
         mark(change(work.scope.scope, "recover", work.plan.activationRoot));
       }
     }
-    if (applied.length) prepared = await prepareSyncUnlocked(options);
+    if (applied.length) prepared = await prepareSyncUnlocked(options, new Map(), expected);
     const states = new Map(
       prepared.scopes.map((work) => [
         work,

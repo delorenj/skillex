@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { Command, CommanderError } from "commander";
 import { registerCompositionCommands } from "./commands/compositions.js";
+import { registerSelectionCommands } from "./commands/selections.js";
 import { registerSyncCommand } from "./commands/sync.js";
 import {
   createSkill,
@@ -200,6 +201,7 @@ function mutationText(
 }
 
 registerCompositionCommands(program, { emit, help });
+registerSelectionCommands(program, { emit });
 registerSyncCommand(program, { emit });
 
 // Stop each parser at its subcommand so a parent cannot consume a local flag

@@ -251,6 +251,10 @@ describe("published Node package", () => {
         planSync, sync, type SyncOptions, type SyncPlan, type SyncResult,
         readActivationReceipt, writeActivationReceipt, type ReceiptSnapshot,
         aliasPaths, GLOBAL_CLI_ALIASES, PROJECT_CLI_ALIASES,
+        initScope, enableSelection, disableSelection, setInheritance,
+        type SelectionOptions, type SelectionResult, type SelectionChange,
+        readSelectionManifest, writeSelectionManifest, type SelectionManifestSnapshot,
+        validateActivationStateLocation,
         type Diagnostic, type ResultEnvelope, type Resolution, type ResolveOptions,
         type SkillListData, type SkillShowData,
       } from '${packageName}';
@@ -296,6 +300,15 @@ describe("published Node package", () => {
       const aliases: readonly string[] = aliasPaths('/project', 'project');
       const globalAliases: readonly string[] = GLOBAL_CLI_ALIASES;
       const projectAliases: readonly string[] = PROJECT_CLI_ALIASES;
+      const selectionOptions: SelectionOptions = { scope: 'project', project: '/project', registryRoot: '/catalog', stateHome: '/state', dryRun: true, signal: { aborted: false } };
+      const initialization: Promise<ResultEnvelope<SelectionResult | null>> = initScope(selectionOptions);
+      const enabled: Promise<ResultEnvelope<SelectionResult | null>> = enableSelection('skill', 'example', selectionOptions);
+      disableSelection('set', 'example', selectionOptions);
+      setInheritance(false, selectionOptions);
+      const selectionChange: SelectionChange = { scope: 'project', action: 'write-manifest', path: '/project/.agents/skills.json' };
+      const declaration: Promise<SelectionManifestSnapshot> = readSelectionManifest('/project');
+      declaration.then(snapshot => writeSelectionManifest(snapshot, { scope: 'project', inherit_global: true }));
+      const stateLocation: Promise<void> = validateActivationStateLocation('/project', { stateHome: '/state' });
       // @ts-expect-error Public result types must preserve the data payload shape.
       result.data.missing;
       // @ts-expect-error Diagnostic severity is a fixed vocabulary.

@@ -3,6 +3,7 @@ export {
   type ReceiptOptions,
   type ReceiptSnapshot,
   readActivationReceipt,
+  validateActivationStateLocation,
   writeActivationReceipt,
 } from "./core/activation-state.js";
 export {
@@ -87,5 +88,23 @@ export type {
   SkillsManifest,
   WriteScope,
 } from "./core/selection.js";
+export type {
+  SelectionChange,
+  SelectionKind,
+  SelectionOptions,
+  SelectionResult,
+} from "./core/selection-command-types.js";
+export {
+  disableSelection,
+  enableSelection,
+  initScope,
+  setInheritance,
+} from "./core/selection-commands.js";
+export {
+  readSelectionManifest,
+  type SelectionManifestSnapshot,
+  SelectionManifestWriteError,
+  writeSelectionManifest,
+} from "./core/selection-manifest.js";
 export { addSetSkills, createSet, listSets, removeSetSkills, showSet } from "./core/sets.js";
 export { VERSION } from "./version.js";

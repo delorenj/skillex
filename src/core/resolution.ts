@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from "node:util";
 import { canonicalSkill, packInventory, setMembers, setMemberTarget } from "./composition.js";
 import { discoverRegistry, discoverScopes } from "./discovery.js";
 import { fail, SkillexError } from "./error.js";
@@ -213,12 +214,38 @@ async function resolveScope(
 export async function resolveSelection(
   options: ResolveOptions = {},
 ): Promise<ResultEnvelope<Resolution | null>> {
+  return resolveSelectionWithManifests(options);
+}
+
+/** Internal read-only preview: substitute only named manifests in discovered scopes. */
+export async function resolveSelectionWithManifests(
+  options: ResolveOptions = {},
+  proposed: ReadonlyMap<string, unknown> = new Map(),
+  expected: ReadonlyMap<string, unknown> = new Map(),
+): Promise<ResultEnvelope<Resolution | null>> {
   const findings: Diagnostic[] = [];
   try {
     const locations = await discoverScopes(options);
-    const projectManifest = locations.project
-      ? await readManifest(locations.project.path)
-      : undefined;
+    const read = async (path: string): Promise<SkillsManifest> => {
+      const manifest = proposed.has(path)
+        ? parseManifest(proposed.get(path), path)
+        : await readManifest(path);
+      if (
+        expected.has(path) &&
+        !isDeepStrictEqual(manifest, parseManifest(expected.get(path), path))
+      )
+        fail(
+          "E_MANIFEST_CHANGED",
+          "The saved selection changed before activation could read it.",
+          {
+            path,
+            fix: "Preserve the current declaration, inspect the intervening edit, and run sync to apply the intended selection.",
+          },
+          ExitCode.REFUSED,
+        );
+      return manifest;
+    };
+    const projectManifest = locations.project ? await read(locations.project.path) : undefined;
     const needsGlobal =
       locations.writeScopes.includes("global") ||
       (projectManifest?.inheritGlobal && projectManifest.packs.length === 0);
@@ -226,9 +253,10 @@ export async function resolveSelection(
     let global: ResolvedScope | undefined;
     const context = { ...options, home: locations.global.root };
     if (needsGlobal) {
-      const manifest = locations.global.exists
-        ? await readManifest(locations.global.path)
-        : parseManifest({}, locations.global.path);
+      const manifest =
+        locations.global.exists || expected.has(locations.global.path)
+          ? await read(locations.global.path)
+          : parseManifest({}, locations.global.path);
       global = await resolveScope(locations.global, manifest, undefined, context, findings);
       scopes.push(global);
     }
