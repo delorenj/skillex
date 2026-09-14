@@ -1,0 +1,40 @@
+{
+  "version": 1,
+  "names": {
+    "packs/hermes-base/0.18.2/computer-use": "hermes-base-0-18-2-computer-use",
+    "packs/hermes-base/0.18.2/creative/design-md": "hermes-base-0-18-2-design-md",
+    "/home/delorenj/code/hyperframes/skills/hyperframes": "hyperframes-upstream-hyperframes"
+  },
+  "references": {
+    "sets/delodocs/33god-projects": "projects",
+    "sets/global/33god-agent-fleet-operations": "agent-fleet-operations",
+    "sets/global/33god-projects": "projects",
+    "sets/min-global/pjangler": "project-jangler",
+    "packs/Kurzgesagt/ecosystem-patterns": "delonet-conventions",
+    "packs/Kurzgesagt/skill-creator": null
+  },
+  "packs": {
+    "packs/Kurzgesagt": {
+      "name": "kurzgesagt",
+      "version": "0.1.0"
+    },
+    "packs/torrent-movie": {
+      "name": "torrent-movie",
+      "version": "0.1.0"
+    }
+  },
+  "wrappers": {
+    "sets/cloudflare-focused": {
+      "name": "cloudflare-focused-hub",
+      "ownedPaths": [
+        "SKILL.md"
+      ]
+    },
+    "sets/product-manager": {
+      "name": "product-manager-hub",
+      "ownedPaths": [
+        "SKILL.md"
+      ]
+    }
+  }
+}

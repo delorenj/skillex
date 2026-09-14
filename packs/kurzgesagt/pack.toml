@@ -1,0 +1,6 @@
+[pack]
+name = "kurzgesagt"
+version = "0.1.0"
+
+[freeform]
+skills = [ "agno", "design-md", "delonet-conventions", "find-skills", "high-end-visual-design", "hindsight", "opencode-controller", "ralph-wiggum-v2", "remotion", "self-improving-agent", "taste-design" ]

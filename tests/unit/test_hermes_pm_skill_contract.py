@@ -35,8 +35,12 @@ def test_command_and_skill_core_are_immutable_and_additive() -> None:
     }
 
     for name in REQUIRED_CORE:
-        projection = ROOT / "sets" / "global" / name
+        # The retained deployment contract still uses the historical label;
+        # catalog references now use the canonical definition name.
+        canonical_name = "projects" if name == "33god-projects" else name
+        projection = ROOT / "sets" / "global" / canonical_name
         assert projection.is_symlink()
+        assert projection.resolve() == (ROOT / "all-skills" / canonical_name).resolve()
         assert (projection / "SKILL.md").is_file()
 
 
@@ -267,7 +271,6 @@ def test_human_runbooks_route_to_the_normative_contract() -> None:
     assert "agent-fleet-operations" in project_creation
     assert "references/pm-deployment.md" in project_creation
 
-    for name in ("agent-fleet-operations", "33god-agent-fleet-operations"):
-        projection = ROOT / "sets" / "global" / name
-        assert projection.is_symlink()
-        assert projection.resolve() == FLEET_SKILL.resolve()
+    projection = ROOT / "sets" / "global" / "agent-fleet-operations"
+    assert projection.is_symlink()
+    assert projection.resolve() == FLEET_SKILL.resolve()

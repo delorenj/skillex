@@ -136,9 +136,9 @@ I/O errors, actual SIGKILL recovery, and retry/idempotency.
 
 Local tooling acceptance on 2026-09-14:
 
-- Full suites on Node 24.15.0 and Node 26.5.0 each pass 842 tests with one
+- Full suites on Node 24.15.0 and Node 26.5.0 each pass 844 tests with one
   existing UID-dependent skip. Biome, TypeScript, and package build pass.
-- All 98 new migration checks pass, including 37 registry, 20 manifest,
+- All 100 new migration checks pass, including 39 registry, 20 manifest,
   20 activation, 13 declaration, and eight installed CLI cases.
 - The isolated npm package includes usable public migration types and executes
   migration with Python/uv absent from PATH.
@@ -149,3 +149,6 @@ The Node package workflow checks Node 24/26 on Ubuntu/macOS. Its exact landed
 commit/run and the committed catalog conversion are recorded on SKRILL-18 as
 those acceptance steps complete. Active-consumer cutover remains SKRILL-20 and
 Python removal remains SKRILL-21.
+
+The completed source conversion, content comparison, and preserved upstream
+status limitations are recorded in [catalog migration evidence](cli-catalog-migration.md).

@@ -3,83 +3,35 @@ name = "hermes-base"
 version = "0.18.2"
 description = "Version-pinned, read-only base skill set harvested from hermes-agent 0.18.2 (~/.hermes/hermes-agent/skills). Shared by every Hermes PM runtime via config.yaml skills.external_dirs. The local runtime skills/ dir is the writable OVERLAY and WINS on name collision."
 
-# Provenance of this snapshot — verify the pack matches upstream before pinning.
-[source]
-upstream        = "hermes-agent"
-upstream_version = "0.18.2"                  # pyproject version at harvest
-upstream_git    = "e5afc0d93"                # git describe: v2026.7.7.2-1222-ge5afc0d93
-harvested_from  = "/home/delorenj/.hermes/hermes-agent/skills"
-excluded        = ["index-cache"]            # runtime cache artifact (lobehub_index.json etc.), NOT a skill
-
-# The 18 pristine upstream skills this pack ships. Each is a directory with a
-# SKILL.md at its root (+ references/, assets/, scripts/ as applicable).
-# Referenced directly by version dir in config.yaml, mirroring the bmad/6.10.2 pin.
 [freeform]
-skills = [
-  "apple",
-  "autonomous-ai-agents",
-  "computer-use",
-  "creative",
-  "data-science",
-  "dogfood",
-  "email",
-  "github",
-  "hermes-desktop-plugins",
-  "media",
-  "mlops",
-  "note-taking",
-  "productivity",
-  "research",
-  "smart-home",
-  "social-media",
-  "software-development",
-  "yuanbao",
-]
+skills = [ "apple-notes", "apple-reminders", "findmy", "imessage", "claude-code", "codex", "hermes-agent", "opencode", "hermes-base-0-18-2-computer-use", "architecture-diagram", "ascii-art", "ascii-video", "baoyu-infographic", "claude-design", "comfyui", "hermes-base-0-18-2-design-md", "excalidraw", "humanizer", "manim-video", "p5js", "popular-web-designs", "pretext", "sketch", "songwriting-and-ai-music", "touchdesigner-mcp", "jupyter-live-kernel", "dogfood", "himalaya", "codebase-inspection", "github-auth", "github-code-review", "github-issues", "github-pr-workflow", "github-repo-management", "hermes-desktop-plugins", "gif-search", "heartmula", "songsee", "youtube-content", "lm-evaluation-harness", "weights-and-biases", "huggingface-hub", "llama-cpp", "vllm", "audiocraft", "segment-anything", "obsidian", "airtable", "google-workspace", "maps", "nano-pdf", "notion", "ocr-and-documents", "petdex", "powerpoint", "teams-meeting-pipeline", "arxiv", "blogwatcher", "llm-wiki", "polymarket", "research-paper-writing", "openhue", "xurl", "hermes-agent-skill-authoring", "node-inspect-debugger", "plan", "python-debugpy", "requesting-code-review", "simplify-code", "spike", "systematic-debugging", "test-driven-development", "yuanbao" ]
 
-# Skills that are byte-identical shared additions across every agent that has
-# them but are NOT yet upstream. Staged for promotion into 0.18.2+build.1 after
-# curator review. Kept out of `skills` until blessed so the base stays a
-# verifiable mirror of upstream.
-[promote_candidates]
-skills = [
-  "diagramming",
-  "domain",
-  "gaming",
-  "gifs",
-  "inference-sh",
-  "mcp",          # voxxy/skillex identical; 33god carries a variant to reconcile first
-  "red-teaming",
-]
+[source]
+upstream = "hermes-agent"
+upstream_version = "0.18.2"
+upstream_git = "e5afc0d93"
+harvested_from = "/home/delorenj/.hermes/hermes-agent/skills"
+excluded = [ "index-cache" ]
 
-# Collision policy consumed by the curator guard.
-[policy]
-overlay_wins = true          # local runtime skills/<name> shadows pack/<name>
-base_readonly = true         # pack dirs must never be edited in place by an agent
+[source.legacy_migration.pack]
+name = "hermes-base"
+version = "0.18.2"
+description = "Version-pinned, read-only base skill set harvested from hermes-agent 0.18.2 (~/.hermes/hermes-agent/skills). Shared by every Hermes PM runtime via config.yaml skills.external_dirs. The local runtime skills/ dir is the writable OVERLAY and WINS on name collision."
 
-# Upstream Hermes groups skills under CONTAINER directories, each carrying a
-# DESCRIPTION.md.  The container level is real upstream: agent/skill_utils.py's
-# iter_skill_index_files() walks a skills tree to ARBITRARY depth, and
-# agent/prompt_builder.py calls it twice over the same tree -- once for "SKILL.md" to find
-# the skills, once for "DESCRIPTION.md" to attach each container's group description.
-# That nesting is upstream's data model, so it is preserved here verbatim -- this pack
-# stays a faithful mirror.  (Not to be confused with agent/skill_bundles.py, which globs
-# YAML out of <HERMES_HOME>/skill-bundles and never walks a skill directory.)
-#
-# The other five agent CLIs have no container concept, so the mismatch is resolved at
-# PROJECTION time: the 18 entries in [freeform].skills are expanded by DESCENT, not by a
-# fixed one-level step.  Descend while a directory has no SKILL.md; a directory that has
-# one IS a skill and is never descended into (so a skill's own references/, scripts/ and
-# assets/ can never contribute a second member).
-#
-# For this pack that yields 73 leaf skills with zero duplicate basenames: 4 declared
-# entries are already skills (computer-use, dogfood, hermes-desktop-plugins, yuanbao) and
-# 14 are containers.  67 leaves sit one level down; the remaining 6 sit TWO levels down
-# under mlops/{evaluation,inference,models}/ -- which is exactly why the rule is a descent.
-# An implementation capped at one level resolves 67 and silently drops vllm, llama-cpp,
-# audiocraft, segment-anything, lm-evaluation-harness and weights-and-biases.  73 is what
-# upstream's own iter_skill_index_files() returns for this tree.
-#
-# 13 of the 14 containers carry a DESCRIPTION.md; software-development does not, which is
-# why SKILL.md -- never DESCRIPTION.md -- is the discriminator.
-# See PACKS-CONTRACT section 3b.
+[source.legacy_migration.source]
+upstream = "hermes-agent"
+upstream_version = "0.18.2"
+upstream_git = "e5afc0d93"
+harvested_from = "/home/delorenj/.hermes/hermes-agent/skills"
+excluded = [ "index-cache" ]
+
+[source.legacy_migration.freeform]
+skills = [ "apple", "autonomous-ai-agents", "computer-use", "creative", "data-science", "dogfood", "email", "github", "hermes-desktop-plugins", "media", "mlops", "note-taking", "productivity", "research", "smart-home", "social-media", "software-development", "yuanbao" ]
+
+[source.legacy_migration.promote_candidates]
+skills = [ "diagramming", "domain", "gaming", "gifs", "inference-sh", "mcp", "red-teaming" ]
+
+[source.legacy_migration.policy]
+overlay_wins = true
+base_readonly = true
 flatten = true
