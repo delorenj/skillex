@@ -39,7 +39,28 @@ export type {
   SetListData,
   SetShowData,
 } from "./core/composition-types.js";
+export { explainSkill, inspectStatus } from "./core/diagnostics.js";
+export type {
+  AliasObservation,
+  DiagnosticOptions,
+  ExplainResult,
+  PathObservation,
+  ReceiptObservation,
+  SkillExplanation,
+  SkillObservation,
+  StatusResult,
+  StatusScope,
+} from "./core/diagnostics-types.js";
 export { discoverRegistry, discoverScopes } from "./core/discovery.js";
+export { doctor } from "./core/doctor.js";
+export type {
+  ConfiguredLegacyWriter,
+  DoctorOptions,
+  DoctorResult,
+  DoctorSourceInspection,
+  DoctorWriterInspection,
+  RunningLegacyWriter,
+} from "./core/doctor-types.js";
 export { SkillexError } from "./core/error.js";
 export { type LockOptions, withLock } from "./core/lock.js";
 export { isSkillName, isVersionComponent, parseManifest, readManifest } from "./core/manifest.js";

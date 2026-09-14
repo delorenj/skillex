@@ -255,6 +255,9 @@ describe("published Node package", () => {
         type SelectionOptions, type SelectionResult, type SelectionChange,
         readSelectionManifest, writeSelectionManifest, type SelectionManifestSnapshot,
         validateActivationStateLocation,
+        inspectStatus, explainSkill, doctor,
+        type DiagnosticOptions, type StatusResult, type ExplainResult,
+        type DoctorOptions, type DoctorResult,
         type Diagnostic, type ResultEnvelope, type Resolution, type ResolveOptions,
         type SkillListData, type SkillShowData,
       } from '${packageName}';
@@ -309,6 +312,11 @@ describe("published Node package", () => {
       const declaration: Promise<SelectionManifestSnapshot> = readSelectionManifest('/project');
       declaration.then(snapshot => writeSelectionManifest(snapshot, { scope: 'project', inherit_global: true }));
       const stateLocation: Promise<void> = validateActivationStateLocation('/project', { stateHome: '/state' });
+      const diagnosticOptions: DiagnosticOptions = { scope: 'both', project: '/project', registryRoot: '/catalog', stateHome: '/state', signal: { aborted: false } };
+      const status: Promise<ResultEnvelope<StatusResult | null>> = inspectStatus(diagnosticOptions);
+      const explanation: Promise<ResultEnvelope<ExplainResult | null>> = explainSkill('example', diagnosticOptions);
+      const doctorOptions: DoctorOptions = { ...diagnosticOptions, sourcesOnly: true, processSnapshot: async () => '' };
+      const health: Promise<ResultEnvelope<DoctorResult | null>> = doctor(doctorOptions);
       // @ts-expect-error Public result types must preserve the data payload shape.
       result.data.missing;
       // @ts-expect-error Diagnostic severity is a fixed vocabulary.
