@@ -91,9 +91,9 @@ or optional resolution retain their existing failure meanings before drift.
 Cancellation exits 130. An excluded, dormant, or unselected explanation is not
 itself a failure; other detected problems in the inspected scope still count.
 
-Node 24.15.0 and 26.5.0 each pass 583 tests, with one filesystem-owner test
+Node 24.15.0 and 26.5.0 each pass 584 tests, with one filesystem-owner test
 skipped because it requires root. C07 adds 17 status/explanation API cases,
-43 doctor cases, and 18 installed CLI cases. The isolated package's public
+44 doctor cases, and 18 installed CLI cases. The isolated package's public
 declarations compile without Node type dependencies; Biome and TypeScript
 checks pass.
 
@@ -120,7 +120,9 @@ baseline has no success exemption.
 
 A full live Node doctor invocation also inspected the global activation and
 completed its process observation. It found three configured legacy-writer
-references and no running legacy writers. Three configuration inputs could
-not be fully inspected and retained explicit incomplete-observation findings.
+references and no running legacy writers. Three services masked with
+`/dev/null` were verified as masked by systemd and are excluded from configured
+writer evidence. A regression preserves those masks without treating them as
+unreadable files, while other device targets still report incomplete inspection.
 This verifies the distinction between configuration and runtime evidence;
 consumer migration and Python retirement remain later epic stories.

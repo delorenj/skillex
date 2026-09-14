@@ -509,6 +509,30 @@ test("comments, descriptions, and echo commands do not configure a legacy writer
   assert.deepEqual(result.data.writers.configured, []);
 });
 
+test("masked user services are inactive definitions while other device targets stay incomplete", async (t) => {
+  const f = await healthy(t);
+  const services = join(f.config, "systemd", "user");
+  await mkdir(services, { recursive: true });
+  const masked = join(services, "skillex-ssot.service");
+  await symlink("/dev/null", masked);
+  const before = await snapshot(f.root);
+  const result = await doctor(f.options);
+  assert.equal(result.exit, 0, JSON.stringify(result));
+  assert.deepEqual(result.data.writers.configured, []);
+  assert.deepEqual(result.data.writers.running, []);
+  assert.equal(result.data.writers.processObservation, "complete");
+  assert.deepEqual(await snapshot(f.root), before);
+
+  const other = join(services, "unsupported.service");
+  await symlink("/dev/zero", other);
+  const withOther = await snapshot(f.root);
+  const incomplete = await doctor(f.options);
+  assert.equal(incomplete.exit, 4);
+  finding(incomplete, "W_WRITER_CONFIG_UNREADABLE", other);
+  assert.ok(!incomplete.findings.some((item) => item.path === masked));
+  assert.deepEqual(await snapshot(f.root), withOther);
+});
+
 test("project writer discovery includes ancestor hooks but not unrelated registry tasks", async (t) => {
   const f = await healthy(t, "project");
   const parent = join(f.root, "mise.toml");

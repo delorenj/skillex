@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { readdir, readFile, stat } from "node:fs/promises";
+import { readdir, readFile, realpath, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { parse as parseToml } from "smol-toml";
@@ -289,6 +289,9 @@ export async function inspectDoctorWriters(
   for (const [path, kind] of [...candidates].sort(([a], [b]) => a.localeCompare(b))) {
     try {
       const info = await stat(path);
+      // A systemd unit or drop-in masked with /dev/null cannot configure a writer.
+      if (kind === "service" && info.isCharacterDevice() && (await realpath(path)) === "/dev/null")
+        continue;
       if (!info.isFile() || info.size > maxConfigBytes) {
         unavailable(path, "Writer configuration is not a bounded regular file.");
         continue;
