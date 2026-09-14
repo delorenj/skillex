@@ -207,8 +207,16 @@ async function targetFor(input: MigrationOptions, recoveryOnly = false): Promise
   const root = profile?.skillsRoot ?? join(base, ".agents", "skills");
   const scope = project ? "project" : "global";
   const aliases = profile ? [] : aliasPaths(base, scope);
+  // The registry may also be an explicitly selected project. Its ordinary
+  // activation is a sibling of the source collections, not a source itself.
+  // Keep the whole checkout protected for every other target and for state IO.
+  const activationSourceRoots = sourceRoots.flatMap((source) =>
+    !profile && project === source
+      ? ["all-skills", "sets", "packs"].map((name) => join(source, name))
+      : [source],
+  );
   for (const protectedRoot of [
-    ...sourceRoots,
+    ...activationSourceRoots,
     ...(profile ? [join(options.home, ".agents"), ...(project ? [project] : [])] : []),
   ])
     if (within(root, protectedRoot) || within(protectedRoot, root))

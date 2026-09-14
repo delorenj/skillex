@@ -176,6 +176,80 @@ it("migration has no ambient activation target and preview is entirely immutable
   assert.deepEqual(planned.applied, []);
 });
 
+it("the registry checkout can migrate its own inherited activation without changing source collections", async (t) => {
+  const f = fixture(t);
+  const project = f.registry;
+  const activation = f.directory(join(project, ".agents", "skills"));
+  f.file(join(project, ".agents", "skills.json"), JSON.stringify({ inherit_global: true }));
+  f.file(join(f.home, ".agents", "skills.json"), JSON.stringify({ skills: ["alpha"] }));
+  symlinkSync(f.alpha, join(activation, "alpha"));
+  f.file(join(activation, ".system", "marker"), "installer-owned\n");
+  legacy(f, { entries: { alpha: f.alpha } }, false, activation);
+  const alias = f.directory(join(project, ".claude", "skills"));
+  symlinkSync(f.alpha, join(alias, "alpha"));
+  const options = {
+    ...f.options,
+    project,
+    mapping: { version: 1, references: { [join(alias, "alpha")]: "alpha" } },
+  };
+  const sourceRoots = ["all-skills", "sets", "packs"].map((name) => join(f.registry, name));
+  const sources = sourceRoots.map(snapshot);
+  const installer = snapshot(join(activation, ".system"));
+  const rootInode = lstatSync(activation).ino;
+  const preview = ok(await immutable(f, () => migrate(options)));
+  assert.ok(preview.items.some((item) => item.path === activation && item.action === "adopt-root"));
+  ok(await migrate({ ...options, apply: true }));
+  const receipt = (await readActivationReceipt(project, options)).document.data;
+  assert.equal(receipt.directories[activation].ino, String(rootInode));
+  assert.equal(
+    receipt.links[join(activation, "alpha")].ino,
+    String(lstatSync(join(activation, "alpha")).ino),
+  );
+  assert.equal(Object.hasOwn(receipt.links, join(activation, ".system")), false);
+  assert.equal(realpathSync(alias), activation);
+  ok(await sync({ ...options, scope: "project" }));
+  assert.deepEqual(sourceRoots.map(snapshot), sources);
+  assert.deepEqual(snapshot(join(activation, ".system")), installer);
+  ok(await immutable(f, () => migrate({ ...options, apply: true })));
+});
+
+it("registry-as-project support still refuses projects inside canonical definitions or collections", async (t) => {
+  for (const source of ["all-skills", "all-skills/alpha", "sets", "packs"])
+    await t.test(source, async (t) => {
+      const f = fixture(t);
+      const project = join(f.registry, source);
+      f.file(join(project, ".agents", "skills.json"), JSON.stringify({ inherit_global: false }));
+      const activation = f.directory(join(project, ".agents", "skills"));
+      const result = await immutable(f, () => migrate({ ...f.options, project }));
+      assert.equal(result.exit, 3, JSON.stringify(result));
+      assert.ok(
+        result.findings.some(
+          (finding) =>
+            finding.code === "E_MIGRATION_ACTIVATION" &&
+            finding.path === activation &&
+            finding.message.includes("overlaps"),
+        ),
+      );
+    });
+});
+
+it("a selected external registry below an activation root remains protected", async (t) => {
+  const f = fixture(t);
+  const registryRoot = f.directory(join(f.activation, "external-registry"));
+  f.file(join(registryRoot, "all-skills", "alpha", "SKILL.md"), "# alpha\n");
+  f.file(join(registryRoot, "all-skills", "sources.toml"), "version = 1\n");
+  const result = await immutable(f, () => migrate({ ...f.options, registryRoot }));
+  assert.equal(result.exit, 3, JSON.stringify(result));
+  assert.ok(
+    result.findings.some(
+      (finding) =>
+        finding.code === "E_MIGRATION_ACTIVATION" &&
+        finding.path === f.activation &&
+        finding.message.includes("overlaps"),
+    ),
+  );
+});
+
 it("validated Python claims become exact v2 ownership while real and foreign entries retain their inode and bytes", async (t) => {
   const f = fixture(t);
   symlinkSync(f.alpha, join(f.activation, "alpha"));

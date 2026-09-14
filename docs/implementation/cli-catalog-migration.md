@@ -87,6 +87,20 @@ checks. Retained Python checks are updated for the deliberate removal of the
 three-engine flattening contract and legacy alias names; they do not define the
 new Node composition contract.
 
+Catalog commit `be7d0c54814a0fa761036affd89e3814975c51b1` also passed all four
+[Node 24/26 Ubuntu/macOS jobs](https://github.com/delorenj/skillex/actions/runs/34879362883).
+The retained Python suite passed 882 tests with five existing missing-BMAD skips.
+
+The first consumer preview exposed an activation guard that treated the entire
+registry checkout as source content even when that checkout was the explicitly
+selected project. Migration now permits its ordinary `.agents/skills` directory
+while protecting `all-skills/`, `sets/`, `packs/`, external registries, and receipt
+state. The regression exercises inherited selection, Python receipt adoption,
+installer content preservation, CLI alias conversion, and repeat migration.
+Migration activation and installed CLI checks pass all 35 cases on Node 24 and
+Node 26. This makes the project eligible for a preview; foreign installer content
+still must be accounted for before its live alias conversion.
+
 ## Boundaries
 
 This source conversion did not select a global/project activation target or
