@@ -12,14 +12,13 @@ import {
   symlink,
   writeFile,
 } from "node:fs/promises";
-import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import test from "node:test";
-import { createSkill, importSkill } from "@delorenj/skillex";
+import { createSkill, importSkill, withLock } from "@delorenj/skillex";
 import { parse } from "yaml";
 
 async function fixture(t) {
-  const root = await realpath(await mkdtemp(join(tmpdir(), "skillex-catalog-write-")));
+  const root = await realpath(await mkdtemp("/tmp/skillex-catalog-write-"));
   t.after(() => rm(root, { recursive: true, force: true }));
   const registryRoot = join(root, "registry");
   const source = join(root, "source");
@@ -90,6 +89,54 @@ function failure(result, code) {
 async function provenance(path) {
   return parse(await readFile(join(path, ".source.yaml"), "utf8"));
 }
+
+test("catalog create and import honor the same catalog writer lock", async (t) => {
+  const f = await fixture(t);
+  const acquired = Promise.withResolvers();
+  const release = Promise.withResolvers();
+  const holder = withLock(
+    `${join(f.registryRoot, "all-skills")}#catalog`,
+    async () => {
+      acquired.resolve();
+      await release.promise;
+    },
+    f.options,
+  );
+  await acquired.promise;
+  try {
+    const before = await snapshot(f.registryRoot);
+    for (const run of [
+      () => createSkill("blocked", { ...f.options, timeoutMs: 0 }),
+      () => importSkill(f.source, "blocked", { ...f.options, timeoutMs: 0 }),
+    ]) {
+      const result = await run();
+      assert.equal(result.exit, 5, JSON.stringify(result));
+      failure(result, "E_LOCK_BUSY");
+      assert.deepEqual(await snapshot(f.registryRoot), before);
+    }
+  } finally {
+    release.resolve();
+    await holder;
+  }
+  success(await createSkill("unblocked", f.options));
+});
+
+test("catalog writes refuse state inside source repositories and honor interruption before writes", async (t) => {
+  const f = await fixture(t);
+  const before = await snapshot(f.root);
+  const unsafe = { ...f.options, stateHome: join(f.registryRoot, "state") };
+  failure(await createSkill("unsafe", unsafe), "E_RECEIPT_UNSAFE_PATH");
+  failure(await importSkill(f.source, "unsafe", unsafe), "E_RECEIPT_UNSAFE_PATH");
+  for (const run of [
+    () => createSkill("cancelled", { ...f.options, signal: { aborted: true } }),
+    () => importSkill(f.source, "cancelled", { ...f.options, signal: { aborted: true } }),
+  ]) {
+    const result = await run();
+    assert.equal(result.exit, 130, JSON.stringify(result));
+    failure(result, "E_INTERRUPTED");
+  }
+  assert.deepEqual(await snapshot(f.root), before);
+});
 
 test("create scaffolds a real canonical skill with valid quoted metadata and provenance", async (t) => {
   const f = await fixture(t);

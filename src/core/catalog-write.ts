@@ -3,6 +3,7 @@ import { chmod, lstat, mkdir, open, readFile, realpath, symlink } from "node:fs/
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { stringify } from "yaml";
+import { type CatalogLockOptions, withCatalogLock } from "./catalog-lock.js";
 import { type ContentEntry, captureContent, digestContent, isWithin } from "./content.js";
 import { discoverRegistry } from "./discovery.js";
 import { fail, SkillexError } from "./error.js";
@@ -26,7 +27,7 @@ export interface CatalogWriteResult {
   readonly changes: readonly CatalogChange[];
 }
 
-export interface CatalogWriteOptions extends RegistryOptions {
+export interface CatalogWriteOptions extends RegistryOptions, CatalogLockOptions {
   readonly dryRun?: boolean;
 }
 
@@ -165,6 +166,44 @@ async function publish(
   }
 }
 
+async function publishLocked(
+  command: string,
+  result: CatalogWriteResult,
+  entries: readonly ContentEntry[],
+  rootMode: number,
+  catalogIdentity: Stats,
+  options: CatalogWriteOptions,
+): Promise<ResultEnvelope<CatalogWriteResult | null>> {
+  if (result.dryRun) return makeResult(command, result);
+  let outcome: ResultEnvelope<CatalogWriteResult | null> | undefined;
+  try {
+    return await withCatalogLock(result.registry, options, async () => {
+      const current = await target(result.name, options);
+      if (current.path !== result.path || current.registry.root !== result.registry.root) {
+        fail(
+          "E_CATALOG_CHANGED",
+          "Registry discovery changed after the catalog lock was selected.",
+          {
+            path: current.path,
+            fix: "Choose an explicit registry root and retry after other writers finish.",
+          },
+          ExitCode.REFUSED,
+        );
+      }
+      await assertOwnedDirectory(current.catalog, catalogIdentity);
+      outcome = await publish(command, result, entries, rootMode, catalogIdentity);
+      return outcome;
+    });
+  } catch (error) {
+    if (!outcome?.data) throw error;
+    const failure = ioResult(command, error);
+    return makeResult(command, outcome.data, {
+      exit: ExitCode.PARTIAL,
+      findings: [...outcome.findings, ...failure.findings],
+    });
+  }
+}
+
 function receipt(record: Record<string, unknown>): ContentEntry {
   return {
     kind: "file",
@@ -223,7 +262,14 @@ export async function createSkill(
         })),
       ],
     };
-    return await publish(command, result, entries, 0o755, destination.catalogIdentity);
+    return await publishLocked(
+      command,
+      result,
+      entries,
+      0o755,
+      destination.catalogIdentity,
+      options,
+    );
   } catch (error) {
     return ioResult(command, error);
   }
@@ -326,12 +372,13 @@ export async function importSkill(
         })),
       ],
     };
-    return await publish(
+    return await publishLocked(
       command,
       result,
       entries,
       sourceInfo.mode & 0o777,
       destination.catalogIdentity,
+      options,
     );
   } catch (error) {
     return ioResult(command, error);

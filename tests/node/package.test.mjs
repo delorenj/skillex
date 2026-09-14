@@ -258,6 +258,9 @@ describe("published Node package", () => {
         inspectStatus, explainSkill, doctor,
         type DiagnosticOptions, type StatusResult, type ExplainResult,
         type DoctorOptions, type DoctorResult,
+        listVendorSources, showVendorSource, inspectVendorStatus, syncVendorSources,
+        type VendorOptions, type VendorSyncOptions, type VendorSourceListResult,
+        type VendorSourceShowResult, type VendorStatusResult, type VendorSyncResult,
         type Diagnostic, type ResultEnvelope, type Resolution, type ResolveOptions,
         type SkillListData, type SkillShowData,
       } from '${packageName}';
@@ -317,6 +320,12 @@ describe("published Node package", () => {
       const explanation: Promise<ResultEnvelope<ExplainResult | null>> = explainSkill('example', diagnosticOptions);
       const doctorOptions: DoctorOptions = { ...diagnosticOptions, sourcesOnly: true, processSnapshot: async () => '' };
       const health: Promise<ResultEnvelope<DoctorResult | null>> = doctor(doctorOptions);
+      const vendorOptions: VendorOptions = { registryRoot: '/catalog', sources: ['upstream'], checkouts: { 'repo-id': '/checkout' }, upstream: false, signal: { aborted: false } };
+      const vendorList: Promise<ResultEnvelope<VendorSourceListResult | null>> = listVendorSources(vendorOptions);
+      const vendorSource: Promise<ResultEnvelope<VendorSourceShowResult | null>> = showVendorSource('upstream', vendorOptions);
+      const vendorStatus: Promise<ResultEnvelope<VendorStatusResult | null>> = inspectVendorStatus(vendorOptions);
+      const vendorSyncOptions: VendorSyncOptions = { ...vendorOptions, stateHome: '/state', dryRun: true, adopt: true, discardLocalEdits: true, prune: true, timeoutMs: 200 };
+      const vendorSync: Promise<ResultEnvelope<VendorSyncResult | null>> = syncVendorSources(vendorSyncOptions);
       // @ts-expect-error Public result types must preserve the data payload shape.
       result.data.missing;
       // @ts-expect-error Diagnostic severity is a fixed vocabulary.

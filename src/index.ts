@@ -128,4 +128,23 @@ export {
   writeSelectionManifest,
 } from "./core/selection-manifest.js";
 export { addSetSkills, createSet, listSets, removeSetSkills, showSet } from "./core/sets.js";
+export { inspectVendorStatus, listVendorSources, showVendorSource } from "./core/vendor-inspect.js";
+export { syncVendorSources } from "./core/vendor-sync.js";
+export type {
+  VendorChange,
+  VendorCheckout,
+  VendorOptions,
+  VendorProvenance,
+  VendorProvenanceInput,
+  VendorSkillStatus,
+  VendorSource,
+  VendorSourceListResult,
+  VendorSourceResolution,
+  VendorSourceShowResult,
+  VendorSourceSkill,
+  VendorSourcesManifest,
+  VendorStatusResult,
+  VendorSyncOptions,
+  VendorSyncResult,
+} from "./core/vendor-types.js";
 export { VERSION } from "./version.js";

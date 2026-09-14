@@ -4,6 +4,7 @@ import { registerCompositionCommands } from "./commands/compositions.js";
 import { registerDiagnosticCommands } from "./commands/diagnostics.js";
 import { registerSelectionCommands } from "./commands/selections.js";
 import { registerSyncCommand } from "./commands/sync.js";
+import { registerVendorCommands } from "./commands/vendor.js";
 import {
   createSkill,
   ExitCode,
@@ -205,6 +206,7 @@ registerCompositionCommands(program, { emit, help });
 registerSelectionCommands(program, { emit });
 registerSyncCommand(program, { emit });
 registerDiagnosticCommands(program, { emit });
+registerVendorCommands(program, { emit, help });
 
 // Stop each parser at its subcommand so a parent cannot consume a local flag
 // such as pack create --version. Repeat shared flags at each level to retain

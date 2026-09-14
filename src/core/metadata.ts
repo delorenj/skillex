@@ -116,7 +116,7 @@ function yamlMapping(
   return value;
 }
 
-function frontmatter(content: string, path: string): Record<string, unknown> {
+export function parseSkillMetadata(content: string, path: string): Record<string, unknown> {
   const lines = content.split(/\r?\n/);
   if (!/^---[\t ]*$/.test(lines[0] ?? "")) return {};
   const end = lines.findIndex((line, index) => index > 0 && /^(---|\.\.\.)[\t ]*$/.test(line));
@@ -146,33 +146,37 @@ function frontmatter(content: string, path: string): Record<string, unknown> {
   return metadata;
 }
 
+/** Parse already-decoded receipt bytes, including blobs read from a local Git tree. */
+export function parseProvenanceMetadata(content: string, path: string): Record<string, unknown> {
+  const provenance = yamlMapping(content, path, "E_SKILL_PROVENANCE_INVALID");
+  if (
+    (provenance.origin !== undefined && !mapping(provenance.origin)) ||
+    (provenance.modified_locally !== undefined && typeof provenance.modified_locally !== "boolean")
+  ) {
+    fail(
+      "E_SKILL_PROVENANCE_INVALID",
+      "Provenance origin or modified_locally has an invalid type.",
+      {
+        path,
+        fix: "Use an origin mapping and a boolean modified_locally field; preserve the recorded source details.",
+      },
+    );
+  }
+  return provenance;
+}
+
 /** Read skill-owned metadata without changing names, provenance fields, or source bytes. */
 export async function readSkillMetadata(skillPath: string): Promise<SkillMetadata> {
   const path = await requireDirectory(skillPath, "E_SKILL_MISSING");
   const skillFile = join(path, "SKILL.md");
-  const metadata = frontmatter(await textFile(skillFile, "E_SKILL_MISSING"), skillFile);
+  const metadata = parseSkillMetadata(await textFile(skillFile, "E_SKILL_MISSING"), skillFile);
   const provenancePath = join(path, ".source.yaml");
   let provenance: Record<string, unknown> | null = null;
   if (await inspectPath(provenancePath)) {
-    provenance = yamlMapping(
+    provenance = parseProvenanceMetadata(
       await textFile(provenancePath, "E_SKILL_PROVENANCE_INVALID"),
       provenancePath,
-      "E_SKILL_PROVENANCE_INVALID",
     );
-    if (
-      (provenance.origin !== undefined && !mapping(provenance.origin)) ||
-      (provenance.modified_locally !== undefined &&
-        typeof provenance.modified_locally !== "boolean")
-    ) {
-      fail(
-        "E_SKILL_PROVENANCE_INVALID",
-        "Provenance origin or modified_locally has an invalid type.",
-        {
-          path: provenancePath,
-          fix: "Use an origin mapping and a boolean modified_locally field; preserve the recorded source details.",
-        },
-      );
-    }
   }
   return {
     description: typeof metadata.description === "string" ? metadata.description : null,

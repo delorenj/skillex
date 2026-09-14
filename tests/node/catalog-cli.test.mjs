@@ -14,7 +14,6 @@ import {
   symlinkSync,
   writeFileSync,
 } from "node:fs";
-import { tmpdir } from "node:os";
 import { dirname, join, relative } from "node:path";
 import { after, before, describe, it } from "node:test";
 import { createPackageFixture, packageName } from "./package-fixture.mjs";
@@ -55,7 +54,7 @@ function skillFile(name, description = "Temporary catalog skill", metadata = "")
 }
 
 function catalogFor(context) {
-  const root = realpathSync(mkdtempSync(join(tmpdir(), "skillex-catalog-cli-")));
+  const root = realpathSync(mkdtempSync("/tmp/skillex-catalog-cli-"));
   context.after(() => rmSync(root, { recursive: true, force: true }));
   const registry = join(root, "registry");
   for (const child of ["all-skills", "sets", "packs"]) {
@@ -126,10 +125,16 @@ function assertFilesPlanned(data) {
 
 describe("installed skill catalog CLI", () => {
   let fixture;
+  let state;
   before(() => {
     fixture = createPackageFixture();
+    state = realpathSync(mkdtempSync("/tmp/skillex-catalog-state-"));
+    fixture.environment.XDG_STATE_HOME = state;
   });
-  after(() => fixture?.cleanup());
+  after(() => {
+    fixture?.cleanup();
+    if (state) rmSync(state, { recursive: true, force: true });
+  });
 
   function envelope(args, command, exit = 0) {
     const result = fixture.runCli(args);

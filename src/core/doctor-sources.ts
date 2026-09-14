@@ -1,8 +1,8 @@
-import { lstat, readdir, readFile, realpath } from "node:fs/promises";
+import { readdir, readFile, realpath } from "node:fs/promises";
 import { basename, dirname, join, relative, sep } from "node:path";
 import { parse as parseToml } from "smol-toml";
 import { canonicalSkill, packInventory, setMembers, setMemberTarget } from "./composition.js";
-import { type ContentEntry, captureContent, digestContent, isWithin } from "./content.js";
+import { isWithin } from "./content.js";
 import type { DoctorSourceInspection } from "./doctor-types.js";
 import { fail, SkillexError } from "./error.js";
 import { inspectPath, requireDirectory } from "./filesystem.js";
@@ -11,6 +11,7 @@ import { readSkillMetadata } from "./metadata.js";
 import { verifyPack } from "./packs.js";
 import { type Diagnostic, ExitCode } from "./result.js";
 import type { RegistrySelection } from "./selection.js";
+import { digestRecordedSkill } from "./vendor-provenance.js";
 
 export interface SourceAudit {
   readonly data: DoctorSourceInspection;
@@ -234,38 +235,12 @@ export async function inspectDoctorSources(registry: RegistrySelection): Promise
       );
       return;
     }
-    let entries: ContentEntry[];
+    let actual: string;
     try {
-      const content = await captureContent(path);
-      entries = content.entries.map((entry) =>
-        entry.kind === "link" ? { ...entry, target: entry.originalTarget } : entry,
-      );
-      if (origin.type === "vendored") {
-        // Python's vendored tree contract includes every regular file, including
-        // names excluded by the Node import operation. Reuse its digest encoder.
-        for (const excluded of content.excluded)
-          if (excluded.split(sep).some((name) => [".git", ".hg", ".svn"].includes(name))) {
-            invariant(
-              join(path, excluded),
-              "Repository administration is not vendored skill content.",
-              "E_PROVENANCE_CONTENT_UNSAFE",
-            );
-            return;
-          }
-        for (const excluded of content.excluded)
-          await appendLegacyContent(path, join(path, excluded), entries);
-      }
-      if (
-        entries.some((entry) => entry.kind === "link") &&
-        origin.digest_format !== "skillex-tree-v1+symlinks"
-      ) {
-        invariant(
-          receipt,
-          "This recorded digest format does not support symbolic links.",
-          "E_PROVENANCE_CONTENT_UNSAFE",
-        );
-        return;
-      }
+      actual = await digestRecordedSkill(path, {
+        type: typeof origin.type === "string" ? origin.type : "local",
+        digestFormat: typeof origin.digest_format === "string" ? origin.digest_format : null,
+      });
     } catch (error) {
       if (error instanceof SkillexError && error.exit === ExitCode.REFUSED) {
         for (const finding of error.findings)
@@ -282,7 +257,6 @@ export async function inspectDoctorSources(registry: RegistrySelection): Promise
       }
       throw error;
     }
-    const actual = digestContent(entries);
     data.digestsChecked++;
     if (actual !== origin.digest)
       report(
@@ -451,40 +425,4 @@ async function toml(path: string, code: Diagnostic["code"]): Promise<Record<stri
       fix: "Correct the TOML source manifest and retry.",
     });
   }
-}
-
-async function appendLegacyContent(
-  root: string,
-  path: string,
-  entries: ContentEntry[],
-): Promise<void> {
-  const info = await lstat(path);
-  if (info.isDirectory()) {
-    for (const name of (await readdir(path)).sort())
-      await appendLegacyContent(root, join(path, name), entries);
-  } else if (info.isFile()) {
-    const bytes = await readFile(path);
-    const after = await lstat(path);
-    if (
-      info.dev !== after.dev ||
-      info.ino !== after.ino ||
-      info.mode !== after.mode ||
-      info.size !== after.size ||
-      info.mtimeMs !== after.mtimeMs
-    ) {
-      fail(
-        "E_PROVENANCE_CONTENT_UNSAFE",
-        "Skill content changed during observation.",
-        { path },
-        ExitCode.REFUSED,
-      );
-    }
-    entries.push({ path: relative(root, path), kind: "file", mode: info.mode & 0o777, bytes });
-  } else
-    fail(
-      "E_PROVENANCE_CONTENT_UNSAFE",
-      "Legacy vendored digests require regular content.",
-      { path },
-      ExitCode.REFUSED,
-    );
 }

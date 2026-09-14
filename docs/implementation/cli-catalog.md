@@ -58,6 +58,12 @@ checks. Existing files, links, or directories are never replaced. A filesystem
 failure after publication starts reports incomplete creation and the partial
 destination; it does not claim rollback or complete success.
 
+With SKRILL-17, create and import share the canonical catalog lock with vendor
+sync. Destination discovery and identity checks repeat under the lock before
+publication. Lock and recovery state stay in XDG state outside repositories;
+the public write options accept `stateHome`, `timeoutMs`, and a cancellation
+signal. Dry-run remains read-only.
+
 Catalog commands author source declarations. Activation remains the job of the
 later selection and reconciliation commands.
 
