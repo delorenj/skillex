@@ -552,13 +552,17 @@ test("set wrapper ownership is explicit and inline relative routes are checked",
   assert.deepEqual((await readdir(path)).sort(), ["alpha", "hub-router"]);
 });
 
-test("hidden system definitions are preserved and receive top-level canonical set membership", async (t) => {
+test("hidden system definitions are preserved and referenced in place without gaining set membership", async (t) => {
   const f = await fixture(t);
   await f.skill(join(f.set("global"), ".system", "alpha"));
-  resultIs(await migrate({ ...f.options, apply: true }), 0);
-  assert.equal(await realpath(join(f.set("global"), "alpha")), f.canonical("alpha"));
+  const data = resultIs(await migrate({ ...f.options, apply: true }), 0);
+  // The bytes move to the catalog, because a composition may hold no real definition...
   assert.equal(await realpath(join(f.set("global"), ".system", "alpha")), f.canonical("alpha"));
   assert.ok((await lstat(join(f.set("global"), ".system"))).isDirectory());
+  // ...but activation never read a hidden entry as a member, so none is invented at the top.
+  assert.equal(existsSync(join(f.set("global"), "alpha")), false);
+  const item = data.items.find((entry) => entry.path === f.set("global"));
+  assert.ok(item.details.includes("Canonical membership: "), item.details.join("\n"));
 });
 
 test("linked external set roots become real compositions while external source content survives", async (t) => {
@@ -921,6 +925,41 @@ test("an alias identical to a canonical except for generated entries is retired 
     );
   }
   assert.deepEqual(await snapshot(legacy), external);
+});
+
+// Activation never reads dot- or underscore-prefixed set entries (composition.ts setMembers),
+// and neither did the legacy projector. The real sets/global/.system is a gitignored,
+// Codex-written projection (a marker plus links); promoting it to top-level membership would
+// track six new links and widen every activation that inherits the set.
+test("hidden and underscore projection entries in a set never become canonical membership", async (t) => {
+  const f = await fixture(t);
+  for (const name of ["alpha", "bravo", "imagegen", "skill-creator"])
+    await f.skill(f.canonical(name));
+  const external = await f.skill(join(f.root, "installer", "external-tool"));
+  const set = f.set("global");
+  await mkdir(join(set, ".system"), { recursive: true });
+  await mkdir(join(set, "_archive"), { recursive: true });
+  await symlink("../../all-skills/alpha", join(set, "alpha"));
+  await f.file(join(set, ".lastagent"), "codex 1789428008\n");
+  await f.file(join(set, ".system", ".codex-system-skills.marker"), "codex-managed\n");
+  await symlink("../../../all-skills/imagegen", join(set, ".system", "imagegen"));
+  await symlink("../../../all-skills/skill-creator", join(set, ".system", "skill-creator"));
+  await symlink(external, join(set, ".system", "external-tool"));
+  await symlink("../../../all-skills/bravo", join(set, "_archive", "bravo"));
+  const before = await snapshot(f.root);
+  for (const apply of [false, true]) {
+    const result = await migrate({ ...f.options, apply });
+    const data = resultIs(result, 0);
+    const item = data.items.find((entry) => entry.path === set);
+    assert.equal(item?.action, "preserve-composition", JSON.stringify(item));
+    assert.equal(item.state, "preserved");
+    assert.ok(item.details.includes("Canonical membership: alpha"), item.details.join("\n"));
+    // Installer-owned content is never claimed for the catalog.
+    assert.equal(existsSync(f.canonical("external-tool")), false);
+    assert.ok(!data.items.some((entry) => entry.path === join(set, ".system", "external-tool")));
+    assert.deepEqual(data.applied, []);
+    assert.deepEqual(await snapshot(f.root), before);
+  }
 });
 
 test("portable internal support links survive relocation", async (t) => {

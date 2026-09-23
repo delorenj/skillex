@@ -208,6 +208,14 @@ const runtimeContentFix =
 function runtimeContentMessage(holder: "candidate definition" | "composition"): string {
   return `A ${holder} contains generated build, cache, or runtime content that migration never carries or removes.`;
 }
+/**
+ * Dot- and underscore-prefixed entries are outside a composition's namespace: activation never
+ * reads them as members (composition.ts setMembers), and the legacy projector dropped them at
+ * every depth. A Codex-written `.system/` projection inside a set is exactly this.
+ */
+function hiddenPath(path: string): boolean {
+  return path.split(sep).some((part) => part.startsWith(".") || part.startsWith("_"));
+}
 /** Honest preservation wording: never claim bytes that were skipped. */
 function skippedDetail(skipped: readonly string[], where: string): string[] {
   return skipped.length
@@ -695,6 +703,9 @@ async function composition(plan: Plan, path: string, kind: "set" | "pack"): Prom
     if (
       !entry.path ||
       entry.kind !== "link" ||
+      // A hidden link is outside the composition's namespace: never a member, never rewritten,
+      // and its referent (often installer-owned) is never imported into the catalog.
+      hiddenPath(entry.path) ||
       definitionRoots.some((parent) => entry.path.startsWith(`${parent}${sep}`))
     )
       continue;
@@ -763,7 +774,11 @@ async function composition(plan: Plan, path: string, kind: "set" | "pack"): Prom
     if (kind === "pack" || dirname(member.relativePath) !== ".")
       entries.push(memberLink(plan, destination, member.relativePath, member.name));
   }
-  let selected = members.map((member) => member.name);
+  // A real definition under a hidden entry is still imported and referenced in place (a
+  // composition may hold no real definition), but it never gains membership it did not have.
+  let selected = members
+    .filter((member) => !hiddenPath(member.relativePath))
+    .map((member) => member.name);
   if (kind === "pack") {
     const declared: string[] = [];
     if (

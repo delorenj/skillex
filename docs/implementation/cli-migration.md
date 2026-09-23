@@ -58,12 +58,18 @@ alias), the item names every generated entry it did not copy, and it only
 says "All captured definition bytes ... are preserved" when it skipped none.
 Authored files over 128 MiB still block with `E_MIGRATION_CONTENT`.
 
-Sets become real collections of canonical links. Hidden legacy containers such
-as `.system` expand into explicit members. Pack containers expand once into
-canonical manifest membership and generated `skills/` links. Pack-level support
-assets and useful provenance remain pack-owned; slots and copied-payload policy
-are retired with the item evidence. Unknown fields, missing content, unsafe
-links, and unsupported topology keep the affected item intact and blocked.
+Sets become real collections of canonical links. Dot- and underscore-prefixed
+entries at any depth (a Codex-written `.system/` projection, `_archive/`) are
+outside the composition's namespace, as activation reads it (`setMembers`) and
+as the legacy projector did: they never become canonical membership, their
+links are left untouched, and their referents are never imported. Only a real
+definition inside one is imported and replaced in place by its canonical link,
+because a composition may hold no real definition; it still gains no
+membership. Pack containers expand once into canonical manifest membership and
+generated `skills/` links. Pack-level support assets and useful provenance
+remain pack-owned; slots and copied-payload policy are retired with the item
+evidence. Unknown fields, missing content, unsafe links, and unsupported
+topology keep the affected item intact and blocked.
 
 Wrapper skills at a set root require explicit ownership of their support paths.
 Relative routes must still work from the new canonical location; migration
