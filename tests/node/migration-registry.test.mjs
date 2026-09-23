@@ -779,6 +779,150 @@ test("an unchanged composition keeps its generated content without blocking", as
   assert.deepEqual(await snapshot(f.root), before);
 });
 
+// Import skips secrets, logs and backups by name; migration must not. These are authored files
+// (the real catalog tracks n8n-self-hosting/assets/.env.queue.example and
+// starship-customization/.logs/subtask2.log), and a legacy composition holding a copy of such a
+// skill must migrate byte for byte instead of being refused as "generated" content.
+const authoredButImportExcluded = {
+  [join("assets", ".env.queue.example")]: "QUEUE=redis\n",
+  [join("assets", ".env.single.example")]: "MODE=single\n",
+  [join(".logs", "subtask2.log")]: "fixture log\n",
+  [join("tests", "fixtures", "app.log")]: "GET / 200\n",
+  ".env.local": "LOCAL=1\n",
+  [join("docs", "guide.md.orig")]: "original guide\n",
+  [join("docs", "notes.bak")]: "backup notes\n",
+  [join("docs", "draft~")]: "draft\n",
+};
+
+test("authored example, log, backup and env files in a legacy composition migrate byte for byte", async (t) => {
+  const f = await fixture(t);
+  const source = await f.skill(
+    join(f.set("legacy"), "n8n-legacy"),
+    "---\nname: n8n-legacy\n---\n# Legacy copy\n",
+  );
+  for (const [path, bytes] of Object.entries(authoredButImportExcluded))
+    await f.file(join(source, path), bytes);
+  const before = await snapshot(f.root);
+  const preview = await migrate(f.options);
+  const data = resultIs(preview, 0);
+  assert.ok(!preview.findings.some((item) => item.code === "E_MIGRATION_RUNTIME_CONTENT"));
+  const imported = data.items.find(
+    (item) => item.action === "import-definition" && item.path === f.canonical("n8n-legacy"),
+  );
+  assert.equal(imported?.state, "ready", JSON.stringify(data.items));
+  assert.ok(imported.details.some((line) => line.startsWith("All captured definition bytes")));
+  assert.ok(
+    data.items.some(
+      (item) =>
+        item.path === f.set("legacy") &&
+        item.action === "canonicalize-set" &&
+        item.state === "ready",
+    ),
+  );
+  assert.deepEqual(await snapshot(f.root), before);
+
+  resultIs(await migrate({ ...f.options, apply: true }), 0);
+  for (const [path, bytes] of Object.entries(authoredButImportExcluded))
+    assert.equal(await readFile(join(f.canonical("n8n-legacy"), path), "utf8"), bytes, path);
+  assert.equal(await realpath(join(f.set("legacy"), "n8n-legacy")), f.canonical("n8n-legacy"));
+
+  // They are evidence too: changing an authored log changes the canonical digest.
+  const digest = async () =>
+    (await migrate(f.options)).data.items.find((item) => item.path === f.canonical("n8n-legacy"))
+      .beforeDigest;
+  const first = await digest();
+  await f.file(join(f.canonical("n8n-legacy"), "tests", "fixtures", "app.log"), "GET / 500\n");
+  assert.notEqual(await digest(), first);
+});
+
+test("materializing a linked canonical carries authored files and discloses only the generated ones it skips", async (t) => {
+  const f = await fixture(t);
+  const source = await f.skill(join(f.root, "ext", "logparse"));
+  const authored = {
+    [join("tests", "fixtures", "app.log")]: "GET / 200\n",
+    [join("assets", ".env.prod.example")]: "HOST=example\n",
+  };
+  for (const [path, bytes] of Object.entries(authored)) await f.file(join(source, path), bytes);
+  await f.file(join(source, "scripts", "__pycache__", "parse.cpython-312.pyc"), "bytecode\n");
+  await f.file(join(source, "node_modules", "pkg", "index.js"), "module.exports=1\n");
+  await symlink(source, f.canonical("logparse"));
+  const external = await snapshot(source);
+  const data = resultIs(await migrate({ ...f.options, apply: true }), 0);
+  assert.ok((await lstat(f.canonical("logparse"))).isDirectory());
+  for (const [path, bytes] of Object.entries(authored))
+    assert.equal(await readFile(join(f.canonical("logparse"), path), "utf8"), bytes, path);
+  assert.equal(existsSync(join(f.canonical("logparse"), "node_modules")), false);
+  assert.equal(existsSync(join(f.canonical("logparse"), "scripts", "__pycache__")), false);
+  const item = data.items.find(
+    (entry) => entry.action === "materialize-canonical" && entry.path === f.canonical("logparse"),
+  );
+  assert.equal(item?.state, "verified", JSON.stringify(data.items));
+  // Never claim every byte was preserved when some were skipped; name exactly what was skipped.
+  assert.ok(!item.details.some((line) => line.startsWith("All captured")), item.details.join("\n"));
+  const skipped = item.details.filter((line) => line.includes("not copied"));
+  assert.equal(skipped.length, 1, item.details.join("\n"));
+  assert.ok(skipped[0].includes("node_modules"), skipped[0]);
+  assert.ok(skipped[0].includes(join("scripts", "__pycache__")), skipped[0]);
+  assert.ok(!skipped[0].includes("app.log") && !skipped[0].includes(".env.prod.example"));
+  assert.deepEqual(await snapshot(source), external);
+});
+
+async function aliasedLegacy(f, extra) {
+  await f.skill(f.canonical("canonical"));
+  const legacy = await f.skill(join(f.root, "ext", "legacy"));
+  await extra(legacy);
+  await symlink(legacy, f.canonical("legacy"));
+  await mkdir(f.set("tools"), { recursive: true });
+  await symlink("../../all-skills/legacy", join(f.set("tools"), "legacy"));
+  return legacy;
+}
+
+test("an alias that differs from a canonical only by an authored log is materialized, never retired as identical", async (t) => {
+  const f = await fixture(t);
+  const legacy = await aliasedLegacy(f, (path) =>
+    f.file(join(path, "sample.log"), "authored sample\n"),
+  );
+  const external = await snapshot(legacy);
+  const data = resultIs(await migrate({ ...f.options, apply: true }), 0);
+  assert.ok(
+    !data.items.some((item) => item.action === "retire-canonical-alias"),
+    JSON.stringify(data.items),
+  );
+  assert.ok((await lstat(f.canonical("legacy"))).isDirectory());
+  assert.equal(
+    await readFile(join(f.canonical("legacy"), "sample.log"), "utf8"),
+    "authored sample\n",
+  );
+  assert.equal(await realpath(join(f.set("tools"), "legacy")), f.canonical("legacy"));
+  assert.deepEqual(await snapshot(legacy), external);
+});
+
+test("an alias identical to a canonical except for generated entries is retired and says what stays behind", async (t) => {
+  const f = await fixture(t);
+  const legacy = await aliasedLegacy(f, (path) =>
+    f.file(join(path, "__pycache__", "helper.cpython-312.pyc"), "bytecode\n"),
+  );
+  const external = await snapshot(legacy);
+  const data = resultIs(await migrate({ ...f.options, apply: true }), 0);
+  assert.deepEqual(await readdir(join(f.registryRoot, "all-skills")), ["canonical"]);
+  assert.equal(await realpath(join(f.set("tools"), "canonical")), f.canonical("canonical"));
+  for (const action of ["retire-canonical-alias", "reuse-definition"]) {
+    const item = data.items.find(
+      (entry) => entry.action === action && entry.path === f.canonical("legacy"),
+    );
+    assert.ok(item, `${action}: ${JSON.stringify(data.items)}`);
+    assert.ok(
+      item.details.some((line) => line.includes("__pycache__") && line.includes("not carried")),
+      `${action}: ${item.details.join("\n")}`,
+    );
+    assert.ok(
+      !item.details.some((line) => line.startsWith("Identical definition content")),
+      `${action}: ${item.details.join("\n")}`,
+    );
+  }
+  assert.deepEqual(await snapshot(legacy), external);
+});
+
 test("portable internal support links survive relocation", async (t) => {
   const f = await fixture(t);
   const source = await f.skill(join(f.set("tools"), "alpha"));

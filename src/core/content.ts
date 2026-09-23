@@ -25,10 +25,9 @@ export function isWithin(root: string, path: string): boolean {
   return child === "" || (!isAbsolute(child) && child !== ".." && !child.startsWith(`..${sep}`));
 }
 
+const repositoryNames = new Set([".git", ".hg", ".svn"]);
+
 const generatedNames = new Set([
-  ".git",
-  ".hg",
-  ".svn",
   ".DS_Store",
   "__pycache__",
   ".pytest_cache",
@@ -41,13 +40,25 @@ const generatedNames = new Set([
 ]);
 
 /**
- * Generated, runtime, backup, and secret entries that are never skill content. Shared by
- * import (captureContent) and migration (captureMigrationTree) so both agree on the same set.
+ * Build, cache, and runtime artifacts that a tool writes and can write again: dependency trees,
+ * bytecode, virtualenvs, caches, pid/socket/WAL files. Never authored skill content. This is the
+ * only set migration may skip: it carries every other entry, because a migration that drops an
+ * authored file (an `.env.<variant>.example`, a `*.log` fixture, a `*.bak`) destroys it.
  */
-export function excludedName(name: string): boolean {
+export function generatedName(name: string): boolean {
+  return generatedNames.has(name) || /\.(?:pyc|pyo|pid|sock|db-wal|db-shm)$/.test(name);
+}
+
+/**
+ * Import-time exclusions: generated artifacts plus repository administration, logs, backups, and
+ * secrets. A fresh import is a deliberate curation step that may leave these behind; migration
+ * of existing content is not, and uses generatedName instead.
+ */
+function excludedName(name: string): boolean {
   return (
-    generatedNames.has(name) ||
-    /(?:\.(?:pyc|pyo|pid|sock|db-wal|db-shm|log|bak|orig)|~)$/.test(name) ||
+    repositoryNames.has(name) ||
+    generatedName(name) ||
+    /(?:\.(?:log|bak|orig)|~)$/.test(name) ||
     /(?:\.bak-|-backup\.)/.test(name) ||
     (/^\.env(?:\.|$)/.test(name) &&
       ![".env.op", ".env.example", ".env.sample", ".env.template"].includes(name))

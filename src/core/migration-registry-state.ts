@@ -14,7 +14,7 @@ import {
 } from "node:fs/promises";
 import { dirname, join, relative, sep } from "node:path";
 import { type ReceiptSnapshot, readBoundReceipt, writeBoundReceipt } from "./activation-state.js";
-import { excludedName, isWithin } from "./content.js";
+import { generatedName, isWithin } from "./content.js";
 import { fail } from "./error.js";
 import type { MigrationItem, MigrationOptions } from "./migration-types.js";
 import { ExitCode } from "./result.js";
@@ -50,8 +50,9 @@ export interface MigrationTree {
   readonly evidence: MigrationTreeEvidence;
   readonly entries: readonly MigrationEntry[];
   /**
-   * Relative paths of entries skipped by excludedName (generated, runtime, backup, or secret
-   * content). They are never read, digested, copied, or removed; they are not evidence.
+   * Relative paths of entries skipped by generatedName (build, cache, and runtime artifacts a
+   * tool rewrites). They are never read, digested, copied, or removed; they are not evidence.
+   * Authored files that import leaves behind (logs, backups, `.env.*`) are never skipped here.
    */
   readonly excluded: readonly string[];
 }
@@ -208,10 +209,12 @@ async function regularBytes(path: string, before: BigIntStats): Promise<Buffer> 
 }
 
 /**
- * Capture every authored entry, including hidden support assets and provenance, without
- * following links. Generated, runtime, backup, and secret entries (excludedName, the same set
- * import skips) are recorded in `excluded` but never read: a skill's ignored node_modules or
- * render cache is not definition content and must not trip the size limit or the digest.
+ * Capture every authored entry, including hidden support assets, logs, backups, `.env.*` files
+ * and provenance, without following links. Only generated build, cache, and runtime artifacts
+ * (generatedName) are recorded in `excluded` and never read: a skill's ignored node_modules or
+ * bytecode is not definition content and must not trip the size limit or the digest. Import's
+ * wider secret/noise filter is deliberately not applied: migration that skipped an authored
+ * file would drop it from the catalog.
  */
 export async function captureMigrationTree(root: string): Promise<MigrationTree | null> {
   const initial = await migrationLstat(root);
@@ -253,7 +256,7 @@ export async function captureMigrationTree(root: string): Promise<MigrationTree 
             "E_MIGRATION_CONTENT",
           );
         const child = relpath ? join(relpath, name) : name;
-        if (excludedName(name)) {
+        if (generatedName(name)) {
           excluded.push(child);
           continue;
         }
@@ -283,10 +286,10 @@ export function refuseExcludedRemoval(path: string, tree: MigrationTree): void {
   if (first === undefined) return;
   fail(
     "E_MIGRATION_RUNTIME_CONTENT",
-    `Migration would remove generated, runtime, backup, or secret content it never migrates: ${tree.excluded.join(", ")}`,
+    `Migration would remove generated build, cache, or runtime content it never migrates: ${tree.excluded.join(", ")}`,
     {
       path: join(path, first),
-      fix: "Remove only verified generated entries, or move authored ones elsewhere, then rerun the migration preview.",
+      fix: "Remove only verified generated entries (their tools rebuild them), or move them elsewhere, then rerun the migration preview.",
     },
     ExitCode.REFUSED,
   );

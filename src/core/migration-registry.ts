@@ -69,6 +69,8 @@ interface Plan {
   readonly externalRoots: Set<string>;
   readonly canonical: Map<string, KnownSkill>;
   readonly imported: Map<string, KnownSkill>;
+  /** Generated entries below each imported source that migration did not carry, by lexical path. */
+  readonly skipped: Map<string, readonly string[]>;
 }
 interface Member {
   readonly relativePath: string;
@@ -202,9 +204,17 @@ function refuse(path: string, code: Diagnostic["code"], message: string): never 
   );
 }
 const runtimeContentFix =
-  "Remove only verified generated entries (or move authored ones outside the composition), then rerun the migration preview.";
+  "Remove only verified generated entries (their tools rebuild them), or move them outside the composition, then rerun the migration preview.";
 function runtimeContentMessage(holder: "candidate definition" | "composition"): string {
-  return `A ${holder} contains generated, runtime, backup, or secret content that migration never carries or removes.`;
+  return `A ${holder} contains generated build, cache, or runtime content that migration never carries or removes.`;
+}
+/** Honest preservation wording: never claim bytes that were skipped. */
+function skippedDetail(skipped: readonly string[], where: string): string[] {
+  return skipped.length
+    ? [
+        `Generated build, cache, or runtime entries ${where} are not definition content: they are not copied, not carried, and stay at the source: ${skipped.join(", ")}`,
+      ]
+    : [];
 }
 /** A composition that migration replaces is removed whole, so it may hold no excluded content. */
 function runtimeContent(path: string, holder: "candidate definition" | "composition"): never {
@@ -391,8 +401,21 @@ async function importDefinition(
         excluded: captured.excluded,
       }
     : captured;
-  // Generated/runtime entries (captured.excluded) are never part of `tree`, so they are never
-  // copied into the catalog. A source that migration later removes is refused in composition().
+  // Generated entries (captured.excluded) are never part of `tree`, so they are never copied into
+  // the catalog. A source that migration later removes is refused in composition(); every other
+  // source keeps them, and the plan says exactly which were left behind. A wrapper owns only its
+  // selected paths, so only generated entries below those count as skipped from its definition.
+  const skipped = selected
+    ? captured.excluded.filter((item) =>
+        selected.some(
+          (entry) =>
+            entry.kind === "directory" &&
+            entry.path !== "" &&
+            item.startsWith(`${entry.path}${sep}`),
+        ),
+      )
+    : captured.excluded;
+  plan.skipped.set(lexicalSource, skipped);
   const expected =
     mapped(plan.options.mapping?.digests, plan, lexicalSource) ??
     mapped(plan.options.mapping?.digests, plan, source);
@@ -452,12 +475,10 @@ async function importDefinition(
       details: [
         `source: ${lexicalSource}`,
         `canonical name: ${name}`,
-        "All captured definition bytes, support entries, modes, and provenance are preserved; internal absolute links are made portable.",
-        ...(!selected && captured.excluded.length
-          ? [
-              `Generated/runtime entries are not migrated and stay at the source: ${captured.excluded.join(", ")}`,
-            ]
-          : []),
+        skipped.length
+          ? "Every authored definition byte, support entry, mode, and provenance is preserved; internal absolute links are made portable."
+          : "All captured definition bytes, support entries, modes, and provenance are preserved; internal absolute links are made portable.",
+        ...skippedDetail(skipped, "at this source"),
       ],
       dependsOn: [],
     };
@@ -480,6 +501,7 @@ async function importDefinition(
       dependency
         ? "Definition is retained at its canonical destination before its original composition entry is replaced."
         : "Existing canonical authored payload is identical; differing original provenance is preserved separately in the migration receipt.",
+      ...skippedDetail(skipped, "at this source"),
     ],
     dependsOn: dependency ? [dependency] : [],
   });
@@ -1020,6 +1042,7 @@ async function prepare(
     externalRoots: new Set(previousExternalRoots),
     canonical: new Map(),
     imported: new Map(),
+    skipped: new Map(),
   };
   const catalog = join(registry.root, "all-skills");
   const links: string[] = [];
@@ -1097,9 +1120,14 @@ async function prepare(
           state: "ready",
           beforeDigest: before.evidence.digest,
           afterDigest: skill.digest,
-          details: [
-            "Identical definition content is retained at the canonical target; retire only this exact alias after composition rewrites.",
-          ],
+          details: plan.skipped.get(path)?.length
+            ? [
+                "Identical authored definition content is retained at the canonical target; retire only this exact alias after composition rewrites.",
+                ...skippedDetail(plan.skipped.get(path) ?? [], "at the alias source"),
+              ]
+            : [
+                "Identical definition content is retained at the canonical target; retire only this exact alias after composition rewrites.",
+              ],
           dependsOn: skill.dependency ? [skill.dependency] : [],
         };
         plan.items.push(item);
