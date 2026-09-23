@@ -14,7 +14,7 @@ import {
 } from "node:fs/promises";
 import { dirname, join, relative, sep } from "node:path";
 import { type ReceiptSnapshot, readBoundReceipt, writeBoundReceipt } from "./activation-state.js";
-import { isWithin } from "./content.js";
+import { excludedName, isWithin } from "./content.js";
 import { fail } from "./error.js";
 import type { MigrationItem, MigrationOptions } from "./migration-types.js";
 import { ExitCode } from "./result.js";
@@ -49,6 +49,11 @@ export interface MigrationTreeEvidence {
 export interface MigrationTree {
   readonly evidence: MigrationTreeEvidence;
   readonly entries: readonly MigrationEntry[];
+  /**
+   * Relative paths of entries skipped by excludedName (generated, runtime, backup, or secret
+   * content). They are never read, digested, copied, or removed; they are not evidence.
+   */
+  readonly excluded: readonly string[];
 }
 
 export interface MigrationOperation {
@@ -202,11 +207,17 @@ async function regularBytes(path: string, before: BigIntStats): Promise<Buffer> 
   }
 }
 
-/** Capture every entry, including hidden support assets and provenance, without following links. */
+/**
+ * Capture every authored entry, including hidden support assets and provenance, without
+ * following links. Generated, runtime, backup, and secret entries (excludedName, the same set
+ * import skips) are recorded in `excluded` but never read: a skill's ignored node_modules or
+ * render cache is not definition content and must not trip the size limit or the digest.
+ */
 export async function captureMigrationTree(root: string): Promise<MigrationTree | null> {
   const initial = await migrationLstat(root);
   if (!initial) return null;
   const entries: MigrationEntry[] = [];
+  const excluded: string[] = [];
   const evidence: {
     path: string;
     identity: MigrationIdentity;
@@ -241,7 +252,12 @@ export async function captureMigrationTree(root: string): Promise<MigrationTree 
             "A definition or composition contains repository administration; map its authored content explicitly.",
             "E_MIGRATION_CONTENT",
           );
-        await visit(join(path, name), relpath ? join(relpath, name) : name);
+        const child = relpath ? join(relpath, name) : name;
+        if (excludedName(name)) {
+          excluded.push(child);
+          continue;
+        }
+        await visit(join(path, name), child);
       }
     }
     if (!stable(before, await lstat(path, { bigint: true })))
@@ -253,7 +269,27 @@ export async function captureMigrationTree(root: string): Promise<MigrationTree 
   return {
     entries,
     evidence: { root: identity(initial), entries: evidence, digest: migrationTreeDigest(entries) },
+    excluded,
   };
+}
+
+/**
+ * Migration removes a parked or retired tree only through its recorded evidence, and excluded
+ * content is never evidence. Refuse before anything is renamed or unlinked instead of deleting
+ * unrecorded content or wedging on a non-empty directory halfway through cleanup.
+ */
+export function refuseExcludedRemoval(path: string, tree: MigrationTree): void {
+  const first = tree.excluded[0];
+  if (first === undefined) return;
+  fail(
+    "E_MIGRATION_RUNTIME_CONTENT",
+    `Migration would remove generated, runtime, backup, or secret content it never migrates: ${tree.excluded.join(", ")}`,
+    {
+      path: join(path, first),
+      fix: "Remove only verified generated entries, or move authored ones elsewhere, then rerun the migration preview.",
+    },
+    ExitCode.REFUSED,
+  );
 }
 
 export async function assertMigrationIdentity(
@@ -397,6 +433,7 @@ export async function removeMigrationTree(
   const currentTree = await captureMigrationTree(path);
   if (!currentTree) return;
   await assertMigrationIdentity(path, expected.root);
+  refuseExcludedRemoval(path, currentTree);
   for (const current of currentTree.evidence.entries) {
     const known = expected.entries.find((entry) => entry.path === current.path);
     if (!known || JSON.stringify(known) !== JSON.stringify(current))
@@ -597,6 +634,8 @@ export async function publishMigrationOperation(operation: MigrationOperation): 
   } else {
     if (destination) {
       await assertMigrationTree(operation.path, operation.before);
+      // A parked original is always removed afterwards; never park what cannot be removed.
+      refuseExcludedRemoval(operation.path, destination);
       if (!operation.parked || parked)
         migrationFailure(operation.path, "Cannot park the original migration entry safely.");
       await assertMigrationTree(operation.parked, null);

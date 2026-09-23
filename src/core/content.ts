@@ -40,7 +40,11 @@ const generatedNames = new Set([
   "node_modules",
 ]);
 
-function excludedName(name: string): boolean {
+/**
+ * Generated, runtime, backup, and secret entries that are never skill content. Shared by
+ * import (captureContent) and migration (captureMigrationTree) so both agree on the same set.
+ */
+export function excludedName(name: string): boolean {
   return (
     generatedNames.has(name) ||
     /(?:\.(?:pyc|pyo|pid|sock|db-wal|db-shm|log|bak|orig)|~)$/.test(name) ||

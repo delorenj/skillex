@@ -37,6 +37,17 @@ definition; distinct provenance remains in the migration receipt. Differing
 payloads receive source-qualified names, with explicit mappings for ambiguous
 cases. Skill support files and executable modes remain part of the inventory.
 
+Generated, runtime, backup, and secret entries are not definition content.
+Migration skips the same names that import skips (`node_modules`, `.cache`,
+`.venv`, `__pycache__`, `*.pyc`, `*.log`, `*.bak`, `.env*`, and the rest of
+`excludedName` in `src/core/content.ts`): they are never read, digested,
+size-checked, or copied, so an ignored build tree inside a real canonical
+definition does not block migration. They are also never removed. A
+composition that migration would replace (and therefore park and delete) is
+blocked with `E_MIGRATION_RUNTIME_CONTENT` while it holds excluded entries;
+remove the verified generated ones, then preview again. Authored files over
+128 MiB still block with `E_MIGRATION_CONTENT`.
+
 Sets become real collections of canonical links. Hidden legacy containers such
 as `.system` expand into explicit members. Pack containers expand once into
 canonical manifest membership and generated `skills/` links. Pack-level support

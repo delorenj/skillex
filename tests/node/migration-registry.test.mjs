@@ -12,7 +12,9 @@ import {
   realpath,
   rename,
   rm,
+  stat,
   symlink,
+  truncate,
   writeFile,
 } from "node:fs/promises";
 import { dirname, join, relative } from "node:path";
@@ -662,6 +664,119 @@ test("Python runtime caches block candidate imports while preserving source and 
     assert.deepEqual(data.applied, []);
     assert.deepEqual(await snapshot(f.root), before);
   }
+});
+
+const overLimit = 129 * 1024 * 1024;
+async function sparse(path, size = overLimit) {
+  await mkdir(dirname(path), { recursive: true });
+  await writeFile(path, "");
+  await truncate(path, size);
+  const info = await stat(path);
+  assert.equal(info.size, size);
+  // Sparse: the fixture claims no real disk for its >128 MiB payload.
+  assert.ok(info.blocks * 512 < 1024 * 1024, `expected a sparse file, got ${info.blocks} blocks`);
+  return path;
+}
+
+test("ignored node_modules in a canonical definition never trips the content limit or its digest", async (t) => {
+  const f = await fixture(t);
+  const canonical = await f.skill(f.canonical("letterifier"));
+  await f.file(join(canonical, "remotion", "package.json"), '{"name":"render"}\n');
+  const bundled = await sparse(
+    join(canonical, "remotion", "node_modules", ".remotion", "chrome-headless-shell"),
+  );
+  await f.file(
+    join(canonical, "remotion", "node_modules", "pkg", "index.js"),
+    "module.exports=1\n",
+  );
+  const before = await snapshot(f.root);
+  for (const apply of [false, true]) {
+    const result = await migrate({ ...f.options, apply });
+    const data = resultIs(result, 0);
+    assert.ok(!result.findings.some((item) => item.code === "E_MIGRATION_CONTENT"));
+    const item = data.items.find((entry) => entry.path === canonical);
+    assert.equal(item?.action, "preserve-canonical");
+    assert.equal(item?.state, "preserved");
+    assert.equal((await stat(bundled)).size, overLimit);
+  }
+  assert.deepEqual(await snapshot(f.root), before);
+
+  // The digest is the authored definition only: dropping the generated tree leaves it unchanged.
+  const withGenerated = (await migrate(f.options)).data.items.find(
+    (entry) => entry.path === canonical,
+  ).beforeDigest;
+  await rm(join(canonical, "remotion", "node_modules"), { recursive: true });
+  const authoredOnly = (await migrate(f.options)).data.items.find(
+    (entry) => entry.path === canonical,
+  ).beforeDigest;
+  assert.equal(withGenerated, authoredOnly);
+});
+
+test("an authored file over 128 MiB still blocks its canonical definition", async (t) => {
+  const f = await fixture(t);
+  const canonical = await f.skill(f.canonical("letterifier"));
+  await sparse(join(canonical, "remotion", "node_modules", "huge.bin"));
+  const authored = await sparse(join(canonical, "assets", "huge.bin"));
+  const before = await snapshot(f.root);
+  for (const apply of [false, true]) {
+    const result = await migrate({ ...f.options, apply });
+    const data = resultIs(result, 3, "E_MIGRATION_CONTENT");
+    const content = result.findings.filter((item) => item.code === "E_MIGRATION_CONTENT");
+    assert.deepEqual(
+      content.map((item) => item.path),
+      [authored],
+    );
+    assert.ok(data.items.some((item) => item.path === canonical && item.state === "blocked"));
+    assert.deepEqual(data.applied, []);
+  }
+  assert.deepEqual(await snapshot(f.root), before);
+});
+
+test("a composition that migration would replace refuses generated content it cannot remove", async (t) => {
+  const f = await fixture(t);
+  await f.skill(join(f.set("tools"), "alpha"));
+  const generated = join(f.set("tools"), "node_modules");
+  await f.file(join(generated, "pkg", "index.js"), "module.exports=1\n");
+  const setBefore = await snapshot(f.set("tools"));
+  // Apply still imports the clean definition (a copy), so it reports a partial result (4);
+  // the composition itself, and its generated tree, are never parked or removed.
+  for (const [apply, exit] of [
+    [false, 3],
+    [true, 4],
+  ]) {
+    const result = await migrate({ ...f.options, apply });
+    const data = resultIs(result, exit, "E_MIGRATION_RUNTIME_CONTENT");
+    assert.ok(
+      result.findings.some(
+        (item) =>
+          item.code === "E_MIGRATION_RUNTIME_CONTENT" &&
+          item.path === generated &&
+          item.fix.includes("verified generated"),
+      ),
+    );
+    assert.ok(data.items.some((item) => item.path === f.set("tools") && item.state === "blocked"));
+    assert.deepEqual(await snapshot(f.set("tools")), setBefore);
+  }
+  // Once the generated tree is gone the same composition migrates cleanly.
+  await rm(generated, { recursive: true });
+  resultIs(await migrate({ ...f.options, apply: true }), 0);
+  assert.equal(await realpath(join(f.set("tools"), "alpha")), f.canonical("alpha"));
+});
+
+test("an unchanged composition keeps its generated content without blocking", async (t) => {
+  const f = await fixture(t);
+  await f.skill(f.canonical("alpha"));
+  await mkdir(f.set("tools"), { recursive: true });
+  await symlink("../../all-skills/alpha", join(f.set("tools"), "alpha"));
+  await f.file(join(f.set("tools"), ".DS_Store"), "finder\n");
+  const before = await snapshot(f.root);
+  const data = resultIs(await migrate({ ...f.options, apply: true }), 0);
+  assert.ok(
+    data.items.some(
+      (item) => item.path === f.set("tools") && item.action === "preserve-composition",
+    ),
+  );
+  assert.deepEqual(await snapshot(f.root), before);
 });
 
 test("portable internal support links survive relocation", async (t) => {

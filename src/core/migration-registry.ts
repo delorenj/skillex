@@ -201,6 +201,20 @@ function refuse(path: string, code: Diagnostic["code"], message: string): never 
     ExitCode.REFUSED,
   );
 }
+const runtimeContentFix =
+  "Remove only verified generated entries (or move authored ones outside the composition), then rerun the migration preview.";
+function runtimeContentMessage(holder: "candidate definition" | "composition"): string {
+  return `A ${holder} contains generated, runtime, backup, or secret content that migration never carries or removes.`;
+}
+/** A composition that migration replaces is removed whole, so it may hold no excluded content. */
+function runtimeContent(path: string, holder: "candidate definition" | "composition"): never {
+  fail(
+    "E_MIGRATION_RUNTIME_CONTENT",
+    runtimeContentMessage(holder),
+    { path, fix: runtimeContentFix },
+    ExitCode.REFUSED,
+  );
+}
 function safeKey(value: string): boolean {
   const parts = value.split("/");
   return (
@@ -374,21 +388,11 @@ async function importDefinition(
     ? {
         entries: selected,
         evidence: { ...captured.evidence, digest: migrationTreeDigest(selected) },
+        excluded: captured.excluded,
       }
     : captured;
-  const runtime = tree.entries.find((entry) =>
-    entry.path.split(sep).some((part) => part === "__pycache__" || /\.py[co]$/.test(part)),
-  );
-  if (runtime)
-    fail(
-      "E_MIGRATION_RUNTIME_CONTENT",
-      "A candidate definition contains generated Python cache content.",
-      {
-        path: join(lexicalSource, runtime.path),
-        fix: "Remove only verified generated Python cache entries from the source, then rerun the migration preview.",
-      },
-      ExitCode.REFUSED,
-    );
+  // Generated/runtime entries (captured.excluded) are never part of `tree`, so they are never
+  // copied into the catalog. A source that migration later removes is refused in composition().
   const expected =
     mapped(plan.options.mapping?.digests, plan, lexicalSource) ??
     mapped(plan.options.mapping?.digests, plan, source);
@@ -449,6 +453,11 @@ async function importDefinition(
         `source: ${lexicalSource}`,
         `canonical name: ${name}`,
         "All captured definition bytes, support entries, modes, and provenance are preserved; internal absolute links are made portable.",
+        ...(!selected && captured.excluded.length
+          ? [
+              `Generated/runtime entries are not migrated and stay at the source: ${captured.excluded.join(", ")}`,
+            ]
+          : []),
       ],
       dependsOn: [],
     };
@@ -644,6 +653,9 @@ async function composition(plan: Plan, path: string, kind: "set" | "pack"): Prom
           "E_MIGRATION_REFERENCE",
           "A null reference mapping cannot remove a real definition; name and preserve its content instead.",
         );
+      // This source is removed with its composition, and excluded content is never evidence.
+      const generated = before.excluded.find((item) => item.startsWith(`${definition}${sep}`));
+      if (generated !== undefined) runtimeContent(join(path, generated), "candidate definition");
       const skill = await importDefinition(plan, lexical, basename(definition));
       members.push({
         relativePath: definition,
@@ -911,6 +923,20 @@ async function composition(plan: Plan, path: string, kind: "set" | "pack"): Prom
   entries = entries.sort((a, b) => a.path.localeCompare(b.path));
   const afterDigest = migrationTreeDigest(entries);
   const changed = destination !== path || before.evidence.digest !== afterDigest;
+  // Replacing or retiring a real composition parks and removes it through its evidence;
+  // excluded entries outside a candidate definition (reported above) would block that removal.
+  if (changed)
+    for (const item of before.excluded) {
+      if (definitionRoots.some((root) => item.startsWith(`${root}${sep}`))) continue;
+      finding(
+        plan,
+        join(path, item),
+        "E_MIGRATION_RUNTIME_CONTENT",
+        runtimeContentMessage("composition"),
+        runtimeContentFix,
+      );
+      hasBlocker = true;
+    }
   const dependencies = [
     ...new Set(members.flatMap((member) => (member.dependency ? [member.dependency] : []))),
   ];
