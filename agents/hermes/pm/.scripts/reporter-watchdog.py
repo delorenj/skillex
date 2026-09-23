@@ -145,9 +145,7 @@ def main() -> int:
     names = [job.get("name") for job in jobs if isinstance(job, dict)]
     duplicates = sorted({name for name in names if name and names.count(name) > 1})
     missing = sorted(EXPECTED_JOBS - set(names))
-    unexpected = sorted(
-        {name for name in names if name and name.startswith(f"{JOB_PREFIX}:")} - EXPECTED_JOBS
-    )
+    unexpected = sorted({name for name in names if name and name.startswith(f"{JOB_PREFIX}:")} - EXPECTED_JOBS)
     if duplicates:
         critical.append({"code": "duplicate_managed_jobs", "detail": ",".join(duplicates)})
     if missing:
@@ -173,10 +171,7 @@ def main() -> int:
     else:
         critical.append({"code": "missing_cron_tick", "detail": str(tick_lock)})
 
-    daily = next(
-        (job for job in jobs if isinstance(job, dict) and job.get("name") == f"{JOB_PREFIX}:daily"),
-        {},
-    )
+    daily = next((job for job in jobs if isinstance(job, dict) and job.get("name") == f"{JOB_PREFIX}:daily"), {})
     state = str(daily.get("last_status") or daily.get("status") or "").lower()
     if state in {"failed", "error"}:
         critical.append({"code": "daily_job_failed", "detail": state})
@@ -187,21 +182,17 @@ def main() -> int:
         config = {}
         critical.append({"code": "config_unreadable", "detail": str(CONFIG)})
     daily_config = (
-        config.get("daily", {})
-        if isinstance(config, dict) and isinstance(config.get("daily"), dict)
-        else {}
+        config.get("daily", {}) if isinstance(config, dict) and isinstance(config.get("daily"), dict) else {}
     )
-    deliver = daily_config.get("deliver")
+    deliver = (
+        daily_config.get("deliver")
+    )
     if deliver != "telegram":
         warnings.append({"code": "telegram_delivery_not_activated", "detail": str(deliver)})
 
     archive_dir = Path(config.get("archive_dir", "")) if isinstance(config, dict) else Path()
     current = archive_dir / eastern.strftime("%Y/%m/%Y-%m-%d/current.json")
-    if (
-        daily_config.get("enabled")
-        and (eastern.hour, eastern.minute) >= (8, 15)
-        and not current.is_file()
-    ):
+    if daily_config.get("enabled") and (eastern.hour, eastern.minute) >= (8, 15) and not current.is_file():
         critical.append({"code": "daily_report_missed", "detail": str(current)})
 
     homes = gateway_homes()
@@ -211,10 +202,7 @@ def main() -> int:
     for home, units in sorted(homes.items()):
         if len(units) > 1 and home != str(target):
             warnings.append(
-                {
-                    "code": "fleet_gateway_home_duplicated",
-                    "detail": f"{home}: {','.join(sorted(units))}",
-                }
+                {"code": "fleet_gateway_home_duplicated", "detail": f"{home}: {','.join(sorted(units))}"}
             )
 
     codes = sorted(item["code"] for item in critical)
@@ -241,9 +229,7 @@ def main() -> int:
         "critical": critical,
         "warnings": warnings,
         "tick_age_seconds": tick_age,
-        "managed_jobs": sorted(
-            name for name in names if name and name.startswith(f"{JOB_PREFIX}:")
-        ),
+        "managed_jobs": sorted(name for name in names if name and name.startswith(f"{JOB_PREFIX}:")),
         "delivery": deliver,
         "alert_error": alert_error,
     }

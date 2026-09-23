@@ -27,17 +27,8 @@ Commands (exit 0 = you hold it; 1 = someone else holds it fresh; 2 = usage/error
   release <lockfile> <owner>
   status  <lockfile>                     # always exit 0
 """
-
 from __future__ import annotations
-
-import argparse
-import fcntl
-import json
-import os
-import socket
-import sys
-import tempfile
-import time
+import argparse, fcntl, json, os, socket, sys, tempfile, time
 
 
 def _read(path: str):
@@ -68,56 +59,34 @@ def _guard(lockfile: str):
 
 
 def acquire(lockfile: str, owner: str, ttl: int, steal: bool) -> int:
-    now = time.time()
-    g = _guard(lockfile)
+    now = time.time(); g = _guard(lockfile)
     try:
         cur = _read(lockfile)
         if cur and cur.get("owner") != owner and _fresh(cur, now) and not steal:
-            print(
-                f"HELD by {cur['owner']} (fresh, {int(now - cur['heartbeat_at'])}s ago) — back off"
-            )
+            print(f"HELD by {cur['owner']} (fresh, {int(now - cur['heartbeat_at'])}s ago) — back off")
             return 1
-        started = (
-            cur["started_at"]
-            if (cur and cur.get("owner") == owner and "started_at" in cur)
-            else now
-        )
-        _write_atomic(
-            lockfile,
-            {
-                "owner": owner,
-                "pid": os.getpid(),
-                "host": socket.gethostname(),
-                "started_at": started,
-                "heartbeat_at": now,
-                "ttl": ttl,
-            },
-        )
-        print(
-            f"ACQUIRED by {owner}"
-            + (" (stole stale lease)" if (cur and cur.get("owner") != owner) else "")
-        )
+        started = cur["started_at"] if (cur and cur.get("owner") == owner and "started_at" in cur) else now
+        _write_atomic(lockfile, {
+            "owner": owner, "pid": os.getpid(), "host": socket.gethostname(),
+            "started_at": started, "heartbeat_at": now, "ttl": ttl,
+        })
+        print(f"ACQUIRED by {owner}" + (" (stole stale lease)" if (cur and cur.get('owner') != owner) else ""))
         return 0
     finally:
-        fcntl.flock(g, fcntl.LOCK_UN)
-        g.close()
+        fcntl.flock(g, fcntl.LOCK_UN); g.close()
 
 
 def refresh(lockfile: str, owner: str) -> int:
-    now = time.time()
-    g = _guard(lockfile)
+    now = time.time(); g = _guard(lockfile)
     try:
         cur = _read(lockfile)
         if not cur or cur.get("owner") != owner:
             print(f"NOT OWNER (held by {cur.get('owner') if cur else 'nobody'}) — cannot refresh")
             return 1
         cur["heartbeat_at"] = now
-        _write_atomic(lockfile, cur)
-        print("REFRESHED")
-        return 0
+        _write_atomic(lockfile, cur); print("REFRESHED"); return 0
     finally:
-        fcntl.flock(g, fcntl.LOCK_UN)
-        g.close()
+        fcntl.flock(g, fcntl.LOCK_UN); g.close()
 
 
 def release(lockfile: str, owner: str) -> int:
@@ -125,50 +94,36 @@ def release(lockfile: str, owner: str) -> int:
     try:
         cur = _read(lockfile)
         if cur and cur.get("owner") != owner:
-            print(f"NOT OWNER (held by {cur['owner']}) — not releasing")
-            return 1
+            print(f"NOT OWNER (held by {cur['owner']}) — not releasing"); return 1
         try:
             os.remove(lockfile)
         except FileNotFoundError:
             pass
-        print("RELEASED")
-        return 0
+        print("RELEASED"); return 0
     finally:
-        fcntl.flock(g, fcntl.LOCK_UN)
-        g.close()
+        fcntl.flock(g, fcntl.LOCK_UN); g.close()
 
 
 def status(lockfile: str) -> int:
-    now = time.time()
-    cur = _read(lockfile)
+    now = time.time(); cur = _read(lockfile)
     if not cur:
-        print("FREE (no lease)")
-        return 0
+        print("FREE (no lease)"); return 0
     state = "fresh" if _fresh(cur, now) else "STALE"
-    print(
-        f"{cur['owner']} — {state} (heartbeat {int(now - cur.get('heartbeat_at', 0))}s ago, "
-        f"ttl {cur.get('ttl')}s, pid {cur.get('pid')}@{cur.get('host')})"
-    )
+    print(f"{cur['owner']} — {state} (heartbeat {int(now - cur.get('heartbeat_at', 0))}s ago, "
+          f"ttl {cur.get('ttl')}s, pid {cur.get('pid')}@{cur.get('host')})")
     return 0
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(
-        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
-    )
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("cmd", choices=["acquire", "refresh", "release", "status"])
     ap.add_argument("lockfile")
     ap.add_argument("owner", nargs="?")
-    ap.add_argument(
-        "--ttl", type=int, default=300, help="freshness window in seconds (default 300)"
-    )
-    ap.add_argument(
-        "--steal", action="store_true", help="take an explicitly stale lease immediately"
-    )
+    ap.add_argument("--ttl", type=int, default=300, help="freshness window in seconds (default 300)")
+    ap.add_argument("--steal", action="store_true", help="take an explicitly stale lease immediately")
     a = ap.parse_args()
     if a.cmd in ("acquire", "refresh", "release") and not a.owner:
-        print("owner required", file=sys.stderr)
-        return 2
+        print("owner required", file=sys.stderr); return 2
     if a.cmd == "acquire":
         return acquire(a.lockfile, a.owner, a.ttl, a.steal)
     if a.cmd == "refresh":

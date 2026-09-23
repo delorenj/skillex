@@ -52,6 +52,10 @@ extend-exclude = [
   ".codex",
   "scripts",
   "docs",
+  # Hermes role scaffold: vendored verbatim from hermes-agent-template and
+  # compared byte-for-byte by `flume audit --rules hermes.pm-scaffold`; a
+  # reformat here turns every refreshed script into a "locally-modified" one.
+  "agents/hermes",
 ]
 
 [tool.ruff.lint]

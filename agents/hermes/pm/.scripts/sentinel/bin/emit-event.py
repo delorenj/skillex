@@ -5,7 +5,6 @@ Dependency-free. Appends JSONL locally so the sentinel engine records an
 event trail even when NATS/BloodBank is offline. Identical envelope shape to the
 Hermes gateway; see .scripts/sentinel/docs/bloodbank-events.md.
 """
-
 from __future__ import annotations
 
 import argparse
@@ -14,11 +13,11 @@ import os
 import pathlib
 import sys
 import uuid
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 
 
 def now_iso() -> str:
-    return datetime.now(UTC).isoformat().replace("+00:00", "Z")
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
 def parse_field(raw: str) -> tuple[str, str]:
@@ -56,14 +55,9 @@ def main() -> int:
     parser.add_argument("--field", action="append", type=parse_field, default=[])
     parser.add_argument("--data-json")
     parser.add_argument("--source")
-    parser.add_argument(
-        "--producer", default=os.environ.get("BLOODBANK_PRODUCER", "local-script:sentinel")
-    )
+    parser.add_argument("--producer", default=os.environ.get("BLOODBANK_PRODUCER", "local-script:sentinel"))
     parser.add_argument("--service", default=os.environ.get("BLOODBANK_SERVICE", "hermes-sentinel"))
-    parser.add_argument(
-        "--actor-id",
-        default=os.environ.get("BLOODBANK_ACTOR_ID", os.environ.get("USER", "local-agent")),
-    )
+    parser.add_argument("--actor-id", default=os.environ.get("BLOODBANK_ACTOR_ID", os.environ.get("USER", "local-agent")))
     parser.add_argument("--actor-cli", default=os.environ.get("BLOODBANK_ACTOR_CLI", "script"))
     parser.add_argument("--correlation-id", default=os.environ.get("BLOODBANK_CORRELATION_ID"))
     parser.add_argument("--causation-id", default=os.environ.get("BLOODBANK_CAUSATION_ID"))
