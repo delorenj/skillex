@@ -60,6 +60,14 @@ resolver converts failures to an envelope and does not print or exit.
   checkout, then the conventional home checkout. Invalid explicit roots never
   fall through. Relative roots retain their invocation-directory meaning for
   both scopes. A bare npm installation is not mistaken for a catalog.
+- A candidate whose `all-skills/` is an empty directory declared as a git
+  submodule in `.gitmodules` (a plain `git clone`/`git pull` of the catalog, the
+  shape a stale `~/.agents/.cache/registries/<url>` cache takes) fails with
+  `E_REGISTRY_ROOT` and a fix naming `git submodule update --init --recursive`
+  (plus `git pull --ff-only` for a cache). It never falls through: selecting a
+  different catalog silently would be as wrong as selecting an empty one. The
+  core never clones or fetches, so a cache stays exactly as current as whoever
+  last refreshed it.
 
 ## Acceptance evidence
 

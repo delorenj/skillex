@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import {
   lstat,
   mkdir,
@@ -388,6 +389,101 @@ test("no local catalog reports all searched candidates without creating a cache"
     },
   );
   assert.deepEqual(await snapshot(f.root), before);
+});
+
+// Real git, not a hand-written .gitmodules: a plain clone of the catalog leaves its
+// all-skills submodule as an empty directory, which is exactly what a URL registry cache
+// looked like when every project-selected skill reported E_SKILL_MISSING (SKRILL-22).
+async function catalogRepositories(t) {
+  const root = await realpath(await mkdtemp("/tmp/skillex-discovery-submodule-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const xdg = join(root, "xdg");
+  await mkdir(xdg);
+  const env = {
+    ...process.env,
+    GIT_CONFIG_NOSYSTEM: "1",
+    GIT_CONFIG_GLOBAL: "/dev/null",
+    XDG_CONFIG_HOME: xdg,
+    GIT_CEILING_DIRECTORIES: root,
+    GIT_TERMINAL_PROMPT: "0",
+    GIT_AUTHOR_NAME: "Catalog fixture",
+    GIT_AUTHOR_EMAIL: "catalog@example.test",
+    GIT_COMMITTER_NAME: "Catalog fixture",
+    GIT_COMMITTER_EMAIL: "catalog@example.test",
+  };
+  const git = (cwd, ...args) => {
+    const result = spawnSync(
+      "git",
+      ["-c", "protocol.file.allow=always", "-c", "commit.gpgsign=false", "-C", cwd, ...args],
+      { encoding: "utf8", env },
+    );
+    assert.ifError(result.error);
+    assert.equal(result.status, 0, `git ${args.join(" ")}: ${result.stderr}`);
+    return result.stdout.trim();
+  };
+  const skills = join(root, "skills");
+  await mkdir(join(skills, "alpha"), { recursive: true });
+  await writeFile(join(skills, "alpha", "SKILL.md"), "---\nname: alpha\n---\n# Alpha\n");
+  git(skills, "init", "-q", "-b", "main");
+  git(skills, "add", ".");
+  git(skills, "commit", "-q", "-m", "skills");
+  const catalog = join(root, "catalog");
+  await mkdir(join(catalog, "sets"), { recursive: true });
+  await writeFile(join(catalog, "sets", ".keep"), "");
+  git(catalog, "init", "-q", "-b", "main");
+  git(catalog, "submodule", "add", "-q", skills, "all-skills");
+  git(catalog, "add", ".");
+  git(catalog, "commit", "-q", "-m", "catalog");
+  return { root, catalog, git };
+}
+
+test("an uninitialized all-skills submodule is refused with its repair, never selected", async (t) => {
+  const f = await fixture(t);
+  const repos = await catalogRepositories(t);
+  const registry = "https://example.test/org/catalog.git";
+  const cache = join(
+    f.home,
+    ".agents",
+    ".cache",
+    "registries",
+    "https___example_test_org_catalog_git",
+  );
+  await mkdir(dirname(cache), { recursive: true });
+  repos.git(dirname(cache), "clone", "-q", repos.catalog, cache);
+  assert.deepEqual(await readdir(join(cache, "all-skills")), []);
+  // A complete fallback checkout exists; a broken cache must not silently fall through to it.
+  await checkout(join(f.home, "code", "skillex"));
+  const before = await snapshot(f.root);
+  await assert.rejects(discoverRegistry({ ...f.registry, registry }), (error) => {
+    failure("E_REGISTRY_ROOT")(error);
+    const [finding] = error.findings;
+    assert.equal(finding.path, join(cache, "all-skills"));
+    assert.match(finding.message, /uninitialized git submodule/);
+    assert.match(finding.fix, /pull --ff-only/);
+    assert.match(finding.fix, /submodule update --init --recursive/);
+    return true;
+  });
+  await assert.rejects(discoverRegistry({ ...f.registry, registryRoot: cache }), (error) => {
+    failure("E_REGISTRY_ROOT")(error);
+    assert.match(error.findings[0].fix, /submodule update --init --recursive/);
+    assert.doesNotMatch(error.findings[0].fix, /pull --ff-only/);
+    return true;
+  });
+  assert.deepEqual(await snapshot(f.root), before);
+
+  // The repair the fix names is sufficient: the cache becomes the selected, populated catalog.
+  repos.git(cache, "submodule", "update", "-q", "--init", "--recursive");
+  const result = await discoverRegistry({ ...f.registry, registry });
+  assert.deepEqual(result, { root: cache, source: "cache", searched: [cache] });
+  assert.ok((await lstat(join(cache, "all-skills", "alpha", "SKILL.md"))).isFile());
+});
+
+test("an empty all-skills that is not a submodule remains a valid empty catalog", async (t) => {
+  const f = await fixture(t);
+  const chosen = await checkout(join(f.home, "catalog"));
+  await writeFile(join(chosen, ".gitmodules"), '[submodule "vendor"]\n\tpath = vendor\n');
+  const result = await discoverRegistry({ ...f.registry, registryRoot: chosen });
+  assert.equal(result.root, chosen);
 });
 
 test("all-skills must be a real directory rather than an activation-style symlink", async (t) => {

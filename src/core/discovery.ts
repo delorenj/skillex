@@ -1,5 +1,5 @@
 import type { Stats } from "node:fs";
-import { lstat, realpath, stat } from "node:fs/promises";
+import { lstat, readdir, readFile, realpath, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join, parse, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -195,7 +195,33 @@ async function installedPackageRoot(): Promise<string> {
   }
 }
 
-async function catalogRoot(path: string, required: boolean): Promise<string | undefined> {
+/**
+ * all-skills/ is a git submodule of the catalog repository. A plain `git clone` or `git pull`
+ * of the catalog leaves it as an empty directory: structurally a catalog, but holding nothing.
+ * Accepting that silently turns every selected skill into E_SKILL_MISSING against a path that
+ * was never populated, so an empty, submodule-declared catalog is a named failure instead.
+ */
+async function uninitializedCatalog(root: string, catalog: string): Promise<boolean> {
+  let declaration: string;
+  try {
+    declaration = await readFile(join(root, ".gitmodules"), "utf8");
+  } catch (error) {
+    if (["ENOENT", "ENOTDIR"].includes((error as NodeJS.ErrnoException).code ?? "")) return false;
+    return ioFailure(join(root, ".gitmodules"), error);
+  }
+  if (!/^[\t ]*path[\t ]*=[\t ]*"?all-skills\/?"?[\t ]*$/m.test(declaration)) return false;
+  try {
+    return (await readdir(catalog)).length === 0;
+  } catch (error) {
+    return ioFailure(catalog, error);
+  }
+}
+
+async function catalogRoot(
+  path: string,
+  required: boolean,
+  source?: RegistrySelection["source"],
+): Promise<string | undefined> {
   const found = await entry(path);
   if (!found) {
     if (!required) return undefined;
@@ -226,6 +252,20 @@ async function catalogRoot(path: string, required: boolean): Promise<string | un
       fix: "Select the owning catalog checkout, or run skillex migrate to repair its topology.",
     });
   }
+  if (await uninitializedCatalog(root, catalog)) {
+    const quoted = JSON.stringify(root);
+    fail(
+      "E_REGISTRY_ROOT",
+      `The registry's all-skills/ catalog is an uninitialized git submodule: ${catalog}`,
+      {
+        path: catalog,
+        fix:
+          source === "cache"
+            ? `skillex never clones or fetches this registry cache. Bring it current and populate its catalog: git -C ${quoted} pull --ff-only && git -C ${quoted} submodule update --init --recursive. Or drop the manifest's registry field, or pin a complete checkout with PJ_SKILLS_REGISTRY_ROOT.`
+            : `Populate the catalog submodule: git -C ${quoted} submodule update --init --recursive. Or select a complete checkout with --registry-root or PJ_SKILLS_REGISTRY_ROOT.`,
+      },
+    );
+  }
   return root;
 }
 
@@ -243,7 +283,7 @@ export async function discoverRegistry(options: RegistryOptions = {}): Promise<R
     const path = absolutePath(value, cwd, home, "E_REGISTRY_ROOT", "registry root");
     if (searched.includes(path)) return undefined;
     searched.push(path);
-    const root = await catalogRoot(path, required);
+    const root = await catalogRoot(path, required, source);
     return root ? { root, source, searched: [...searched] } : undefined;
   };
   if (options.registryRoot !== undefined) {
