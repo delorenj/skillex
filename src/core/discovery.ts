@@ -1,8 +1,10 @@
+import { execFile } from "node:child_process";
 import type { Stats } from "node:fs";
 import { lstat, readdir, readFile, realpath, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join, parse, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
 import { fail } from "./error.js";
 import { type Diagnostic, ExitCode } from "./result.js";
 import type {
@@ -195,26 +197,94 @@ async function installedPackageRoot(): Promise<string> {
   }
 }
 
+const execute = promisify(execFile);
+
 /**
- * all-skills/ is a git submodule of the catalog repository. A plain `git clone` or `git pull`
- * of the catalog leaves it as an empty directory: structurally a catalog, but holding nothing.
- * Accepting that silently turns every selected skill into E_SKILL_MISSING against a path that
- * was never populated, so an empty, submodule-declared catalog is a named failure instead.
+ * What the catalog repository's own index records at all-skills: a gitlink (a submodule), a tree
+ * of ordinary tracked files (a catalog from before all-skills became a submodule), or nothing git
+ * can vouch for (not a repository, not its top level, or no git). Read-only: ls-files never
+ * refreshes the index, and optional locks are off. Inherited GIT_* variables are dropped so an
+ * enclosing hook or worktree cannot redirect the query.
  */
-async function uninitializedCatalog(root: string, catalog: string): Promise<boolean> {
+async function recordedCatalog(root: string): Promise<"gitlink" | "tree" | undefined> {
+  const env: NodeJS.ProcessEnv = {};
+  for (const [key, value] of Object.entries(process.env))
+    if (!key.startsWith("GIT_")) env[key] = value;
+  let stdout: string;
+  try {
+    ({ stdout } = await execute(
+      "git",
+      ["-C", root, "ls-files", "--stage", "--full-name", "-z", "--", "all-skills"],
+      {
+        encoding: "utf8",
+        maxBuffer: 64 * 1024 * 1024,
+        env: {
+          ...env,
+          GIT_OPTIONAL_LOCKS: "0",
+          GIT_TERMINAL_PROMPT: "0",
+          GIT_CONFIG_NOSYSTEM: "1",
+          GIT_CONFIG_GLOBAL: "/dev/null",
+        },
+      },
+    ));
+  } catch {
+    return undefined;
+  }
+  const records = stdout.split("\0").filter(Boolean);
+  // --full-name paths are relative to the repository top level, so a root nested inside some
+  // other repository never matches these exact catalog paths.
+  if (records.some((record) => /^160000 [0-9a-f]+ \d\tall-skills$/.test(record))) return "gitlink";
+  if (records.some((record) => /^\d{6} [0-9a-f]+ \d\tall-skills\//.test(record))) return "tree";
+  return undefined;
+}
+
+async function holdsDefinition(catalog: string, names: readonly string[]): Promise<boolean> {
+  for (const name of names) {
+    try {
+      if ((await stat(join(catalog, name, "SKILL.md"))).isFile()) return true;
+    } catch {
+      // Not a skill directory (a stray file, a leftover cache tree, a dangling link).
+    }
+  }
+  return false;
+}
+
+/**
+ * all-skills/ is a git submodule of the catalog repository. A plain `git clone` of the catalog
+ * leaves it empty, and a cache cloned while it was still ordinary tracked files and then pulled
+ * across the conversion keeps whatever ignored files were inside it (a script's __pycache__, a
+ * .env). Either way it is structurally a catalog holding no definitions, and accepting it turns
+ * every selected skill into E_SKILL_MISSING against a path that was never populated. Emptiness
+ * is therefore not the test. A declared all-skills without its own .git is uninitialized when
+ * the repository's index records it as a gitlink or, when git cannot say, when it holds no skill
+ * definition at all. Returns the entries git would refuse to populate over, or undefined.
+ */
+async function uninitializedCatalog(
+  root: string,
+  catalog: string,
+): Promise<readonly string[] | undefined> {
   let declaration: string;
   try {
     declaration = await readFile(join(root, ".gitmodules"), "utf8");
   } catch (error) {
-    if (["ENOENT", "ENOTDIR"].includes((error as NodeJS.ErrnoException).code ?? "")) return false;
+    if (["ENOENT", "ENOTDIR"].includes((error as NodeJS.ErrnoException).code ?? "")) {
+      return undefined;
+    }
     return ioFailure(join(root, ".gitmodules"), error);
   }
-  if (!/^[\t ]*path[\t ]*=[\t ]*"?all-skills\/?"?[\t ]*$/m.test(declaration)) return false;
+  if (!/^[\t ]*path[\t ]*=[\t ]*"?all-skills\/?"?[\t ]*$/m.test(declaration)) return undefined;
+  if (await entry(join(catalog, ".git"))) return undefined;
+  let names: string[];
   try {
-    return (await readdir(catalog)).length === 0;
+    names = (await readdir(catalog)).sort();
   } catch (error) {
     return ioFailure(catalog, error);
   }
+  if (!names.length) return names;
+  const recorded = await recordedCatalog(root);
+  if (recorded === "gitlink") return names;
+  if (recorded === "tree") return undefined;
+  return (await holdsDefinition(catalog, names)) ? undefined : names;
 }
 
 async function catalogRoot(
@@ -252,8 +322,16 @@ async function catalogRoot(
       fix: "Select the owning catalog checkout, or run skillex migrate to repair its topology.",
     });
   }
-  if (await uninitializedCatalog(root, catalog)) {
+  const leftovers = await uninitializedCatalog(root, catalog);
+  if (leftovers) {
     const quoted = JSON.stringify(root);
+    const more = leftovers.length > 8 ? `, and ${leftovers.length - 8} more` : "";
+    // git refuses to populate a submodule over a non-empty directory, so the repair has to say so.
+    const clear = leftovers.length
+      ? `First move the entries git left in all-skills/ (${leftovers.slice(0, 8).join(", ")}${more}) somewhere outside it, such as a sibling directory, keeping anything you still need: git will not populate a non-empty directory. Then `
+      : "";
+    const step = (text: string): string =>
+      clear ? `${clear}${text}` : `${text.charAt(0).toUpperCase()}${text.slice(1)}`;
     fail(
       "E_REGISTRY_ROOT",
       `The registry's all-skills/ catalog is an uninitialized git submodule: ${catalog}`,
@@ -261,8 +339,8 @@ async function catalogRoot(
         path: catalog,
         fix:
           source === "cache"
-            ? `skillex never clones or fetches this registry cache. Bring it current and populate its catalog: git -C ${quoted} pull --ff-only && git -C ${quoted} submodule update --init --recursive. Or drop the manifest's registry field, or pin a complete checkout with PJ_SKILLS_REGISTRY_ROOT.`
-            : `Populate the catalog submodule: git -C ${quoted} submodule update --init --recursive. Or select a complete checkout with --registry-root or PJ_SKILLS_REGISTRY_ROOT.`,
+            ? `skillex never clones or fetches this registry cache. ${step(`bring it current and populate its catalog: git -C ${quoted} pull --ff-only && git -C ${quoted} submodule update --init --recursive.`)} Or drop the manifest's registry field, or pin a complete checkout with PJ_SKILLS_REGISTRY_ROOT.`
+            : `${step(`populate the catalog submodule: git -C ${quoted} submodule update --init --recursive.`)} Or select a complete checkout with --registry-root or PJ_SKILLS_REGISTRY_ROOT.`,
       },
     );
   }

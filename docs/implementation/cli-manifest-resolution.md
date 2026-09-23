@@ -60,14 +60,21 @@ resolver converts failures to an envelope and does not print or exit.
   checkout, then the conventional home checkout. Invalid explicit roots never
   fall through. Relative roots retain their invocation-directory meaning for
   both scopes. A bare npm installation is not mistaken for a catalog.
-- A candidate whose `all-skills/` is an empty directory declared as a git
-  submodule in `.gitmodules` (a plain `git clone`/`git pull` of the catalog, the
-  shape a stale `~/.agents/.cache/registries/<url>` cache takes) fails with
-  `E_REGISTRY_ROOT` and a fix naming `git submodule update --init --recursive`
-  (plus `git pull --ff-only` for a cache). It never falls through: selecting a
-  different catalog silently would be as wrong as selecting an empty one. The
-  core never clones or fetches, so a cache stays exactly as current as whoever
-  last refreshed it.
+- A candidate whose `all-skills/` is declared as a git submodule in
+  `.gitmodules` but has no `all-skills/.git` is an uninitialized catalog when
+  the repository's index records `all-skills` as a gitlink or, when git cannot
+  say (no repository, not its top level, no git), when it holds no skill
+  definition. Emptiness is not the test: a cache cloned while `all-skills` was
+  ordinary tracked files and pulled across the submodule conversion keeps its
+  ignored leftovers (`__pycache__`, `.env`). It fails with `E_REGISTRY_ROOT` and
+  a fix naming `git submodule update --init --recursive` (plus `git pull
+  --ff-only` for a cache), preceded by the leftover entries to move out of the
+  way, because git will not populate a non-empty directory. The index query is
+  a read-only `git ls-files --stage` with inherited `GIT_*` variables dropped.
+  A populated catalog whose index still tracks ordinary files stays selectable.
+  It never falls through: selecting a different catalog silently would be as
+  wrong as selecting an empty one. The core never clones or fetches, so a cache
+  stays exactly as current as whoever last refreshed it.
 
 ## Acceptance evidence
 

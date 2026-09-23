@@ -8,6 +8,7 @@ import {
   readFile,
   readlink,
   realpath,
+  rename,
   rm,
   symlink,
   writeFile,
@@ -476,6 +477,130 @@ test("an uninitialized all-skills submodule is refused with its repair, never se
   const result = await discoverRegistry({ ...f.registry, registry });
   assert.deepEqual(result, { root: cache, source: "cache", searched: [cache] });
   assert.ok((await lstat(join(cache, "all-skills", "alpha", "SKILL.md"))).isFile());
+});
+
+// A cache cloned while all-skills was still ordinary tracked files, then brought forward with
+// `git pull --ff-only` across the submodule conversion: git deletes the tracked files but leaves
+// ignored ones (a skill script's __pycache__, a .env) in place. all-skills is then non-empty,
+// holds no skill definition and has no .git, and `submodule update --init` refuses to populate
+// it. Emptiness is not the signal; an uninitialized declared submodule is.
+async function pulledAcrossSubmoduleConversion(t) {
+  const repos = await catalogRepositories(t);
+  const { root, git } = repos;
+  const skills = join(root, "skills-flat");
+  await mkdir(join(skills, "foo", "scripts"), { recursive: true });
+  await writeFile(join(skills, "foo", "SKILL.md"), "---\nname: foo\n---\n# Foo\n");
+  await writeFile(join(skills, "foo", "scripts", "run.py"), "print('foo')\n");
+  git(skills, "init", "-q", "-b", "main");
+  git(skills, "add", ".");
+  git(skills, "commit", "-q", "-m", "skills");
+  const catalog = join(root, "catalog-flat");
+  await mkdir(join(catalog, "all-skills", "foo", "scripts"), { recursive: true });
+  await writeFile(join(catalog, "all-skills", "foo", "SKILL.md"), "---\nname: foo\n---\n# Foo\n");
+  await writeFile(join(catalog, "all-skills", "foo", "scripts", "run.py"), "print('foo')\n");
+  await writeFile(join(catalog, ".gitignore"), "__pycache__/\n.env\n");
+  git(catalog, "init", "-q", "-b", "main");
+  git(catalog, "add", ".");
+  git(catalog, "commit", "-q", "-m", "catalog with ordinary all-skills");
+  return { ...repos, skills, flat: catalog };
+}
+
+async function convertToSubmodule(repos) {
+  repos.git(repos.flat, "rm", "-q", "-r", "all-skills");
+  repos.git(repos.flat, "commit", "-q", "-m", "drop ordinary all-skills");
+  repos.git(repos.flat, "submodule", "add", "-q", repos.skills, "all-skills");
+  repos.git(repos.flat, "commit", "-q", "-m", "all-skills becomes a submodule");
+}
+
+test("an uninitialized all-skills submodule holding only leftover ignored files is still refused", async (t) => {
+  const f = await fixture(t);
+  const repos = await pulledAcrossSubmoduleConversion(t);
+  const registry = "https://example.test/org/catalog.git";
+  const cache = join(
+    f.home,
+    ".agents",
+    ".cache",
+    "registries",
+    "https___example_test_org_catalog_git",
+  );
+  await mkdir(dirname(cache), { recursive: true });
+  repos.git(dirname(cache), "clone", "-q", repos.flat, cache);
+  // Before the conversion the populated cache is a working catalog and stays selectable.
+  assert.deepEqual(await discoverRegistry({ ...f.registry, registry }), {
+    root: cache,
+    source: "cache",
+    searched: [cache],
+  });
+  const leftover = join(cache, "all-skills", "foo", "scripts", "__pycache__");
+  await mkdir(leftover, { recursive: true });
+  await writeFile(join(leftover, "run.cpython-312.pyc"), "bytecode\n");
+  await writeFile(join(cache, "all-skills", ".env"), "TOKEN=local\n");
+  await convertToSubmodule(repos);
+  repos.git(cache, "pull", "-q", "--ff-only");
+  assert.match(await readFile(join(cache, ".gitmodules"), "utf8"), /path = all-skills/);
+  assert.deepEqual((await readdir(join(cache, "all-skills"))).sort(), [".env", "foo"]);
+  assert.deepEqual(await readdir(join(cache, "all-skills", "foo")), ["scripts"]);
+  await checkout(join(f.home, "code", "skillex"));
+  const before = await snapshot(f.root);
+  for (const options of [
+    { ...f.registry, registry },
+    { ...f.registry, registryRoot: cache },
+  ]) {
+    await assert.rejects(discoverRegistry(options), (error) => {
+      failure("E_REGISTRY_ROOT")(error);
+      const [finding] = error.findings;
+      assert.equal(finding.path, join(cache, "all-skills"));
+      assert.match(finding.message, /uninitialized git submodule/);
+      // The leftovers block `submodule update --init`; the fix names them and moves, never deletes.
+      assert.match(finding.fix, /\.env/);
+      assert.match(finding.fix, /foo/);
+      assert.match(finding.fix, /submodule update --init --recursive/);
+      assert.doesNotMatch(finding.fix, /\brm\b/);
+      return true;
+    });
+  }
+  assert.deepEqual(await snapshot(f.root), before);
+  // The index is authoritative when git can answer: a stray untracked definition left behind
+  // does not make the uninitialized submodule a catalog (the other skills would still be missing).
+  await writeFile(join(cache, "all-skills", "foo", "SKILL.md"), "---\nname: foo\n---\n# Stale\n");
+  await assert.rejects(
+    discoverRegistry({ ...f.registry, registryRoot: cache }),
+    failure("E_REGISTRY_ROOT"),
+  );
+
+  // The named repair works: move the leftovers aside, then populate the submodule.
+  const aside = join(f.root, "aside");
+  await mkdir(aside);
+  for (const name of await readdir(join(cache, "all-skills")))
+    await rename(join(cache, "all-skills", name), join(aside, name));
+  repos.git(cache, "submodule", "update", "-q", "--init", "--recursive");
+  assert.deepEqual(await discoverRegistry({ ...f.registry, registry }), {
+    root: cache,
+    source: "cache",
+    searched: [cache],
+  });
+  assert.ok((await lstat(join(cache, "all-skills", "foo", "SKILL.md"))).isFile());
+});
+
+test("a declared all-skills without git metadata is refused only when it holds no definition", async (t) => {
+  const f = await fixture(t);
+  const declared = '[submodule "all-skills"]\n\tpath = all-skills\n\turl = ../skills\n';
+  // Not a git checkout at all (an rsync or archive copy): no index to consult, so the catalog
+  // is judged by whether it holds any skill definition.
+  const stray = await checkout(join(f.root, "stray"));
+  await writeFile(join(stray, ".gitmodules"), declared);
+  await writeFile(join(stray, "all-skills", ".DS_Store"), "finder\n");
+  await mkdir(join(stray, "all-skills", "foo", "scripts", "__pycache__"), { recursive: true });
+  await assert.rejects(
+    discoverRegistry({ ...f.registry, registryRoot: stray }),
+    failure("E_REGISTRY_ROOT"),
+  );
+  const copied = await checkout(join(f.root, "copied"));
+  await writeFile(join(copied, ".gitmodules"), declared);
+  await mkdir(join(copied, "all-skills", "foo"), { recursive: true });
+  await writeFile(join(copied, "all-skills", "foo", "SKILL.md"), "---\nname: foo\n---\n# Foo\n");
+  const result = await discoverRegistry({ ...f.registry, registryRoot: copied });
+  assert.equal(result.root, copied);
 });
 
 test("an empty all-skills that is not a submodule remains a valid empty catalog", async (t) => {
