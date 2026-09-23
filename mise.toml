@@ -11,7 +11,7 @@ _.file = [".env"]
 # every link skillex wrote, exiting 0. Nothing invokes any script here by bare name
 # (every task uses an absolute '{{config_root}}/.mise/scripts/...' path, and the two
 # scripts find each other via Path(__file__).resolve().parent), so this costs nothing.
-_.path = ["agents/hermes/pm", "agents/hermes/pm/hermes"]
+_.path = ["agents/hermes/pm", "agents/hermes/pm/hermes", ".mise/scripts"]
 
 # This block will handle the linking of
 # agent files to the main AGENTS.md file.
@@ -20,9 +20,9 @@ _.path = ["agents/hermes/pm", "agents/hermes/pm/hermes"]
 # i.e. All linked agent files MUST be siblings at
 # any given level of nesting.
 [[hooks.enter]]
-script = "'{{config_root}}/.mise/scripts/materialize-env.sh'"
+run = "'{{config_root}}/.mise/scripts/materialize-env.sh'"
 [[hooks.enter]]
-script = "'{{config_root}}/.mise/scripts/link-agentfiles.sh' '{{config_root}}'"
+run = "'{{config_root}}/.mise/scripts/link-agentfiles.sh' '{{config_root}}'"
 # NOTE: there is deliberately no skills enter hook.
 #
 # Two used to live here (provision-packs.py, then sync-skills.py --scope project)
@@ -92,10 +92,6 @@ run = "uv run mypy src/skillex"
 patterns = ["AGENTS.md"]
 task = "link:agentfiles"
 
-[[watch_files]]
-patterns = [".agents/skills.json"]
-task = "skills:sync"
-
 [tasks."link:agentfiles"]
 description = "Symlink all agent files to AGENTS.md"
 run = "'{{config_root}}/.mise/scripts/link-agentfiles.sh' '{{config_root}}'"
@@ -107,8 +103,9 @@ run = "'{{config_root}}/.mise/scripts/link-agentfiles.sh' '{{config_root}}'"
 # you would ever ask for; it is also a behavior change from the engine this
 # replaced, which was project-only. Run `skillex sync` yourself for both.
 [tasks."skills:sync"]
-description = "Reconcile this project's .agents/skills from its manifest"
-run = "uv run skillex sync --scope project --project '{{config_root}}'"
+description = "Reconcile this project's selected skills"
+tools = { "npm:@delorenj/skillex" = { version = "0.1.1", allow_low_downloads = true }, node = "24" }
+run = "skillex sync --scope project --project '{{config_root}}'"
 
 [tasks."skills:sync:preview"]
 description = "Show what a sync would change here, without changing it"
