@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Unified agent heartbeat: continuous board-reconciliation sentinel pass +
-# gated runtime checkpoint, fused into one systemd-timer tick.
+# board-reconciliation pass.
 #
 # Runs often (systemd timer, ~1 min). Only invokes Hermes for a full
 # reconciliation pass when local state says no worker is active, the worker
@@ -8,23 +8,31 @@
 # full pass executes the role's sentinel.prompt.md, which reasons about tickets
 # through the ticket-provider adapter (Linear | Plane | Trello) — never a
 # hardcoded backend. After the sentinel decision (skip OR full), it
-# opportunistically checkpoints only legacy nested-Git runtimes at most once
-# per HEARTBEAT_CHECKPOINT_MIN_INTERVAL_SECONDS, so memory/session state stays
-# durable without pushing every minute.
 set -euo pipefail
 
 ROLE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"   # agents/hermes/<role>
 RUNTIME="$ROLE_DIR/runtime"
+RUN_HOME="${HERMES_HOME:-$RUNTIME}"
 PROMPT_FILE="$ROLE_DIR/.scripts/sentinel.prompt.md"
 STATE_FILE="$RUNTIME/continuous-ticket-sentinel-state.json"
 LOCK_FILE="$RUNTIME/continuous-ticket-sentinel.lock"
 ROLE_YAML="$ROLE_DIR/role.yaml"
+FLEET_ENV="${HERMES_FLEET_ENV:-$HOME/.hermes/fleet.env}"
+FLEET_ENV_LIBRARY="$ROLE_DIR/.scripts/lib/fleet-env.sh"
+FLEET_ENV_PARSER="$ROLE_DIR/.scripts/lib/parse-fleet-env.py"
 LOG_FILE="$RUNTIME/logs/heartbeat.log"
-CHECKPOINT_BIN="$ROLE_DIR/.scripts/checkpoint.sh"
-CHECKPOINT_STAMP="$RUNTIME/.last-checkpoint"
+
+if [[ ! -f "$FLEET_ENV_LIBRARY" || -L "$FLEET_ENV_LIBRARY" \
+   || ! -f "$FLEET_ENV_PARSER" || -L "$FLEET_ENV_PARSER" ]]; then
+  echo "heartbeat: trusted fleet environment loader unavailable" >&2
+  exit 1
+fi
+# shellcheck source=lib/fleet-env.sh
+builtin source "$FLEET_ENV_LIBRARY"
+load_fleet_environment "$FLEET_ENV" "$FLEET_ENV_PARSER"
 
 # Hermes binary: explicit env > ~/.config/hermes-agent/hermes-bin > PATH.
-HERMES_BIN="${HERMES_BIN:-}"
+HERMES_BIN="${HERMES_BIN:-${HERMES_FLEET_BIN:-}}"
 if [[ -z "$HERMES_BIN" ]]; then
   if [[ -r "$HOME/.config/hermes-agent/hermes-bin" ]]; then
     HERMES_BIN="$(cat "$HOME/.config/hermes-agent/hermes-bin")"
@@ -36,67 +44,31 @@ fi
 ACTIVE_MAX_IDLE_SECONDS="${SENTINEL_ACTIVE_MAX_IDLE_SECONDS:-600}"
 FULL_RUN_COOLDOWN_SECONDS="${SENTINEL_FULL_RUN_COOLDOWN_SECONDS:-300}"
 BLOCKED_FULL_RUN_COOLDOWN_SECONDS="${SENTINEL_BLOCKED_FULL_RUN_COOLDOWN_SECONDS:-900}"
-CHECKPOINT_MIN_INTERVAL_SECONDS="${HEARTBEAT_CHECKPOINT_MIN_INTERVAL_SECONDS:-3600}"
 
-# Opportunistic runtime checkpoint, fused into the heartbeat. Runs at most once
-# per interval; checkpoint.sh is itself a no-op on a clean tree, so this only
-# commits+pushes when there is genuinely new state AND enough time has passed
-# since the last push. Never fails the heartbeat — checkpoint is best-effort.
-maybe_checkpoint() {
-  [[ -x "$CHECKPOINT_BIN" ]] || return 0
-  local now last
-  now="$(date +%s)"
-  last="$(cat "$CHECKPOINT_STAMP" 2>/dev/null || echo 0)"
-  [[ "$last" =~ ^[0-9]+$ ]] || last=0
-  if (( now - last >= CHECKPOINT_MIN_INTERVAL_SECONDS )); then
-    printf '%s' "$now" > "$CHECKPOINT_STAMP" 2>/dev/null || true
-    printf '[heartbeat] checkpoint tick (>= %ss since last push)\n' "$CHECKPOINT_MIN_INTERVAL_SECONDS"
-    "$CHECKPOINT_BIN" || true
-  fi
+
+# Every role.yaml read goes through lib/role-yaml.py, the block-scoped walker
+# _lib.sh's yaml_get uses. The readers it replaces matched a one-part key at ANY
+# indentation anywhere in the file, and ended a block at the first blank line.
+ROLE_YAML_READER="$ROLE_DIR/.scripts/lib/role-yaml.py"
+if [[ ! -f "$ROLE_YAML_READER" || -L "$ROLE_YAML_READER" ]]; then
+  echo "heartbeat: trusted role.yaml reader unavailable" >&2
+  exit 1
+fi
+yaml_get() {
+  python3 "$ROLE_YAML_READER" "$ROLE_YAML" "$1"
 }
 
-yaml_value() {
-  python3 - "$ROLE_YAML" "$1" <<'PYEOF'
-import re, sys
-from pathlib import Path
-path, key = sys.argv[1:3]
-text = Path(path).read_text()
-m = re.search(rf'(?m)^\s*{re.escape(key)}:\s*"?([^"\n]*)"?\s*$', text)
-print(m.group(1).strip() if m else "")
-PYEOF
-}
-
-yaml_block_value() {
-  python3 - "$ROLE_YAML" "$1" "$2" <<'PYEOF'
-import re, sys
-from pathlib import Path
-path, block_name, key = sys.argv[1:4]
-text = Path(path).read_text()
-m = re.search(rf'(?m)^{re.escape(block_name)}:[ \t]*\n((?:[ \t]+\S.*\n?)*)', text)
-block = m.group(1) if m else ""
-me = re.search(rf'(?m)^[ \t]+{re.escape(key)}:[ \t]*([^\n#]*)', block)
-value = me.group(1).strip() if me else ""
-print(value.strip().strip('"').strip("'"))
-PYEOF
-}
-
-# True only when role.yaml has a reconcile: block with enabled: true. Block-aware
-# so an unrelated `enabled:` leaf elsewhere in the file can't flip it on.
+# True only when role.yaml's reconcile: block says enabled: true. Scoped to that
+# block, so an unrelated `enabled:` leaf elsewhere in the file can't flip it on.
 reconcile_enabled() {
-  python3 - "$ROLE_YAML" <<'PYEOF'
-import re, sys
-from pathlib import Path
-text = Path(sys.argv[1]).read_text()
-m = re.search(r'(?m)^reconcile:[ \t]*\n((?:[ \t]+\S.*\n?)*)', text)
-block = m.group(1) if m else ""
-me = re.search(r'(?m)^[ \t]+enabled:[ \t]*"?([A-Za-z]+)"?', block)
-print("true" if (me and me.group(1).lower() == "true") else "false")
-PYEOF
+  local value
+  value="$(yaml_get reconcile.enabled)"
+  if [[ "${value,,}" == "true" ]]; then printf 'true\n'; else printf 'false\n'; fi
 }
 
-AGENT_ID="$(yaml_value agent_id)"
-REPO_NAME="$(yaml_value repo)"
-PROVIDER="$(yaml_block_value ticket_provider name)"
+AGENT_ID="$(yaml_get agent_id)"
+REPO_NAME="$(yaml_get repo)"
+PROVIDER="$(yaml_get ticket_provider.name)"
 
 repo_root() {
   local dir="$ROLE_DIR"
@@ -108,6 +80,12 @@ repo_root() {
 }
 REPO_ROOT="$(repo_root)"
 cd "$REPO_ROOT"
+# A repo with no .project.json has no Krebs execution mode: it is legacy.
+EXECUTION_MODE="$(python3 -c 'import json,pathlib,sys; p=pathlib.Path(sys.argv[1]); print((json.loads(p.read_text()) if p.is_file() else {}).get("execution",{}).get("mode","legacy"))' "$REPO_ROOT/.project.json")"
+if [[ "$EXECUTION_MODE" == managed || "$EXECUTION_MODE" == shadow ]]; then
+  KREBS_PLANNER_ENABLED="$(reconcile_enabled)" exec python3 "$ROLE_DIR/.scripts/managed-execution.py" "$REPO_ROOT"
+fi
+
 mkdir -p "$RUNTIME/logs"
 
 # Single-run lock. Prefer flock (Linux); fall back to an atomic mkdir lock so
@@ -132,12 +110,10 @@ else
 fi
 
 # Reconcile gate: the autonomous board-reconciliation pass runs only when
-# role.yaml's reconcile.enabled is true. Default off → the heartbeat just
-# checkpoints (behaves like the legacy hourly checkpoint timer). Flip
-# reconcile.enabled to opt a repo into autonomous board reconciliation.
+# role.yaml's reconcile.enabled is true. Deployed PMs default on; setting it
+# false explicitly opts out of the autonomous board pass.
 if [[ "$(reconcile_enabled)" != "true" ]]; then
-  printf '[heartbeat] reconcile disabled (reconcile.enabled != true) — checkpoint-only tick\n'
-  maybe_checkpoint
+  printf '[heartbeat] reconcile disabled (reconcile.enabled != true) — nothing to do\n'
   exit 0
 fi
 
@@ -176,12 +152,12 @@ if status in {"active","delegated","working"} and session:
         process_active = any(((session and session in line) or (worktree and worktree in line))
             and any(m in line for m in markers) for line in result.stdout.splitlines())
     except Exception: process_active = False
-    # Per-session liveness. zellij 0.44.3 has NO per-session log: there is one
-    # global log at /tmp/zellij-$UID/zellij-log/. The path this used to point at
-    # (~/.local/state/zellij/sessions/<s>/zellij.log) has never existed here, so
-    # log_recent was silently always False. session-metadata.kdl IS per-session
-    # and is rewritten every serialization tick (60s default), well inside the
-    # 600s active_max_idle window.
+    # Per-session liveness. zellij 0.44 has NO per-session log: there is one
+    # global log under /tmp/zellij-$UID/zellij-log/. The path this used to read
+    # (~/.local/state/zellij/sessions/<s>/zellij.log) never exists, so
+    # log_recent was silently always False. session-metadata.kdl IS
+    # per-session and is rewritten every serialization tick (60s default),
+    # well inside the active_max_idle window. (Found and fixed in skillex-pm.)
     log_path = Path.home()/".cache"/"zellij"/"contract_version_1"/"session_info"/session/"session-metadata.kdl"
     log_recent = log_path.exists() and (now - log_path.stat().st_mtime) <= active_max_idle
     marker_recent = False
@@ -214,7 +190,6 @@ state.setdefault("updated_at", now_iso); state.setdefault("summary", state.get("
 tmp = path.with_suffix(path.suffix + ".tmp"); tmp.write_text(json.dumps(state, indent=2, sort_keys=True)+"\n"); tmp.replace(path)
 PYEOF
     printf '[heartbeat] %s\n' "$decision"
-    maybe_checkpoint
     exit 0
     ;;
 esac
@@ -241,14 +216,13 @@ PYEOF
 WIP_LOCK="$RUNTIME/wip-driver.lock"
 if ! python3 "$ROLE_DIR/.scripts/momo-wip-lock.py" acquire "$WIP_LOCK" "hermes:$AGENT_ID" --ttl 3600 >/dev/null 2>&1; then
   printf '[heartbeat] WIP lease held by Momo — skipping full reconcile pass this tick\n'
-  maybe_checkpoint
   exit 0
 fi
 trap 'python3 "$ROLE_DIR/.scripts/momo-wip-lock.py" release "$WIP_LOCK" "hermes:$AGENT_ID" >/dev/null 2>&1 || true' EXIT
 
 prompt="$(<"$PROMPT_FILE")"
 set +e
-env HERMES_HOME="$RUNTIME" "$HERMES_BIN" chat -Q --source cron --max-turns 90 -q "$prompt"
+env HERMES_HOME="$RUN_HOME" "$HERMES_BIN" chat -Q --source cron --max-turns 90 -q "$prompt"
 status=$?
 set -e
 
@@ -273,5 +247,4 @@ tmp = path.with_suffix(path.suffix + ".tmp"); tmp.write_text(json.dumps(state, i
 print(0 if state.get("status") in {"active","blocked","stalled","idle"} else exit_code)
 PYEOF
 )"
-maybe_checkpoint
 exit "$runner_exit"
