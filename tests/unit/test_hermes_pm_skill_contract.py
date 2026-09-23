@@ -25,9 +25,19 @@ def contract() -> dict[str, Any]:
 def test_command_and_skill_core_are_immutable_and_additive() -> None:
     spec = contract()
 
-    assert spec["schema_version"] == 2
-    assert spec["deploy_command"] == ["pj", "hermes-agent", "--yes"]
-    assert spec["required_skill_core"] == REQUIRED_CORE
+    # v3: per-agent heartbeat timers retired from the deployment contract.
+    assert spec["schema_version"] == 3
+    # Deployment moved from pjangler to flume (`flume hire pm`).
+    assert spec["deploy_command"] == ["flume", "hire", "pm", "--yes"]
+    # The core list is no longer restated in the contract: config.toml
+    # `[fleet] symlinked_runtime_skills` is the authority, and each pinned name
+    # is a directory under ~/.agents/skills (not a frontmatter name).
+    assert spec["required_skill_core"] == {
+        "source": "~/.config/hermes-agent-template/config.toml",
+        "key": "fleet.symlinked_runtime_skills",
+        "resolves_to": "~/.agents/skills/<pinned-directory-name>/SKILL.md",
+        "pinned_name_is_directory_not_frontmatter_name": True,
+    }
     assert spec["skill_policy"] == {
         "core_is_immutable": True,
         "configuration_may_add_optional_skills": True,
@@ -233,7 +243,6 @@ def test_channels_secrets_services_registry_and_git_are_fail_closed() -> None:
             "Result",
             "ExecMainStatus",
             "NRestarts",
-            "latest_heartbeat_service_result",
         ],
     }
     assert spec["registry_rerun"] == {
@@ -241,6 +250,8 @@ def test_channels_secrets_services_registry_and_git_are_fail_closed() -> None:
         "preserve_extension_metadata": True,
         "preserve_unknown_fields": True,
         "byte_identical_when_inputs_unchanged": True,
+        "required_bloodbank_block": {"gateway_scope": "fleet", "target_agent_id": "{agent_id}"},
+        "forbidden_legacy_keys": ["consumer_unit", "checkpoint_timer"],
     }
 
     git_contract = spec["git_transactions"]
