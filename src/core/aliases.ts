@@ -20,6 +20,7 @@ export const PROJECT_CLI_ALIASES = Object.freeze([
   ".copilot/skills",
   ".opencode/skills",
   ".kimi-code/skills",
+  ".zcode/skills",
 ] as const);
 
 /** These integrations retain their own installer or profile lifecycle. */

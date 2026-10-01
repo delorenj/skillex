@@ -94,7 +94,7 @@ def test_global_alias_table_is_the_eight_declared_paths() -> None:
     assert len(set(GLOBAL_CLI_ALIASES)) == 8
 
 
-def test_project_alias_table_is_the_six_declared_paths() -> None:
+def test_project_alias_table_is_the_seven_declared_paths() -> None:
     assert PROJECT_CLI_ALIASES == (
         Path(".claude/skills"),
         Path(".codex/skills"),
@@ -102,9 +102,10 @@ def test_project_alias_table_is_the_six_declared_paths() -> None:
         Path(".copilot/skills"),
         Path(".opencode/skills"),
         Path(".kimi-code/skills"),
+        Path(".zcode/skills"),
     )
-    assert len(PROJECT_CLI_ALIASES) == 6
-    assert len(set(PROJECT_CLI_ALIASES)) == 6
+    assert len(PROJECT_CLI_ALIASES) == 7
+    assert len(set(PROJECT_CLI_ALIASES)) == 7
 
 
 def test_no_alias_is_ever_a_never_touch_directory() -> None:

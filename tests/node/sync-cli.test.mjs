@@ -24,6 +24,7 @@ const projectAliases = [
   ".copilot/skills",
   ".opencode/skills",
   ".kimi-code/skills",
+  ".zcode/skills",
 ];
 const globalAliases = [
   ".claude/skills",

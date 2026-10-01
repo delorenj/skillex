@@ -351,6 +351,7 @@ PROJECT_CLI_ROOTS = (
     Path(".copilot/skills"),
     Path(".opencode/skills"),
     Path(".kimi-code/skills"),
+    Path(".zcode/skills"),
 )
 
 

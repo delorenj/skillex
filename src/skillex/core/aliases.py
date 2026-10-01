@@ -49,6 +49,7 @@ PROJECT_CLI_ALIASES: tuple[Path, ...] = (
     Path(".copilot/skills"),
     Path(".opencode/skills"),
     Path(".kimi-code/skills"),
+    Path(".zcode/skills"),
 )
 
 #: Skill directories sync must never touch, at any scope, under any flag.
