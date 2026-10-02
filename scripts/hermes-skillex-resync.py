@@ -425,6 +425,24 @@ def catalog_head(registry_root, env):
     return head if ran.rc == 0 and re.fullmatch(r"[0-9a-f]{40,64}", head) else None
 
 
+def catalog_moved_at(registry_root, env):
+    """When the catalog's HEAD last moved (its reflog), as an ISO UTC stamp; None if unknown."""
+    argv = ["git", "-C", str(registry_root / "all-skills")]
+    ran = run_capture([*argv, "reflog", "-1", "--format=%gd", "--date=unix", "HEAD"], env, 15)
+    found = re.fullmatch(r"HEAD@\{(\d+)\}", ran.out.strip())
+    if ran.rc != 0 or not found:
+        return None
+    return stamp(datetime.datetime.fromtimestamp(int(found.group(1)), datetime.UTC))
+
+
+def previous_catalog_commit(last_file):
+    """The catalog commit the previous real run converged to, from its last-run file."""
+    try:
+        return json.loads(last_file.read_text(encoding="utf-8")).get("catalog_commit")
+    except (OSError, ValueError, AttributeError):
+        return None
+
+
 def merge(previous, current):
     """A desk synced on an earlier pass and found converged on this one stays `synced`."""
     if previous and previous["status"] == "synced" and current["status"] == "ok":
@@ -544,19 +562,20 @@ def main(argv=None, environ=None):
         "event": "run",
         "run_id": f"{now:%Y%m%dT%H%M%SZ}-{uuid.uuid4().hex[:8]}",
         "started_at": stamp(now),
-        "trigger": environ.get("TRIGGER_UNIT")
-        or ("systemd" if environ.get("INVOCATION_ID") else "manual"),
+        # systemd's $TRIGGER_UNIT names the timer for a path-started run when a service has
+        # both (measured 2026-10-02), so it is no evidence; catalog_moved_at is.
+        "trigger": "systemd" if environ.get("INVOCATION_ID") else "manual",
         "dry_run": args.dry_run,
         "hermes_root": str(hermes_root),
         "registry_root": str(registry_root),
         "catalog_commit": None,
+        "previous_catalog_commit": None,
+        "catalog_moved_at": None,
         "skillex": None,
         "passes": 0,
         "settled": True,
         "skipped": [],
     }
-    if environ.get("TRIGGER_PATH"):
-        run["trigger_path"] = environ["TRIGGER_PATH"]
     results = {}
 
     def finish(status, code, message=None, last=True):
@@ -627,6 +646,7 @@ def main(argv=None, environ=None):
         except SkillexUnavailableError as error:
             return finish("error", EXIT_ENV, f"hermes-skillex-resync: ERROR - {error}")
         run["skillex"] = {"bin": argv0, "version": version}
+        run["previous_catalog_commit"] = previous_catalog_commit(state_dir / LAST_NAME)
         skillex = Skillex(argv0, env, hermes_root, registry_root, args.timeout)
 
         desks, run["skipped"] = enumerate_desks(hermes_root)
@@ -656,6 +676,7 @@ def main(argv=None, environ=None):
                 results[name] = merge(results.get(name), record)
             after = catalog_head(registry_root, env)
             run.update(passes=number, catalog_commit=after, settled=before == after)
+            run["catalog_moved_at"] = catalog_moved_at(registry_root, env)
             if run["settled"] or args.dry_run or not desks:
                 break
         counts = count_by_status(list(results.values()))

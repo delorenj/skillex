@@ -159,7 +159,7 @@ except (OSError, ValueError):
 c = last.get("counts", {})
 print(
     f"last run  {last.get('finished_at')} {last.get('status')} exit={last.get('exit')} "
-    f"trigger={last.get('trigger')} desks={c.get('total')} synced={c.get('synced')} "
+    f"desks={c.get('total')} synced={c.get('synced')} "
     f"refused={c.get('refused')} error={c.get('error')} busy={c.get('busy')}"
 )
 seen = last.get("catalog_commit")

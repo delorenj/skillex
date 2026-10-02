@@ -492,17 +492,38 @@ def test_profile_flag_limits_the_run_and_refuses_a_desk_that_is_not_strict(fleet
 
 def test_json_mode_prints_the_whole_run_record_as_one_line(fleet):
     fleet.desk("alpha-pm", "pending")
-    done = fleet.run(
-        "--json", TRIGGER_UNIT="skillex-hermes-resync.path", TRIGGER_PATH="/x/logs/HEAD"
-    )
+    done = fleet.run("--json", INVOCATION_ID="0123abcd")
     assert done.returncode == 0
     record = json.loads(done.stdout)
     assert done.stdout.count("\n") == 1
     assert record["schema"] == 1 and record["event"] == "run" and record["status"] == "ok"
-    assert record["trigger"] == "skillex-hermes-resync.path"
-    assert record["trigger_path"] == "/x/logs/HEAD"
+    assert record["trigger"] == "systemd"  # an INVOCATION_ID means systemd started it
     assert record["skillex"] == {"bin": str(fleet.stub), "version": "0.1.3"}
     assert record["results"][0]["status"] == "synced"
+    assert json.loads(fleet.run("--json").stdout)["trigger"] == "manual"
+
+
+def test_the_run_records_where_the_catalog_was_and_when_it_moved(fleet):
+    git = ["git", "-C", str(fleet.registry / "all-skills"), "-c", "core.hooksPath=/dev/null"]
+    ident = ["-c", "user.name=t", "-c", "user.email=t@t"]
+    subprocess.run([*git, "init", "-q"], check=True, capture_output=True)
+    for number in (1, 2):
+        subprocess.run(
+            [*git, *ident, "commit", "-q", "--allow-empty", "-m", f"c{number}"],
+            check=True,
+            capture_output=True,
+        )
+        if number == 1:
+            fleet.desk("alpha-pm")
+            assert fleet.run().returncode == 0
+    first = fleet.last()
+    assert first["previous_catalog_commit"] is None
+    second = fleet.run("--json")
+    record = json.loads(second.stdout)
+    assert record["previous_catalog_commit"] == first["catalog_commit"]
+    assert record["catalog_commit"] != record["previous_catalog_commit"]
+    assert record["catalog_moved_at"] >= record["started_at"][:10]  # an ISO UTC stamp
+    assert record["catalog_moved_at"].endswith("Z")
 
 
 def test_catalog_that_moves_mid_run_gets_another_pass(fleet, monkeypatch, capsys):

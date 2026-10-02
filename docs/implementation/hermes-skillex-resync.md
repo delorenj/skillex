@@ -48,8 +48,11 @@ HEAD's reflog is append-only. Measured on a scratch repo with real path units:
 | `git gc` (expires reflog entries) | fires, harmless: HEAD unchanged | |
 
 `PathChanged` on `HEAD` also covers `git symbolic-ref`, which moves HEAD with no
-reflog entry. The service sees `$TRIGGER_UNIT` / `$TRIGGER_PATH`, which land in
-the evidence as `trigger` / `trigger_path`.
+reflog entry. systemd's `$TRIGGER_UNIT` is no evidence of which unit started a
+run (with both a timer and a path unit on one service it named the timer for a
+path-started run), so the record carries `previous_catalog_commit`,
+`catalog_commit` and `catalog_moved_at` instead: a run that started seconds after
+`catalog_moved_at`, with a different `previous_catalog_commit`, was the path unit.
 
 **Events that arrive while the service runs are not queued** (systemd stops
 watching while the triggered unit is active). Three mitigations: `--settle 4`
@@ -105,9 +108,11 @@ State directory: `$XDG_STATE_HOME/skillex` (default `~/.local/state/skillex`).
   writes nothing.
 
 `run` record (schema 1): `schema, event:"run", run_id, started_at, finished_at,
-duration_ms, trigger` (`skillex-hermes-resync.path|.timer`, `systemd`, `manual`)`,
-trigger_path?, dry_run, status, exit, hermes_root, registry_root, catalog_commit`
-(all-skills HEAD when the last pass ended)`, skillex:{bin,version}, passes,
+duration_ms, trigger` (`systemd` when a unit started it, else `manual`)`, dry_run,
+status, exit, hermes_root, registry_root, catalog_commit` (all-skills HEAD when the
+last pass ended)`, previous_catalog_commit` (the previous real run's)`,
+catalog_moved_at` (ISO UTC, when HEAD last moved, from its reflog)`,
+skillex:{bin,version}, passes,
 settled, skipped:[{desk,reason}], counts:{total,ok,synced,would_sync,refused,error,busy},
 attention:[desk], message`. `status` is `ok` (exit 0), `partial` (exit 0, some
 desk was busy), `attention` (exit 1, a desk needs a human), `error` (exit 2, could
