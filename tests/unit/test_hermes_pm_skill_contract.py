@@ -25,18 +25,30 @@ def contract() -> dict[str, Any]:
 def test_command_and_skill_core_are_immutable_and_additive() -> None:
     spec = contract()
 
-    # v3: per-agent heartbeat timers retired from the deployment contract.
-    assert spec["schema_version"] == 3
+    # v4: Skillex selection replaced the retired fleet skill pin.
+    assert spec["schema_version"] == 4
     # Deployment moved from pjangler to flume (`flume hire pm`).
     assert spec["deploy_command"] == ["flume", "hire", "pm", "--yes"]
-    # The core list is no longer restated in the contract: config.toml
-    # `[fleet] symlinked_runtime_skills` is the authority, and each pinned name
-    # is a directory under ~/.agents/skills (not a frontmatter name).
+    # PM desks are Skillex-only: the global and project selections are the
+    # authority, linked from the canonical catalog into a real profile skills/
+    # root with no external discovery roots. The template pin is retired.
     assert spec["required_skill_core"] == {
-        "source": "~/.config/hermes-agent-template/config.toml",
-        "key": "fleet.symlinked_runtime_skills",
-        "resolves_to": "~/.agents/skills/<pinned-directory-name>/SKILL.md",
+        "authority": "skillex",
+        "selection": ["~/.agents/skills.json", "<project>/.agents/skills.json"],
+        "catalog": "~/code/skillex/all-skills",
+        "resolves_to": (
+            "<profile>/skills/<directory-name> -> ~/code/skillex/all-skills/<directory-name>"
+        ),
         "pinned_name_is_directory_not_frontmatter_name": True,
+        "strict_markers": [".skillex-only", ".no-bundled-skills"],
+        "skills_external_dirs": [],
+        "inspect": "skillex profile show <profile> --project <repo> --json",
+        "converge": "skillex profile sync <profile> --project <repo> --skillex-only",
+        "retired_keys": [
+            "fleet.canonical_skills_dir",
+            "fleet.symlinked_runtime_skills",
+            "fleet.pm_external_skill_dirs",
+        ],
     }
     assert spec["skill_policy"] == {
         "core_is_immutable": True,
