@@ -82,6 +82,53 @@ function fixture(t) {
     skill,
   };
 }
+it("strict preview is immutable and strict ownership persists across ordinary sync", async (t) => {
+  const f = fixture(t);
+  const before = snapshot(f.root);
+  ok(await syncProfile("work", { ...f.options, skillexOnly: true, dryRun: true }));
+  assert.deepEqual(snapshot(f.root), before);
+  ok(await syncProfile("work", { ...f.options, skillexOnly: true }));
+  assert(existsSync(join(f.profile, ".skillex-only")));
+  assert(existsSync(join(f.profile, ".no-bundled-skills")));
+  f.file(join(f.skills, "foreign", "SKILL.md"), "# foreign");
+  const dirty = snapshot(f.root);
+  const refused = await syncProfile("work", f.options);
+  assert.equal(refused.exit, 3);
+  assert(refused.findings.some((item) => item.code === "E_PROFILE_SKILLEX_ONLY"));
+  assert.deepEqual(snapshot(f.root), dirty);
+  assert.equal((await showProfile("work", f.options)).exit, 3);
+});
+
+it("strict ownership tolerates Hermes bookkeeping but still refuses archives and hubs", async (t) => {
+  const f = fixture(t);
+  ok(await syncProfile("work", { ...f.options, skillexOnly: true }));
+  f.file(join(f.skills, ".curator_state"), "{}");
+  f.file(join(f.skills, ".curator_suppressed"), "");
+  f.file(join(f.skills, ".sync_state"), "{}");
+  f.file(join(f.skills, ".curator_backups", "2026-10-01T18-00-00Z", "skills.tar.gz"), "tar");
+  assert.equal((await showProfile("work", f.options)).exit, 0);
+  ok(await syncProfile("work", f.options));
+  for (const name of [".archive", ".hub"]) {
+    f.file(join(f.skills, name, "x", "SKILL.md"), "# moved");
+    const before = snapshot(f.root);
+    const refused = await syncProfile("work", f.options);
+    assert.equal(refused.exit, 3);
+    assert(refused.findings.some((item) => item.code === "E_PROFILE_SKILLEX_ONLY"));
+    assert.deepEqual(snapshot(f.root), before);
+    rmSync(join(f.skills, name), { recursive: true });
+  }
+  f.file(join(f.skills, ".curator_backups_elsewhere"), "not a store");
+  assert.equal((await showProfile("work", f.options)).exit, 3);
+});
+
+it("strict sync refuses external discovery without mutating local overrides", async (t) => {
+  const f = fixture(t);
+  f.file(join(f.profile, "config.yaml"), "skills:\n  external_dirs: [~/foreign]\n");
+  const before = snapshot(f.root);
+  assert.equal((await syncProfile("work", { ...f.options, skillexOnly: true })).exit, 3);
+  assert.deepEqual(snapshot(f.root), before);
+});
+
 function ok(result) {
   assert.equal(result.exit, 0, JSON.stringify(result, null, 2));
   return result.data;

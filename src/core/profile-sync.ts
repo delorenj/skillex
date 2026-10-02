@@ -24,6 +24,7 @@ import {
   discoverProfile,
   normalizeProfileOptions,
 } from "./profile-discovery.js";
+import { assertStrictProfile, publishStrictPolicy, strictProfile } from "./profile-policy.js";
 import {
   type ProfileData,
   type ProfileJournal,
@@ -306,6 +307,7 @@ async function buildWork(
       );
   state = await readProfileState(profile, receiptOptions(profile, options, projection.scopes));
   const observed = await observations(profile, state);
+  await assertStrictProfile(profile, options, observed.local);
   const links = { ...state.data.links };
   const changes: ProfileChange[] = [];
   if (!observed.root) changes.push({ action: "mkdir", path: profile.skillsRoot });
@@ -383,6 +385,7 @@ export async function inspectProfile(
   }
   try {
     preserved = (await observations(profile, state)).local;
+    await assertStrictProfile(profile, options, preserved);
   } catch (error) {
     const failure = asFailure(error);
     findings.push(...failure.findings);
@@ -790,7 +793,7 @@ export async function runProfileSync(
         { findings, exit: readExit(findings, state.data.pending !== undefined) },
       );
     }
-    if (work && !work.result.changes.length)
+    if (work && !work.result.changes.length && !(await strictProfile(profile, options)))
       return makeResult(
         "profile sync",
         { ...work.result, project: work.projection.project, dryRun: false, applied },
@@ -818,6 +821,10 @@ export async function runProfileSync(
           });
         }
         await assertProfileIdentity(selected);
+        if (
+          await assertStrictProfile(selected, options, (await observations(selected, state)).local)
+        )
+          await publishStrictPolicy(selected);
         const currentProfile = await discoverProfile(name, options);
         if (
           currentProfile.root !== selected.root ||

@@ -40,3 +40,6 @@ agents/hermes/pm/runtime/
 .crush/skills
 .cursor/skills
 .agents/skills
+
+# Hermes runtime output (plans, command payloads) written by the skillex-pm desk.
+.hermes/

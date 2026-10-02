@@ -79,6 +79,36 @@ The following invariants are mandatory:
     global names and add or override explicit names in its compiled map; it does
     not copy global skill bytes into the project.
 
+### Hermes PM amendment (2026-10-01)
+
+Hermes PMs are mandatory **Skillex-only** consumers. Hermes needs a real
+`$HERMES_HOME/skills/` directory, so named PMs use recorded per-skill projections
+rather than whole-root CLI aliases. Only the selected global plus explicit
+owning-project canonical map may appear there. Local or bundled skill shadows
+are not an alternative ownership model for PMs.
+
+- `skillex profile sync <name> --project <repo> --skillex-only` establishes a
+  persistent strict policy and bundled seeding opt-out. Subsequent ordinary
+  sync must retain strictness; omission of a flag cannot weaken ownership.
+- Unknown/local children fail closed with preservation and Skillex remediation
+  guidance. No silently adopted links, recursive deletion, or generated-root
+  authoring. Quarantine lives outside all discoverable roots.
+- PM `skills.external_dirs` is empty: global/project skills are already compiled
+  into the profile projection. Archive/system/client roots must not leak extra
+  skills through a second discovery route.
+- Initial profile creation does not seed bundled skills. Revalidation of an
+  existing profile cannot reset databases, pid/state files, or overwrite its
+  skills root. A skills-only task invokes Skillex, not the whole provisioner.
+- Skills and workflows route creation/import, membership, and activation through
+  canonical catalog and Skillex commands, not Hermes local/hub installation.
+- Setup, audit, and actual Hermes discovery all check the contract. A label
+  such as `local`, an active service, or a successful generic migration is not
+  proof of exclusive selection.
+
+Generic non-PM Hermes users may retain explicit local overlays; that does not
+weaken this PM standard. The default Hermes profile is not a fleet migration
+scratch area and is not modified through a named profile's old root alias.
+
 ### Terminology
 
 - **Canonical definition:** the real skill directory in `all-skills/`.

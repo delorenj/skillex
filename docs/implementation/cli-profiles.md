@@ -66,6 +66,44 @@ its destination alone never authorizes adoption. Runtime overlays and other
 profile files remain untouched. The plan reports these preserved entries and
 identifies which selected names they override.
 
+## Mandatory PM policy
+
+Hermes PMs are Skillex-only. Generic local precedence below applies only to
+profiles not opted into this standard. Establish policy explicitly:
+
+```sh
+skillex profile sync example-pm --project /workspace/example --skillex-only --dry-run --json
+skillex profile sync example-pm --project /workspace/example --skillex-only
+```
+
+`<profile>/.skillex-only` persists strict ownership; later ordinary sync cannot
+silently downgrade it. `.no-bundled-skills` prevents bundled seeding. Strict
+preflight refuses foreign skills, unrecorded links, local overrides, or external
+skill discovery rather than deleting/adopting them. Empty `skills.external_dirs`
+is required in the PM's effective config: the profile projection already
+contains the global plus explicit owning-project selection.
+
+A legacy cutover is explicit and preservation-first:
+
+1. Identify the owning project and validate its manifest and catalog selection.
+2. Preview `skillex migrate --profile NAME --project PATH` for a whole-root
+   skills alias. Do not mutate its shared default-profile target. Migration
+   preserves foreign entries, so migration alone is not strict activation.
+3. Move foreign content into a private quarantine outside all discovery roots,
+   preserving bytes, modes, link targets, and an identity-bound journal. Retain
+   existing real root and owned-child identities; never delete local procedures.
+4. Clear external discovery through the canonical locked delta/render workflow.
+   Never hand-edit generated config or overwrite unrelated settings.
+5. Preview/apply strict Skillex sync, inspect actual pinned Hermes discovery,
+   then prove a second sync has no planned managed changes.
+
+New setup creates the profile with `--no-skills`. Existing databases and runtime
+state are never reset during skills repair or provisioning revalidation. Use
+Skillex commands for skills-only changes, never the whole profile setup script.
+Create/import canonical definitions in `all-skills/`, select through manifests,
+sets, or packs, and sync; do not install or create skill payloads directly in a
+PM root. Native Hermes `local` labels do not prove physical ownership.
+
 ## Ownership and recovery
 
 Sync keeps an existing real `skills/` directory and its inode. If it is missing,

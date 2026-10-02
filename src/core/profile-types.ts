@@ -5,6 +5,7 @@ import type { RegistryOptions, SkillOrigin } from "./selection.js";
 export interface ProfileOptions extends RegistryOptions, LockOptions {
   readonly hermesRoot?: string;
   readonly project?: string;
+  readonly skillexOnly?: boolean;
   readonly signal?: { readonly aborted: boolean };
 }
 

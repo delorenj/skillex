@@ -20,6 +20,7 @@ interface Options {
   hermesRoot?: string;
   project?: string;
   dryRun?: boolean;
+  skillexOnly?: boolean;
 }
 
 function rootOption(command: Command): Command {
@@ -139,8 +140,12 @@ export function registerProfileCommands(program: Command, output: Output): void 
       "--dry-run",
       "Preview links, preserved entries, and receipts without writing or recovering.",
     )
+    .option(
+      "--skillex-only",
+      "Persist strict catalog-only ownership; refuse local skills and external discovery.",
+    )
     .action(async (name: string, _local, command: Command) => {
-      const { project, dryRun } = command.opts<Options & { project: string }>();
+      const { project, dryRun, skillexOnly } = command.opts<Options & { project: string }>();
       await run(
         command,
         (options) =>
@@ -148,6 +153,7 @@ export function registerProfileCommands(program: Command, output: Output): void 
             ...options,
             project,
             ...(dryRun === undefined ? {} : { dryRun }),
+            ...(skillexOnly === undefined ? {} : { skillexOnly }),
           }),
         syncText,
       );
