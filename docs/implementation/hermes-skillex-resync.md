@@ -29,7 +29,8 @@ scripts/install-hermes-resync.sh uninstall
 mise run hermes:resync -- --dry-run          # preview against the real fleet; writes nothing
 ```
 
-The units say `%h/code/skillex`. When the repo is elsewhere, or `all-skills` is
+`install` starts one run at once: the timer's `OnStartupSec` has long elapsed,
+so enabling it fires it. The units say `%h/code/skillex`. When the repo is elsewhere, or `all-skills` is
 a submodule whose gitdir lives under `.git/modules` (a `.git` *file*), `install`
 writes `<unit>.d/10-layout.conf` with the resolved paths and removes it again
 when the layout is the default.
@@ -61,9 +62,11 @@ the catalog HEAD after each pass and goes round again, up to `--max-passes 3`,
 when it moved, and the timer catches whatever is left. Selection edits (`sets/`,
 `.agents/skills.json`) need no catalog commit and are caught by the timer alone.
 
-`TriggerLimitBurst=6` per 2 min is a circuit breaker: past it the path unit
-FAILS and stops watching until restarted (`install` does that, and `status`
-reports it) while the timer keeps going.
+`TriggerLimitBurst=20` per 5 min is a circuit breaker for a loop that keeps
+writing the reflog: past it the path unit FAILS and stops watching until
+restarted (`install` does that, and `status` reports it) while the timer keeps
+going. A run takes 10 to 20 seconds, so a legitimate burst of catalog commits
+stays far below it.
 
 ## What it does per desk
 

@@ -21,11 +21,13 @@ Documentation=file:%h/code/skillex/docs/implementation/hermes-skillex-resync.md
 PathModified=%h/code/skillex/all-skills/.git/logs/HEAD
 PathChanged=%h/code/skillex/all-skills/.git/HEAD
 Unit=skillex-hermes-resync.service
-# Past this the path unit FAILS and stops watching until restarted; that is the
-# point of a limit (a loop writing the reflog must not hammer the fleet). The timer
-# keeps resyncing meanwhile and `install-hermes-resync.sh status` reports it.
-TriggerLimitIntervalSec=2min
-TriggerLimitBurst=6
+# A circuit breaker for a loop that keeps writing the reflog. Past it the path unit
+# FAILS and stops watching until restarted (`install-hermes-resync.sh install` does
+# that); the timer keeps resyncing meanwhile and `status` reports it. A run takes
+# 10-20 s and events during a run start nothing, so legitimate bursts (a vendor sweep
+# committing skill after skill) stay far under 20 activations in 5 minutes.
+TriggerLimitIntervalSec=5min
+TriggerLimitBurst=20
 
 [Install]
 WantedBy=paths.target
