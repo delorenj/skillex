@@ -29,11 +29,11 @@ scripts/install-hermes-resync.sh uninstall
 mise run hermes:resync -- --dry-run          # preview against the real fleet; writes nothing
 ```
 
-`install` starts one run at once: the timer's `OnStartupSec` has long elapsed,
-so enabling it fires it. The units say `%h/code/skillex`. When the repo is elsewhere, or `all-skills` is
-a submodule whose gitdir lives under `.git/modules` (a `.git` *file*), `install`
-writes `<unit>.d/10-layout.conf` with the resolved paths and removes it again
-when the layout is the default.
+`install` starts one run at once: the timer's `OnStartupSec` has long elapsed, so
+enabling it fires it. The units say `%h/code/skillex`. When the repo is elsewhere,
+or `all-skills` is a submodule whose gitdir lives under `.git/modules` (a `.git`
+*file*), `install` writes `<unit>.d/10-layout.conf` with the resolved paths and
+removes it again when the layout is the default.
 
 ### Why the path unit watches what it watches
 
