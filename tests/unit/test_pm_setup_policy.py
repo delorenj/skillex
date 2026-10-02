@@ -3,10 +3,21 @@
 import os
 import shutil
 import subprocess
+import tempfile
 from pathlib import Path
+
+import pytest
 
 ROOT = Path(__file__).parents[2]
 RENDERER = Path.home() / "code/33GOD/hermes-agent-template/scripts/hermes-profile-config.py"
+
+
+@pytest.fixture
+def tmp_root():
+    """Skillex refuses activation receipts inside a git checkout, and pytest's
+    tmp_path can sit in one (TMPDIR=~/.claude/tmp under Claude Code hooks)."""
+    with tempfile.TemporaryDirectory(prefix="pm-setup-", dir="/tmp") as tmp:
+        yield Path(tmp).resolve()
 
 
 def fixture(tmp_path):
@@ -76,8 +87,8 @@ def run(scripts, env):
     )
 
 
-def test_new_profile_gets_strict_policy_and_repeated_setup_preserves_state(tmp_path):
-    profile, scripts, env = fixture(tmp_path)
+def test_new_profile_gets_strict_policy_and_repeated_setup_preserves_state(tmp_root):
+    profile, scripts, env = fixture(tmp_root)
     result = run(scripts, env)
     assert result.returncode == 0, result.stdout + result.stderr
     assert (profile / ".skillex-only").is_file()
@@ -108,8 +119,8 @@ def test_new_profile_gets_strict_policy_and_repeated_setup_preserves_state(tmp_p
     }
 
 
-def test_existing_foreign_skill_refuses_without_resetting_live_state(tmp_path):
-    profile, scripts, env = fixture(tmp_path)
+def test_existing_foreign_skill_refuses_without_resetting_live_state(tmp_root):
+    profile, scripts, env = fixture(tmp_root)
     assert run(scripts, env).returncode == 0
     foreign = profile / "skills/foreign"
     foreign.mkdir()

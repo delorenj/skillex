@@ -13,6 +13,15 @@ from skillex.cli import app
 runner = CliRunner()
 
 
+@pytest.fixture(autouse=True)
+def _wide_pack_console(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Rich sizes the module console from COLUMNS at import; a narrow shell
+    (pre-push hooks run with COLUMNS=38) elides pack and slot names."""
+    from skillex.commands import pack
+
+    monkeypatch.setattr(pack.console, "width", 200)
+
+
 @pytest.fixture
 def workspace(tmp_path: Path, fixtures_dir: Path) -> Path:
     """Full workspace mirroring the real layout:
