@@ -177,3 +177,18 @@ run = "uv run skillex sync --scope global --dry-run"
 [tasks."skills:sync:global"]
 description = "Reconcile ~/.agents/skills from ~/.agents/skills.json"
 run = "uv run skillex sync --scope global"
+
+# Skillex-only Hermes desks are synced against the catalog's HEAD commit, so every
+# catalog commit leaves them "sync pending". These run (and install the automation
+# for) scripts/hermes-skillex-resync.py; see docs/implementation/hermes-skillex-resync.md.
+[tasks."hermes:resync"]
+description = "Converge every Skillex-only Hermes desk with the catalog (mise run hermes:resync -- --dry-run to preview)"
+run = "python3 '{{config_root}}/scripts/hermes-skillex-resync.py'"
+
+[tasks."hermes:resync:install"]
+description = "Install the user timer and path units that run hermes:resync automatically"
+run = "'{{config_root}}/scripts/install-hermes-resync.sh' install"
+
+[tasks."hermes:resync:status"]
+description = "Show the auto-resync units, the last run and whether the catalog moved since"
+run = "'{{config_root}}/scripts/install-hermes-resync.sh' status"

@@ -111,6 +111,12 @@ and sync and nothing else (byte and inode no-op when converged). A desk without
 the marker resumes the full provisioning path only when its skills root holds
 no local entries; otherwise it is refused toward the cutover script.
 
+Catalog commits no longer need a human: every commit to `all-skills` leaves each
+strict desk "sync pending" (show exit 6, a lone `write-receipt` change), and
+`scripts/hermes-skillex-resync.py` now converges them automatically from a user
+path unit and a timer. A desk it cannot sync (exit 3, foreign content) is left
+untouched and reported. See [hermes-skillex-resync.md](hermes-skillex-resync.md).
+
 Flume received a durable Bloodbank invocation with the owning template writer,
 retired host-config keys, pinned bootstrap-name mismatch, and review/handbook
 acceptance criteria. Its upstream release/pin/backfill follow-up is distinct

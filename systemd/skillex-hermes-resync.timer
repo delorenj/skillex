@@ -1,0 +1,22 @@
+# Fallback for skillex-hermes-resync.path: soon after the user manager starts and
+# every 15 minutes. It catches what inotify cannot: selection edits (sets and
+# manifests need no catalog commit), a commit that landed while a run was in
+# flight, and a missed event. Minutes are off the :00/:30 marks on purpose.
+[Unit]
+Description=Fallback resync of Skillex-only Hermes desks (startup and every 15 minutes)
+Documentation=file:%h/code/skillex/docs/implementation/hermes-skillex-resync.md
+
+[Timer]
+# OnStartupSec is relative to the user manager; OnBootSec would already have
+# elapsed by login and fire the moment the timer starts.
+OnStartupSec=2min
+OnCalendar=*-*-* *:07,22,37,52:00
+# Persistent applies to OnCalendar: a run missed while the machine was off or
+# asleep is made up when the timer comes back.
+Persistent=true
+RandomizedDelaySec=30s
+AccuracySec=30s
+Unit=skillex-hermes-resync.service
+
+[Install]
+WantedBy=timers.target

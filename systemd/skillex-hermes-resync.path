@@ -1,0 +1,31 @@
+# Start the resync when the all-skills catalog HEAD moves.
+#
+# A Skillex receipt records exactly one fact about the catalog: its HEAD commit.
+# HEAD's reflog is append-only, so PathModified on it sees every commit, amend,
+# reset, checkout/switch, fast-forward or merge pull and rebase; git also logs a
+# direct update of the checked-out branch there. HEAD itself is rewritten by
+# rename on a checkout and moved WITHOUT a reflog entry by `git symbolic-ref`,
+# hence PathChanged as well. Measured on a scratch repo (2026-10-02): all of
+# those fire, a `git fetch` does not, and an 8-commit burst starts one run
+# (events that arrive while the service runs are not queued, which is why the
+# script re-checks the catalog HEAD before it exits and the timer is a fallback).
+#
+# These paths are for the checkout at ~/code/skillex. install-hermes-resync.sh
+# writes a drop-in when the real gitdir is elsewhere (a submodule gitdir file) or
+# the repo is not at that location.
+[Unit]
+Description=Resync Skillex-only Hermes desks when the all-skills catalog HEAD moves
+Documentation=file:%h/code/skillex/docs/implementation/hermes-skillex-resync.md
+
+[Path]
+PathModified=%h/code/skillex/all-skills/.git/logs/HEAD
+PathChanged=%h/code/skillex/all-skills/.git/HEAD
+Unit=skillex-hermes-resync.service
+# Past this the path unit FAILS and stops watching until restarted; that is the
+# point of a limit (a loop writing the reflog must not hammer the fleet). The timer
+# keeps resyncing meanwhile and `install-hermes-resync.sh status` reports it.
+TriggerLimitIntervalSec=2min
+TriggerLimitBurst=6
+
+[Install]
+WantedBy=paths.target

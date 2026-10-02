@@ -1,0 +1,28 @@
+# Converge every Skillex-only Hermes desk with the all-skills catalog.
+#
+# Type=oneshot, started by skillex-hermes-resync.path (the catalog HEAD moved) and
+# skillex-hermes-resync.timer (fallback). Deliberately NOT a daemon: a crash is
+# repaired by the next trigger, so there is no restart policy to get wrong. Exit 1
+# (a desk needs a human) shows up as a failed unit on purpose; the JSON lines in
+# ~/.local/state/skillex/hermes-resync.jsonl say which desk and why.
+#
+# Plain python3, and the script finds skillex itself (SKILLEX_BIN, PATH, the mise
+# shim, `mise which`): a user unit has no mise shims on its PATH.
+[Unit]
+Description=Resync Skillex-only Hermes desks with the all-skills catalog
+Documentation=file:%h/code/skillex/docs/implementation/hermes-skillex-resync.md
+
+[Service]
+Type=oneshot
+# Runs from / so nothing depends on a caller's working directory (mise reads the
+# config of whatever directory it starts in).
+WorkingDirectory=/
+# --settle is the debounce: a rebase or pull writes the catalog several times in
+# a row, and the first write starts this unit, so look only once it has quieted.
+ExecStart=/usr/bin/python3 -B %h/code/skillex/scripts/hermes-skillex-resync.py --settle 4
+Environment=PJ_SKILLS_REGISTRY_ROOT=%h/code/skillex
+Nice=10
+# 26 desks take about 5 s; the script's own --deadline (10 min) bounds a hung skillex.
+TimeoutStartSec=15min
+Restart=no
+NoNewPrivileges=yes
