@@ -65,6 +65,8 @@ export interface RegistrySelection {
 }
 
 export interface ResolveOptions extends DiscoveryOptions {
+  /** Explicit effective project inheritance; the saved manifest remains unchanged. */
+  readonly inheritGlobal?: boolean;
   readonly registryRoot?: string;
   readonly env?: Readonly<Record<string, string | undefined>>;
   readonly installedRoot?: string;

@@ -24,7 +24,12 @@ import {
   discoverProfile,
   normalizeProfileOptions,
 } from "./profile-discovery.js";
-import { assertStrictProfile, publishStrictPolicy, strictProfile } from "./profile-policy.js";
+import {
+  assertStrictProfile,
+  profileInheritsGlobal,
+  publishStrictPolicy,
+  strictProfile,
+} from "./profile-policy.js";
 import {
   type ProfileData,
   type ProfileJournal,
@@ -123,17 +128,25 @@ function receiptOptions(
 }
 
 async function resolveProjection(
+  profile: ProfileLocation,
   options: ProfileOptions & { project: string },
 ): Promise<Projection> {
   checkProfileSignal(options);
-  const global = await resolveSelection({ ...options, scope: "global" });
-  const project = await resolveSelection({ ...options, scope: "project" });
-  const findings = [...global.findings, ...project.findings].filter(
+  const inheritGlobal = await profileInheritsGlobal(profile);
+  const global = inheritGlobal
+    ? await resolveSelection({ ...options, scope: "global" })
+    : undefined;
+  const project = await resolveSelection({
+    ...options,
+    scope: "project",
+    ...(inheritGlobal ? {} : { inheritGlobal: false }),
+  });
+  const findings = [...(global?.findings ?? []), ...project.findings].filter(
     (finding, index, all) => all.findIndex((other) => isDeepStrictEqual(other, finding)) === index,
   );
-  if (!global.ok || !project.ok || !global.data || !project.data)
+  if ((global && (!global.ok || !global.data)) || !project.ok || !project.data)
     throw new SkillexError(
-      diagnosticExit([global.exit, project.exit]),
+      diagnosticExit([global?.exit ?? ExitCode.SUCCESS, project.exit]),
       findings.length
         ? findings
         : [
@@ -145,13 +158,13 @@ async function resolveProjection(
             },
           ],
     );
-  const globalScope = global.data.scopes.find((scope) => scope.scope === "global");
+  const globalScope = global?.data?.scopes.find((scope) => scope.scope === "global");
   const projectScope = project.data.scopes.find((scope) => scope.scope === "project");
-  if (!globalScope || !projectScope)
+  if ((inheritGlobal && !globalScope) || !projectScope)
     fail("E_PROJECT", "Profile sync requires an explicit project manifest.", {
       fix: "Pass --project PATH for the intended project containing .agents/skills.json.",
     });
-  const scopes = [globalScope, projectScope];
+  const scopes = [...(globalScope ? [globalScope] : []), projectScope];
   const desired = new Map<string, Desired>();
   for (const scope of scopes)
     for (const binding of scope.bindings) {
@@ -283,7 +296,7 @@ async function buildWork(
   state: ProfileState,
   options: ProfileOptions & { project: string },
 ): Promise<ProfileWork> {
-  const projection = await resolveProjection(options);
+  const projection = await resolveProjection(profile, options);
   for (const scope of projection.scopes) {
     for (const protectedRoot of [
       scope.registry.root,
@@ -555,7 +568,10 @@ async function recoverProfile(
 }
 
 async function verifyIntent(work: ProfileWork): Promise<void> {
-  const current = await resolveProjection({ ...work.options, project: work.projection.project });
+  const current = await resolveProjection(work.profile, {
+    ...work.options,
+    project: work.projection.project,
+  });
   if (
     current.project !== work.projection.project ||
     !isDeepStrictEqual(

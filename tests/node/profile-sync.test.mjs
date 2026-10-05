@@ -129,6 +129,44 @@ it("strict sync refuses external discovery without mutating local overrides", as
   assert.deepEqual(snapshot(f.root), before);
 });
 
+it("profile inheritance opt-out persists through ordinary show and resync", async (t) => {
+  const f = fixture(t);
+  f.file(join(f.profile, "config.yaml"), "skills:\n  external_dirs: []\n  inherit_global: false\n");
+  const saved = readFileSync(join(f.project, ".agents/skills.json"), "utf8");
+  const synced = ok(await syncProfile("work", { ...f.options, skillexOnly: true }));
+  assert.deepEqual(
+    synced.managed.map(({ name }) => name),
+    ["beta"],
+  );
+  assert.equal(readFileSync(join(f.project, ".agents/skills.json"), "utf8"), saved);
+  // The ordinary operator home has an invalid global selection. It must not
+  // influence the exact profile, including project manifests that inherit it.
+  f.manifest("global", { skills: ["missing"] });
+  const before = snapshot(f.root);
+  assert.deepEqual(ok(await showProfile("work", f.options)).changes, []);
+  assert.deepEqual(snapshot(f.root), before);
+  assert.deepEqual(ok(await syncProfile("work", f.options)).applied, []);
+  const managed = (rows) =>
+    rows.filter(
+      ([path]) => path !== "state/skillex/locks" && !path.startsWith("state/skillex/locks/"),
+    );
+  assert.deepEqual(managed(snapshot(f.root)), managed(before));
+});
+
+it("profile inheritance policy refuses non-boolean and symlink config", async (t) => {
+  const f = fixture(t);
+  const path = join(f.profile, "config.yaml");
+  f.file(path, "skills:\n  inherit_global: false-ish\n");
+  const before = snapshot(f.root);
+  assert.equal((await syncProfile("work", f.options)).exit, 3);
+  assert.deepEqual(snapshot(f.root), before);
+  rmSync(path);
+  symlinkSync(f.file(join(f.root, "foreign.yaml"), "skills:\n  inherit_global: false\n"), path);
+  const linked = snapshot(f.root);
+  assert.equal((await syncProfile("work", f.options)).exit, 3);
+  assert.deepEqual(snapshot(f.root), linked);
+});
+
 function ok(result) {
   assert.equal(result.exit, 0, JSON.stringify(result, null, 2));
   return result.data;

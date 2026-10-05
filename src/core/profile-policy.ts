@@ -50,6 +50,20 @@ export async function strictProfile(
   return options.skillexOnly === true || marker !== undefined;
 }
 
+/** Persist a profile's selection boundary independently of the caller's HOME. */
+export async function profileInheritsGlobal(profile: ProfileLocation): Promise<boolean> {
+  const path = join(profile.root, "config.yaml");
+  const config = await entry(path);
+  if (!config) return true;
+  if (!config.info.isFile()) refuse(path, "Profile config must be a regular file.");
+  const document = parseDocument(await readFile(path, "utf8"), { uniqueKeys: true });
+  if (document.errors.length) refuse(path, "Cannot validate profile skill inheritance.");
+  const inherit: unknown = document.toJS()?.skills?.inherit_global;
+  if (inherit !== undefined && typeof inherit !== "boolean")
+    refuse(path, "Profile skills.inherit_global must be boolean.");
+  return inherit !== false;
+}
+
 export async function assertStrictProfile(
   profile: ProfileLocation,
   options: ProfileOptions,

@@ -58,6 +58,12 @@ skillex profile sync example-pm --project /workspace/example --dry-run
 skillex profile sync example-pm --project /workspace/example
 ```
 
+Profiles normally combine global and project selections. A profile's generated
+`config.yaml` can set `skills.inherit_global: false` to keep its loadout limited
+to the explicit project selection. Ordinary `profile show` and later resyncs
+honor this persistent boundary, including when the project manifest inherits
+global skills. Change this setting through the profile's owning config renderer.
+
 ## Migrate an existing installation
 
 Preview the registry and each target before applying their migration. The migration result lists content choices, changed objects, and verification receipts. Missing mappings and unresolved local content remain visible as blocked items.

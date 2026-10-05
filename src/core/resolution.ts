@@ -225,6 +225,10 @@ export async function resolveSelectionWithManifests(
 ): Promise<ResultEnvelope<Resolution | null>> {
   const findings: Diagnostic[] = [];
   try {
+    if (options.inheritGlobal !== undefined && typeof options.inheritGlobal !== "boolean")
+      fail("E_MANIFEST", "inheritGlobal must be boolean.", {
+        fix: "Supply a boolean inheritance override or omit it to use the manifest.",
+      });
     const locations = await discoverScopes(options);
     const read = async (path: string): Promise<SkillsManifest> => {
       const manifest = proposed.has(path)
@@ -245,7 +249,11 @@ export async function resolveSelectionWithManifests(
         );
       return manifest;
     };
-    const projectManifest = locations.project ? await read(locations.project.path) : undefined;
+    const savedProjectManifest = locations.project ? await read(locations.project.path) : undefined;
+    const projectManifest =
+      savedProjectManifest && options.inheritGlobal !== undefined
+        ? { ...savedProjectManifest, inheritGlobal: options.inheritGlobal }
+        : savedProjectManifest;
     const needsGlobal =
       locations.writeScopes.includes("global") ||
       (projectManifest?.inheritGlobal && projectManifest.packs.length === 0);
