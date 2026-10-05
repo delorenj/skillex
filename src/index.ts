@@ -12,6 +12,46 @@ export {
   NEVER_TOUCH,
   PROJECT_CLI_ALIASES,
 } from "./core/aliases.js";
+export { freezeBmadPack } from "./core/bmad-freeze.js";
+export { materializeBmadProject, verifySpecificationDigest } from "./core/bmad-materialize.js";
+export type {
+  BmadClientSelection,
+  BmadCompositionPin,
+  BmadMaterializeData,
+  BmadMaterializeOptions,
+  BmadMaterialNode,
+  BmadMaterialPlan,
+  BmadProjectConfig,
+  BmadRuntimeDependency,
+  BmadRuntimeSupportSource,
+  BmadSpecBuildData,
+  BmadSpecBuildOptions,
+  BmadSpecification,
+  BmadSpecificationSources,
+} from "./core/bmad-materialize-types.js";
+export { buildBmadSpecification } from "./core/bmad-spec.js";
+export { explainBmadSkill, inspectBmadStatus } from "./core/bmad-status.js";
+export type {
+  BmadCanonicalStatus,
+  BmadCommandClient,
+  BmadCommandFile,
+  BmadCommandInventory,
+  BmadExplainData,
+  BmadExplainOptions,
+  BmadForeignSkill,
+  BmadFreezeChange,
+  BmadFreezeData,
+  BmadFreezeOptions,
+  BmadProvenance,
+  BmadReference,
+  BmadSkillExplanation,
+  BmadSkillInventory,
+  BmadSkillManifestEntry,
+  BmadSourceInstallation,
+  BmadSourceModule,
+  BmadStatusData,
+  BmadStatusOptions,
+} from "./core/bmad-types.js";
 export { listSkills, showSkill } from "./core/catalog.js";
 export type {
   ListSkillsOptions,

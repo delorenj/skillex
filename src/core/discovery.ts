@@ -129,7 +129,10 @@ async function nearestProject(cwd: string, home: string): Promise<ScopeLocation 
 }
 
 /** Discover read sources separately from the activation scopes selected for writes. */
-export async function discoverScopes(options: DiscoveryOptions = {}): Promise<ScopeDiscovery> {
+export async function discoverScopes(
+  options: DiscoveryOptions = {},
+  proposed: ReadonlySet<string> = new Set(),
+): Promise<ScopeDiscovery> {
   const scope = options.scope ?? "auto";
   if (!["auto", "global", "project", "both"].includes(scope)) {
     fail("E_SCOPE", `Unknown write scope: ${scope}`, {
@@ -165,10 +168,19 @@ export async function discoverScopes(options: DiscoveryOptions = {}): Promise<Sc
     }
     project = await location("project", root);
     if (!project.exists) {
-      fail("E_NO_PROJECT_MANIFEST", `No project manifest exists at ${project.path}`, {
-        path: project.path,
-        fix: "Create .agents/skills.json in that project, or select the intended --project directory.",
-      });
+      // The internal resolver may project an in-memory declaration for this exact
+      // path (a planning projection). A projected declaration is not ownership:
+      // a physically absent scope stays exists:false so later existence checks
+      // still treat it as unwritten, and the caller remains responsible for
+      // creating the scope through the existing public writer. Nothing on disk
+      // is created or weakened here.
+      const projected = proposed.has(project.path);
+      if (!projected) {
+        fail("E_NO_PROJECT_MANIFEST", `No project manifest exists at ${project.path}`, {
+          path: project.path,
+          fix: "Create .agents/skills.json in that project, or select the intended --project directory.",
+        });
+      }
     }
   } else {
     project = await nearestProject(cwd, home);
