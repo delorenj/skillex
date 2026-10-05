@@ -26,6 +26,7 @@ import { discoverRegistry } from "./discovery.js";
 import { fail, SkillexError } from "./error.js";
 import { inspectPath, requireDirectory } from "./filesystem.js";
 import { isVersionComponent, parseManifest } from "./manifest.js";
+import { readSkillMetadata } from "./metadata.js";
 import { type Diagnostic, ExitCode, makeResult, type ResultEnvelope } from "./result.js";
 import type { PackSelection } from "./selection.js";
 
@@ -232,7 +233,7 @@ export async function verifyPack(
     const selected = selection(ref);
     const registry = await discoverRegistry(options);
     const document = await readPack(registry.root, selected);
-    const { inventory } = document;
+    const { inventory, raw } = document;
     const targets = new Map<string, string>();
     const findings: Diagnostic[] = [];
     const report = (code: Diagnostic["code"], message: string, path: string) =>
@@ -264,6 +265,40 @@ export async function verifyPack(
         inventory.skillsRoot,
       );
     else {
+      // Version-baseline grounding for bmad-freeze packs: a pack records the BMAD
+      // installation version it froze ([source].bmad_version). The canonical skills
+      // it references carry their own recorded bmad_version in their receipts. If
+      // the versions diverge, the canonical was replaced by a different BMAD
+      // release and this pack must not verify green against bytes it never froze.
+      const packSource = raw.source as TomlTable | undefined;
+      const packBmadVersion =
+        packSource &&
+        typeof packSource === "object" &&
+        typeof (packSource as Record<string, unknown>).bmad_version === "string"
+          ? ((packSource as Record<string, unknown>).bmad_version as string)
+          : null;
+      const recordedVersions = new Map<string, string>();
+      if (packBmadVersion !== null) {
+        for (const name of new Set(inventory.names)) {
+          try {
+            const metadata = await readSkillMetadata(targets.get(name) as string);
+            const origin = metadata.provenance?.origin;
+            if (
+              origin &&
+              typeof origin === "object" &&
+              !Array.isArray(origin) &&
+              typeof (origin as Record<string, unknown>).bmad_version === "string"
+            ) {
+              recordedVersions.set(
+                name,
+                (origin as Record<string, unknown>).bmad_version as string,
+              );
+            }
+          } catch {
+            /* Missing/unreadable canonicals are already reported above. */
+          }
+        }
+      }
       const names = new Set(inventory.names);
       const entries = await readdir(inventory.skillsRoot, { withFileTypes: true });
       const present = new Set(entries.map((entry) => entry.name));
@@ -302,6 +337,21 @@ export async function verifyPack(
             `Pack member ${entry.name} does not resolve to its matching canonical definition.`,
             path,
           );
+      }
+      // Baseline mismatch: this pack froze skills at a different BMAD version than
+      // the canonical currently records, so the pack is stale.
+      if (packBmadVersion !== null) {
+        for (const name of new Set(inventory.names)) {
+          const recorded = recordedVersions.get(name);
+          if (recorded === undefined) continue;
+          if (recorded !== packBmadVersion) {
+            report(
+              "E_BMAD_PACK_BASELINE",
+              `Pack bmad member ${name} is frozen at BMAD ${packBmadVersion} but the canonical now records BMAD ${recorded} (stale after a version switch).`,
+              targets.get(name) ?? inventory.skillsRoot,
+            );
+          }
+        }
       }
     }
     return makeResult(

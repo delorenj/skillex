@@ -71,6 +71,7 @@ printf '{}\\n' > "$HOME/.hermes/profiles/$3/config.yaml"
         **os.environ,
         "HOME": str(home),
         "HERMES_HOME": str(fleet),
+        "HERMES_FLEET_HOME": str(fleet),
         "TEST_PROJECT": str(project),
         "SKILLEX_BIN": str(wrapper),
         "HERMES_BIN": str(hermes),

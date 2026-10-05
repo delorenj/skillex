@@ -1,0 +1,57 @@
+[pack]
+name = "bmad"
+version = "6.12.1-next.1"
+description = "BMAD 6.12.1-next.1 legacy skills/commands frozen from /tmp/skillex020-bmad-target (reference-only pack; canonical bytes live in all-skills/)."
+
+[freeform]
+skills = [ "bmad-advanced-elicitation", "bmad-brainstorming", "bmad-customize", "bmad-deep-recon", "bmad-forge-idea", "bmad-help", "bmad-party-mode", "bmad-review", "bmad-agent-analyst", "bmad-agent-architect", "bmad-agent-dev", "bmad-agent-pm", "bmad-agent-ux-designer", "bmad-architecture", "bmad-create-epics-and-stories", "bmad-prd", "bmad-prfaq", "bmad-product-brief", "bmad-project-context", "bmad-spec", "bmad-sprint-planning", "bmad-ux", "bmad-build", "bmad-build-auto", "bmad-code-review", "bmad-correct-course", "bmad-qa-generate-e2e-tests", "bmad-retrospective", "bmad-walkthrough", "bmad-agent-builder", "bmad-bmb-setup", "bmad-eval-runner", "bmad-module-builder", "bmad-workflow-builder", "bmad-cis-agent-brainstorming-coach", "bmad-cis-agent-creative-problem-solver", "bmad-cis-agent-design-thinking-coach", "bmad-cis-agent-innovation-strategist", "bmad-cis-agent-presentation-master", "bmad-cis-agent-storyteller", "bmad-cis-design-thinking", "bmad-cis-innovation-strategy", "bmad-cis-problem-solving", "bmad-cis-storytelling", "bmad-loop-resolve", "bmad-loop-setup", "bmad-loop-sweep" ]
+
+[source]
+type = "bmad-freeze"
+bmad_version = "6.12.1-next.1"
+source_root = "/tmp/skillex020-bmad-target"
+installation_version = "6.12.1-next.1"
+install_date = "2026-10-05T00:06:58.963Z"
+last_updated = "2026-10-05T00:06:58.963Z"
+skill_manifest_sha256 = "sha256:f2c8b62eb63fe4196c404acc67e38ce0afa5d47f1c5042a505b2cf21940b83bc"
+files_manifest_sha256 = "sha256:074586581aa324fa4a2f45b46b0eb11d3a20c48af85b8ce8de17367d78711296"
+files_manifest_declared = 400
+files_manifest_missing = 378
+prerequisites = [ "Project runtime assets under {project-root}/_bmad (scripts, _config, config.toml, custom/) are NOT carried by this pack.", "Several frozen skills and commands reference {project-root}/_bmad at runtime; install or restore the matching BMAD tree in the consuming project." ]
+
+[[source.modules]]
+name = "bmad-loop"
+version = "main"
+source = "external"
+repo_url = "https://github.com/bmad-code-org/bmad-loop"
+sha = "68645cbd3e1a8aa2d7d3b2e69a5f2bee834e8ae3"
+
+[[source.modules]]
+name = "bmb"
+version = "v2.2.2"
+source = "external"
+repo_url = "https://github.com/bmad-code-org/bmad-builder"
+sha = "4a1422274a2acb0fb0ec0511753da6263948f072"
+
+[[source.modules]]
+name = "bmm"
+version = "6.12.1-next.1"
+source = "built-in"
+
+[[source.modules]]
+name = "cis"
+version = "v0.3.2"
+source = "external"
+repo_url = "https://github.com/bmad-code-org/bmad-module-creative-intelligence-suite"
+sha = "97298b22fee1c7e482710d3a8414adb5cfccccd9"
+
+[[source.modules]]
+name = "core"
+version = "6.12.1-next.1"
+source = "built-in"
+
+[[source.commands]]
+client = "opencode-skill"
+layout = ".opencode/commands"
+files = 47
+dangling = 0
