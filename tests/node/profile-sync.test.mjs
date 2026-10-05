@@ -153,7 +153,7 @@ it("profile inheritance opt-out persists through ordinary show and resync", asyn
   assert.deepEqual(managed(snapshot(f.root)), managed(before));
 });
 
-it("profile inheritance policy refuses non-boolean and symlink config", async (t) => {
+it("profile inheritance policy refuses non-boolean and strict symlink config", async (t) => {
   const f = fixture(t);
   const path = join(f.profile, "config.yaml");
   f.file(path, "skills:\n  inherit_global: false-ish\n");
@@ -163,8 +163,38 @@ it("profile inheritance policy refuses non-boolean and symlink config", async (t
   rmSync(path);
   symlinkSync(f.file(join(f.root, "foreign.yaml"), "skills:\n  inherit_global: false\n"), path);
   const linked = snapshot(f.root);
-  assert.equal((await syncProfile("work", f.options)).exit, 3);
+  assert.equal((await syncProfile("work", { ...f.options, skillexOnly: true })).exit, 3);
   assert.deepEqual(snapshot(f.root), linked);
+});
+
+it("ordinary linked profile config keeps legacy global inheritance", async (t) => {
+  const f = fixture(t);
+  const target = f.file(join(f.root, "shared-config.yaml"), "model:\n  default: fixture\n");
+  const path = join(f.profile, "config.yaml");
+  symlinkSync(target, path);
+  assert.deepEqual(
+    ok(await syncProfile("work", f.options)).managed.map(({ name }) => name),
+    ["alpha", "beta"],
+  );
+  const before = snapshot(f.root);
+  assert.deepEqual(ok(await showProfile("work", f.options)).changes, []);
+  assert.deepEqual(snapshot(f.root), before);
+  assert.equal(readlinkSync(path), target);
+});
+
+it("ordinary linked profile config can declare persistent inheritance opt-out", async (t) => {
+  const f = fixture(t);
+  const target = f.file(join(f.root, "shared-config.yaml"), "skills:\n  inherit_global: false\n");
+  const path = join(f.profile, "config.yaml");
+  symlinkSync(target, path);
+  assert.deepEqual(
+    ok(await syncProfile("work", f.options)).managed.map(({ name }) => name),
+    ["beta"],
+  );
+  f.manifest("global", { skills: ["missing"] });
+  assert.deepEqual(ok(await showProfile("work", f.options)).changes, []);
+  assert.deepEqual(ok(await syncProfile("work", f.options)).applied, []);
+  assert.equal(readlinkSync(path), target);
 });
 
 function ok(result) {

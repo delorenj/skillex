@@ -1,5 +1,5 @@
 import { constants } from "node:fs";
-import { open, readFile } from "node:fs/promises";
+import { open, readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { parseDocument } from "yaml";
 import { entry } from "./activation-ownership.js";
@@ -55,7 +55,10 @@ export async function profileInheritsGlobal(profile: ProfileLocation): Promise<b
   const path = join(profile.root, "config.yaml");
   const config = await entry(path);
   if (!config) return true;
-  if (!config.info.isFile()) refuse(path, "Profile config must be a regular file.");
+  // Ordinary Hermes profiles can link their config. Strict callers still require
+  // a generated regular file through assertStrictProfile before projection.
+  if (!config.info.isFile() && !(config.info.isSymbolicLink() && (await stat(path)).isFile()))
+    refuse(path, "Profile config must resolve to a regular file.");
   const document = parseDocument(await readFile(path, "utf8"), { uniqueKeys: true });
   if (document.errors.length) refuse(path, "Cannot validate profile skill inheritance.");
   const inherit: unknown = document.toJS()?.skills?.inherit_global;
