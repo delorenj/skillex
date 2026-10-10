@@ -26,7 +26,7 @@ Install, inspect and remove (units are symlinked from `systemd/`):
 scripts/install-hermes-resync.sh install     # link, daemon-reload, enable --now timer + path
 scripts/install-hermes-resync.sh status      # units, last run, catalog freshness; exit 1 if unhealthy
 scripts/install-hermes-resync.sh uninstall
-mise run hermes:resync -- --dry-run          # preview against the real fleet; writes nothing
+skillex profile sync <name> --project <selection-project> --skillex-only --dry-run
 ```
 
 `install` starts one run at once: the timer's `OnStartupSec` has long elapsed, so
@@ -153,7 +153,7 @@ python3 ~/code/skillex/scripts/hermes-skillex-cutover.py --profile NAME --projec
 # add --apply once the preview lists what you expect
 ```
 
-Then run the resync again (`mise run hermes:resync`). Other statuses: `error`
+Then preview and apply `skillex profile sync <name> --project <selection-project> --skillex-only` for the affected desk. Skill-operation mise tasks are retired (2026-10-10). Other statuses: `error`
 with "no recorded project" means the receipt is gone (sync that desk by hand
 once with `--project`); "not converged after sync" means skillex accepted the sync
 but the desk still reports drift (look at its findings); a timeout points at a

@@ -6,6 +6,10 @@
 > The [core-model amendment](../architecture/ADR-0001-reference-only-skill-topology.md#core-model-amendment-2026-10-10)
 > supersedes those criteria. Earlier passing tests prove the old behavior only.
 > This local annotation does not claim the Plane tickets or runtime were updated.
+>
+> **Mise correction — 2026-10-10:** requirements below to keep or generate
+> `skills:sync` are superseded. Remove skill-operation mise tasks and their call
+> edges; use the `skillex` CLI directly. Do not repin or recreate task wrappers.
 
 Created and verified 2026-09-08 in Skillex (`SKRILL`), workspace `33god`.
 

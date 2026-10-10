@@ -7,6 +7,11 @@
 > The legacy implementation contract and acceptance scenarios below are retained
 > as historical evidence, not authorization to implement the reversed model.
 > Runtime/schema repair and reconciliation of inheritance remain outstanding.
+>
+> **User correction — 2026-10-10:** all existing mise tasks operating on skills
+> must be removed, not repinned or replaced. Invoke `skillex` directly. The old
+> `skills:sync` template requirement below is superseded; remove its call edges
+> and fix the generating template within the authorized rollout scope.
 
 Status: implementation in progress. SKRILL-10 provides the Node package foundation, SKRILL-11 adds canonical manifest resolution, SKRILL-12 provides catalog inspection, creation, and import commands, SKRILL-13 adds set and pack management, SKRILL-14 implements activation reconciliation, SKRILL-15 adds immediate scope selection and inheritance commands, SKRILL-16 adds status, explanations, and source/runtime diagnostics, SKRILL-17 adds offline upstream vendoring, and SKRILL-8 adds Hermes profile projection. Consumer integration and cutover, and Python retirement remain open. See [foundation evidence](../implementation/cli-node-foundation.md), [resolver evidence](../implementation/cli-manifest-resolution.md), [catalog evidence](../implementation/cli-catalog.md), [composition evidence](../implementation/cli-compositions.md), [reconciliation evidence](../implementation/cli-reconciliation.md), [selection evidence](../implementation/cli-selections.md), [diagnostic evidence](../implementation/cli-diagnostics.md), [vendoring evidence](../implementation/cli-vendoring.md), and [profile evidence](../implementation/cli-profiles.md).
 SKRILL-18 provides [migration tooling](../implementation/cli-migration.md) and the [canonical catalog conversion](../implementation/cli-catalog-migration.md). SKRILL-19 template and PJangler integration is in progress; its active component execution ticket is [PJAN-127](https://plane.delo.sh/33god/projects/18a79832-00fb-4146-b054-d88528f9fef3/issues/54629e52-28a1-4e36-ac1f-05691aba7ee2).

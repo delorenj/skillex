@@ -133,6 +133,14 @@ export {
   type ResultEnvelope,
   type ResultOptions,
 } from "./core/result.js";
+export {
+  type RetiredMiseChange,
+  type RetiredMiseResult,
+  type RetireMiseOptions,
+  RetireMiseSkillTasksCommand,
+  retireMiseSkillTasks,
+  retireMiseText,
+} from "./core/retired-mise.js";
 export type {
   DiscoveryOptions,
   ExcludedBinding,

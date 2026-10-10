@@ -23,6 +23,8 @@ outrank contrary implementation behavior, older docs, tests, and recalled memory
 
 ## Rules and Guidelines
 
+- **No skill-operation mise tasks (2026-10-10).** Treat existing skill-management tasks as wrong and remove them and their task-call edges, not their version pins alone. Use `skillex` directly; never recreate mise wrappers. Preserve unrelated tasks and tool/runtime installation. Detect and remediate through `skillex integrations retire-mise` (preview, then `--apply`), within the authorized pilot/rollout scope. Fix generators when in scope so tasks cannot return.
+
 - Skill roots are almost always named `skills/`; Skillex's canonical roots are specifically `.agents/skills/`.
 - **Sets select the root; packs add skills to it.** This distinction applies in both global and project scopes. Do not infer semantics from legacy exclusive-pack or additive-set behavior.
 - Preview before applying selection changes. A plan that reverses these operations is implementation drift, not product authority. Inheritance, name collisions, and pack additions through shared set targets need explicit policy; do not invent it.

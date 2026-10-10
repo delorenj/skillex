@@ -127,6 +127,26 @@ skillex migrate --project /workspace/example --apply
 
 Do not run the Python and Node reconcilers against the same target. The [migration contract](docs/implementation/cli-migration.md) covers legacy references, explicit choices, ownership handoff, interruption recovery, and profile conversion. The [CLI Revamp delivery record](docs/tasks/cli-revamp-tickets.md) tracks the remaining template and consumer cutover work; installing the package alone does not migrate consumers.
 
+## Retire skill-operation mise tasks
+
+Existing mise tasks for skills are obsolete. Remove them rather than updating
+their package pins or introducing replacement wrappers. Invoke `skillex` directly.
+
+```sh
+skillex integrations retire-mise --project /workspace/example
+skillex integrations retire-mise --project /workspace/example --apply
+skillex integrations retire-mise --project /workspace/example
+```
+
+The default is a read-only preview. Removal covers detected skill-operation task
+tables, their dependencies, and supported watcher/enter-hook calls. Unrelated
+configuration and tool installation remain. The final preview must be empty.
+Use `--file PATH` for one explicit TOML source or `-g` for global mise configs.
+Unsupported inline task definitions or mixed hooks refuse instead of dropping
+unrelated behavior. This command does not change skill roots or run mise.
+File-task scripts and externally included config sources are not yet scanned;
+inspect those separately and extend the command before claiming their retirement.
+
 ## Automation and development
 
 Use `--json` for a schema-2 envelope with `schema`, `command`, `ok`, `exit`, `data`, and `findings`. Diagnostic output does not contaminate JSON stdout. Mutating commands support `--dry-run`; `migrate` previews by default and requires `--apply`. `sync --dry-run --exit-code` returns 6 for drift.

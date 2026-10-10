@@ -96,24 +96,7 @@ task = "link:agentfiles"
 description = "Symlink all agent files to AGENTS.md"
 run = "'{{config_root}}/.mise/scripts/link-agentfiles.sh' '{{config_root}}'"
 
-# --scope project, deliberately. [[watch_files]] fires this task whenever
-# .agents/skills.json is saved, and `skillex sync` defaults to reconciling the
-# GLOBAL root as well as the project one. A file-watch that silently rebuilds the
-# machine-wide projection every time you edit a project manifest is not something
-# you would ever ask for; it is also a behavior change from the engine this
-# replaced, which was project-only. Run `skillex sync` yourself for both.
-[tasks."skills:sync"]
-description = "Reconcile this project's selected skills"
-tools = { "npm:@delorenj/skillex" = { version = "0.2.0", allow_low_downloads = true }, node = "24" }
-run = "skillex sync --scope project --project '{{config_root}}'"
-
-[tasks."skills:sync:preview"]
-description = "Show what a sync would change here, without changing it"
-run = "uv run skillex sync --scope project --project '{{config_root}}' --dry-run"
-
-# `skills:provision:packs` is gone with the engine that needed it. Pack members
-# now resolve during `skillex sync` itself -- there is no separate provisioning
-# step to forget, and nothing writes a projection except the reconciler.
+# Skill operations use the skillex CLI directly; no mise tasks or watchers.
 
 # >>> mise-versioning >>>  (managed block — do not edit by hand; re-run init to update)
 [tasks."version"]
@@ -154,41 +137,7 @@ run = "uv build"
 description = "Run all quality checks: lint, typecheck, test"
 depends = ["lint", "tc", "test"]
 
-[tasks."topology:check"]
-description = "Audit strict single-source ownership (expected red until migration completes)"
-run = "uv run skillex topology check --root '{{config_root}}'"
 
 [tasks.setup]
 description = "Install Node and Python dependencies and git hooks"
 run = ["npm ci", "uv sync", "lefthook install"]
-
-# PJAN-84: the GLOBAL projection — ~/.agents/skills.json into skill-sets/global,
-# which every CLI on this machine reads through a single dir-level alias. It
-# lives here, in the registry that owns the farm, and NOT in the CommonProject
-# template: a project must never sync the machine's shared skill set, and there
-# is deliberately no enter hook for it.
-#
-# Preview first. This projection is shared by every CLI and every project on the
-# box, so see what a sync would remove before it removes anything.
-[tasks."skills:sync:global:preview"]
-description = "Report what a global skill sync would change, without changing it"
-run = "uv run skillex sync --scope global --dry-run"
-
-[tasks."skills:sync:global"]
-description = "Reconcile ~/.agents/skills from ~/.agents/skills.json"
-run = "uv run skillex sync --scope global"
-
-# Skillex-only Hermes desks are synced against the catalog's HEAD commit, so every
-# catalog commit leaves them "sync pending". These run (and install the automation
-# for) scripts/hermes-skillex-resync.py; see docs/implementation/hermes-skillex-resync.md.
-[tasks."hermes:resync"]
-description = "Converge every Skillex-only Hermes desk with the catalog (mise run hermes:resync -- --dry-run to preview)"
-run = "python3 '{{config_root}}/scripts/hermes-skillex-resync.py'"
-
-[tasks."hermes:resync:install"]
-description = "Install the user timer and path units that run hermes:resync automatically"
-run = "'{{config_root}}/scripts/install-hermes-resync.sh' install"
-
-[tasks."hermes:resync:status"]
-description = "Show the auto-resync units, the last run and whether the catalog moved since"
-run = "'{{config_root}}/scripts/install-hermes-resync.sh' status"
