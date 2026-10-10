@@ -1,8 +1,28 @@
 # ADR-0001: One Writable Skill Definition with Reference-Only Compositions
 
-- **Status:** Accepted
+- **Status:** Accepted; set/pack terminology amended by the user on 2026-10-10
 - **Date:** 2026-08-26
 - **Deciders:** Jarad DeLorenzo
+
+## Core-model amendment (2026-10-10)
+
+The user's definitions supersede ambiguous composition/activation language in
+this ADR and reversed set/pack semantics in older implementation material:
+
+- A **skill root** is a directory an agent searches for skills, almost always
+  named `skills/`. A **global skill root** loads regardless of project scope.
+- The **canonical skill root** is `~/.agents/skills/` globally or
+  `<project>/.agents/skills/` locally. `all-skills/` owns definition bytes; it is
+  not the canonical discovery root.
+- A **set replaces the root** with a symlink to the set's skill root. Sets are
+  mutually exclusive.
+- A **pack populates the existing root** with per-member symlinks. Packs are
+  composable; ten distinct additional skills produce ten additional links.
+
+This amendment establishes meaning, not a claim that the current resolver has
+been repaired. It does not decide name-collision precedence, inheritance, or how
+scope-local pack additions interact with a shared set target. Do not silently
+write through a shared set alias while those details remain unspecified.
 
 ## Context
 
@@ -60,24 +80,27 @@ The following invariants are mandatory:
    create a second place they live. `all-skills/sources.toml` declares the
    sources; nothing is fetched, and `skillex vendor status` verifies the pin
    offline from the catalog alone.
-5. **Composition expands to a flat name map.** Set and pack membership compiles
-   to `canonical-name -> all-skills/<canonical-name>`. Duplicate names or two
-   different targets for one name are errors.
-6. **Each scope has one activation root.** The user scope uses
-   `~/.agents/skills`; a project uses `<repo>/.agents/skills`.
-7. **Two activation modes are supported and named.** In *whole-root alias mode*,
-   `.agents/skills` aliases one reference-only composition such as
-   `skill-sets/global`. In *composed projection mode*, the reconciler builds a
-   real `.agents/skills/` directory whose children are canonical symlinks.
+5. **Membership references definitions, but operations differ.** A name map can
+   describe member targets; it does not make sets and packs interchangeable or
+   authorize unioning multiple sets. Collision policy must be explicit rather
+   than inferred from the map.
+6. **Each scope has one canonical skill root.** The user scope uses
+   `~/.agents/skills/`; a project uses `<repo>/.agents/skills/`.
+7. **Sets replace; packs populate.** Selecting a set replaces `.agents/skills/`
+   with a symlink to the set's skill root. Sets are mutually exclusive. Selecting
+   a pack adds individual member symlinks to the existing root. Packs compose.
+   These operations apply in either scope; they are not global/project modes.
 8. **CLI roots are aliases, not projections.** Claude, Codex, Gemini, Copilot,
    OpenCode, and Kimi skill roots alias the scope's `.agents/skills` directory.
 9. **Generated roots have one writer.** Humans edit canonical skills,
    compositions, and manifests. The Skillex reconciler exclusively owns
    generated activation roots. Generated roots are read-only from the user's
    perspective.
-10. **Project inheritance is a union, not a copy.** A project manifest may inherit
-    global names and add or override explicit names in its compiled map; it does
-    not copy global skill bytes into the project.
+10. **Inheritance must not redefine selection semantics.** The earlier union-map
+    inheritance design and current implementation need reconciliation with the
+    2026-10-10 definitions. They cannot make sets additive or packs exclusive.
+    Skill bytes remain reference-only; inheritance precedence is not established
+    by this amendment.
 
 ### Hermes PM amendment (2026-10-01)
 
@@ -112,12 +135,14 @@ scratch area and is not modified through a named profile's old root alias.
 ### Terminology
 
 - **Canonical definition:** the real skill directory in `all-skills/`.
-- **Composition:** a reference-only skill set or pack.
-- **Activation root:** the one `.agents/skills` root consumed by a scope.
-- **CLI alias:** a CLI-specific `skills/` path resolving to the activation root.
+- **Skill set:** a mutually exclusive root replacement, referencing definitions.
+- **Skill pack:** a composable addition of member links to an existing root.
+- **Canonical skill root / activation root:** the one `.agents/skills/` root
+  consumed by a scope.
+- **CLI alias:** a CLI-specific `skills/` path resolving to the canonical root.
 
-Calling all four of these things “canonical” is prohibited because it hides the
-write boundary.
+Definition ownership and discovery-root identity are different concepts. Always
+qualify which one is meant; do not reject the user's term “canonical skill root.”
 
 ## Options Considered
 

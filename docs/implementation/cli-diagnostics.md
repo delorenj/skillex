@@ -1,5 +1,12 @@
 # SKRILL-16: Read-only diagnostics
 
+> **Diagnostic interpretation — 2026-10-10:** exclusive-pack/dormant-selection
+> explanations below report legacy implementation behavior, not product intent.
+> Sets replace the canonical root and are mutually exclusive; packs add member
+> symlinks to an existing root and compose. See the
+> [core-model amendment](../architecture/ADR-0001-reference-only-skill-topology.md#core-model-amendment-2026-10-10).
+> A clean diagnostic for the old behavior does not establish semantic correctness.
+
 Implemented for [CLI Revamp](../plan/cli-revamp.md).
 Ticket: [SKRILL-16](https://plane.delo.sh/33god/projects/5aa8ec5c-3c66-49f9-b900-cca8a8446b65/issues/237ec990-0c2e-40b6-9701-14e267817396).
 

@@ -1,5 +1,12 @@
 # SKRILL-18: Explicit legacy migration
 
+> **Migration warning — 2026-10-10:** the exclusive-pack target described below
+> is not the intended contract. Sets replace the canonical root and are mutually
+> exclusive; packs add member links to an existing root and compose. See the
+> [core-model amendment](../architecture/ADR-0001-reference-only-skill-topology.md#core-model-amendment-2026-10-10).
+> Treat the old migration behavior as implementation evidence; do not convert
+> additive packs into exclusive roots or apply a contradictory migration plan.
+
 Tooling for [CLI Revamp](../plan/cli-revamp.md).
 Ticket: [SKRILL-18](https://plane.delo.sh/33god/projects/5aa8ec5c-3c66-49f9-b900-cca8a8446b65/issues/f29575b7-2222-471a-a336-19b14cf15821).
 Catalog conversion and live consumer rollout are separate acceptance steps;

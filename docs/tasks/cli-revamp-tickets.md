@@ -1,5 +1,12 @@
 # CLI Revamp tickets
 
+> **Historical acceptance warning — 2026-10-10:** the exclusive-pack criteria
+> recorded below encode the wrong product model. Sets replace the canonical root
+> and are mutually exclusive; packs populate it with individual links and compose.
+> The [core-model amendment](../architecture/ADR-0001-reference-only-skill-topology.md#core-model-amendment-2026-10-10)
+> supersedes those criteria. Earlier passing tests prove the old behavior only.
+> This local annotation does not claim the Plane tickets or runtime were updated.
+
 Created and verified 2026-09-08 in Skillex (`SKRILL`), workspace `33god`.
 
 **Epic: [SKRILL-9 — CLI Revamp](https://plane.delo.sh/33god/projects/5aa8ec5c-3c66-49f9-b900-cca8a8446b65/issues/dd33b6f7-da3b-4a42-a4fa-94518ea341e9).**

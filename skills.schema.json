@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://raw.githubusercontent.com/delorenj/skillex/main/skills.schema.json",
   "title": "Agent Skills Manifest",
-  "description": "Canonical skill selections for one global or project activation root. Resolution is offline; all definitions belong to all-skills/ and sets and packs contain references only.",
+  "description": "Selection schema for the current legacy runtime, not the corrected product contract. User clarification 2026-10-10: sets are mutually exclusive root replacements; packs compose by adding per-skill links to an existing canonical .agents/skills/ root. Validation constraints below still encode reversed behavior pending runtime/schema migration. Definitions belong to all-skills/; sets and packs contain references only.",
   "type": "object",
   "additionalProperties": false,
   "definitions": {
@@ -42,7 +42,7 @@
     "inherit_global": {
       "type": "boolean",
       "default": true,
-      "description": "Include global selections in a composed project selection. This does not choose which roots a command writes. Ignored for global scope or an active exclusive pack."
+      "description": "Legacy runtime: include global selections in a composed project selection; ignored globally or with its exclusive-pack mode. This does not choose write scopes. Exclusive-pack behavior is drift from the 2026-10-10 contract; intended inheritance interaction remains to be specified."
     },
     "registry": {
       "type": "string",
@@ -51,7 +51,7 @@
     },
     "skills": {
       "type": "array",
-      "description": "Explicit canonical all-skills/ references, applied after inherited names and ordered sets. Repeated references collapse; conflicting canonical targets fail.",
+      "description": "Explicit canonical all-skills/ references. Legacy runtime applies them after inheritance and ordered additive sets, collapses repeated references, and rejects conflicting targets. Additive-set behavior is drift from the 2026-10-10 mutually exclusive root-replacement contract.",
       "items": {
         "anyOf": [
           {
@@ -72,7 +72,7 @@
     },
     "sets": {
       "type": "array",
-      "description": "Composable references to sets/<name>, processed in declaration order. Every selected member resolves to its canonical all-skills/ definition.",
+      "description": "Intended contract: sets are mutually exclusive; selecting one replaces .agents/skills/ with a symlink to the set's skill root. Legacy validation/resolution still permits ordered additive sets. That behavior is incorrect and is retained here only until runtime and schema are migrated together.",
       "items": {
         "anyOf": [
           {
@@ -88,11 +88,11 @@
               },
               "include": {
                 "$ref": "#/definitions/skillNames",
-                "description": "Limit this set to these canonical members. Omission includes all members; an empty list includes none."
+                "description": "Legacy additive-set filter: limit a contribution to these members; omission includes all and an empty list includes none. This does not establish filtering semantics for the corrected root-replacement set model."
               },
               "exclude": {
                 "$ref": "#/definitions/skillNames",
-                "description": "Remove these members from this set contribution only."
+                "description": "Legacy additive-set filter removing members from a contribution. Do not infer permission to mutate a shared set or filter a root alias under the corrected model."
               },
               "optional": {
                 "type": "boolean",
@@ -107,7 +107,7 @@
     "packs": {
       "type": "array",
       "maxItems": 1,
-      "description": "At most one exclusive loadout from packs/. An active pack replaces the entire effective selection while ordinary declarations remain dormant for restoration. Pack member filters are unsupported.",
+      "description": "Intended contract: packs are composable and add individual member symlinks to an existing canonical root. Legacy maxItems: 1 and exclusive whole-root replacement are incorrect implementation constraints pending runtime/schema migration, not the meaning of a pack.",
       "items": {
         "anyOf": [
           {
@@ -129,7 +129,7 @@
               "optional": {
                 "type": "boolean",
                 "default": false,
-                "description": "Report an unavailable pack as an optional skip. Ordinary selections remain dormant while the pack is selected."
+                "description": "Legacy runtime reports an unavailable pack as an optional skip and leaves ordinary selections dormant. Dormant exclusive-pack selection is implementation drift, not the intended additive pack contract."
               }
             }
           }
@@ -138,7 +138,7 @@
     },
     "exclude": {
       "$ref": "#/definitions/skillNames",
-      "description": "Mask canonical names after inheritance, sets, and explicit skills have been composed. Ignored while an exclusive pack is active."
+      "description": "Legacy runtime masks names after inheritance, additive sets, and explicit skills; it ignores exclusions in exclusive-pack mode. Those set/pack semantics are reversed; the corrected model does not yet specify exclusion precedence."
     }
   }
 }

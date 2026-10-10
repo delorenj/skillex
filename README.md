@@ -2,6 +2,44 @@
 
 A Node CLI for defining skills once, composing them by reference, and exposing the selected skills to agentic CLIs.
 
+## Core model
+
+The user-confirmed definitions (2026-10-10) are:
+
+| Term | Meaning |
+| --- | --- |
+| Skill root | A directory where an agent looks for skills, almost always named `skills/`. |
+| Global skill root | A directory an agent automatically loads regardless of project scope. |
+| Canonical skill root | Skillex's SSOT root: `~/.agents/skills/` globally; `<project>/.agents/skills/` locally. |
+| Skill set | **Replaces** the canonical root with a symlink to the set's skill root. Sets are **mutually exclusive**. |
+| Skill pack | **Populates** the existing root with individual skill symlinks. Packs are **composable**. |
+
+**Sets select the root; packs add skills to it.** A ten-skill pack adds ten member
+links; it does not take over the root. `all-skills/` owns the definition bytes,
+not the canonical discovery root. See [AGENTS.md](AGENTS.md) for the vocabulary.
+
+> **Implementation mismatch:** the current CLI/schema still contain reversed
+> semantics: additive sets and exclusive packs. Those are defects relative to
+> this model, not alternative definitions. This documentation correction does
+> not repair the resolver or migrate live roots. Preview changes and do not apply
+> a plan that contradicts the model. The diagram's `skill-sets/global` root alias
+> agrees with set replacement; its global/project examples do not restrict which
+> scope can use either operation. Older planning defaults do not override the
+> user's definitions.
+
+Known repair points (not fixed by this documentation change):
+
+- `skills.schema.json` and `src/core/manifest.ts`: allow composable packs rather
+  than restricting them to one; enforce mutually exclusive sets.
+- `src/core/resolution.ts` and `src/core/reconciliation.ts`: replace additive-set
+  and whole-root-pack behavior with the defined operations.
+- Selection commands, migration, diagnostics, command help, and their tests:
+  remove exclusive-pack/dormant-selection assumptions.
+
+Existing manifests and live roots need an explicit migration, not an automatic
+swap based only on renamed concepts. Shared-set additions, inheritance, and
+collision policy are still to be specified.
+
 ## Install
 
 Requires Node 24 or newer. The npm package contains the compiled CLI, typed ESM core, and JSON schemas. It has no Python or uv runtime dependency.
@@ -15,7 +53,13 @@ Keep a local registry checkout with its `all-skills/` submodule initialized. Sel
 
 ## Select and sync skills
 
-A global or project `.agents/skills.json` declares skills, sets, an optional exclusive pack, and exclusions. Projects inherit global selections by default.
+Selection lives in global or project `.agents/skills.json`. Intended set and
+pack semantics are defined above. The current implementation also has individual
+skill selections, exclusions, and project inheritance; do not mistake its legacy
+exclusive-pack restrictions for the product contract.
+
+The commands below describe the existing CLI surface, not proof that set/pack
+behavior is correct. Preview mutating commands with `--dry-run` before applying.
 
 ```sh
 skillex init --scope global
@@ -28,7 +72,11 @@ skillex status --project /workspace/example
 skillex explain code-reviewer --project /workspace/example
 ```
 
-`enable`, `disable`, and `inherit` save the selected scope's intent and immediately reconcile that scope. Disabling an inherited skill adds a local exclusion. A pack supplies the entire loadout; disabling it restores the retained ordinary selection.
+`enable`, `disable`, and `inherit` save the selected scope's intent and immediately
+reconcile that scope unless previewed. The current implementation adds a local
+exclusion when disabling an inherited skill. Its behavior of making a pack the
+entire loadout is legacy drift: packs must add member links, while sets replace
+the root. Do not use that legacy behavior as an activation recipe.
 
 Plain `sync` reconciles global plus the nearest project, or global alone outside a project. `--scope project --project PATH` restricts writes to that project while still resolving inheritance. Existing foreign files and installer-owned content are preserved. Only recorded owned links can be pruned.
 

@@ -1,5 +1,13 @@
 # SKRILL-11: Canonical manifest resolution
 
+> **Semantic correction — 2026-10-10:** this is a record of implemented behavior,
+> not the product contract. Its ordered additive sets and exclusive replacement
+> pack are reversed. **Sets replace the canonical root and are mutually exclusive;
+> packs add per-skill symlinks to an existing root and compose.** Follow the
+> [core-model amendment](../architecture/ADR-0001-reference-only-skill-topology.md#core-model-amendment-2026-10-10).
+> The resolver, schema, and their tests still require correction; do not reproduce
+> this behavior as intended design or apply a contradictory activation plan.
+
 Implemented 2026-09-14 for [CLI Revamp](../plan/cli-revamp.md).
 Ticket: [SKRILL-11](https://plane.delo.sh/33god/projects/5aa8ec5c-3c66-49f9-b900-cca8a8446b65/issues/9f99f363-1d09-422a-a98b-8330610f4bc9).
 

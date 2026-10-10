@@ -1,5 +1,13 @@
 # SKRILL-15: Scope selection commands
 
+> **Semantic correction — 2026-10-10:** the exclusive-pack/dormant-selection
+> behavior below records the old implementation, not intended semantics.
+> **Sets replace the canonical root and are mutually exclusive; packs populate
+> the existing root with member symlinks and compose.** See the
+> [core-model amendment](../architecture/ADR-0001-reference-only-skill-topology.md#core-model-amendment-2026-10-10).
+> Do not use the old pack commands below as an activation recipe without checking
+> a dry-run against that contract. Runtime repair is not part of this doc change.
+
 Implemented for [CLI Revamp](../plan/cli-revamp.md).
 Ticket: [SKRILL-15](https://plane.delo.sh/33god/projects/5aa8ec5c-3c66-49f9-b900-cca8a8446b65/issues/a3480478-25a3-4e26-a869-ba8e8a2cbb21).
 

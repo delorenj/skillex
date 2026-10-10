@@ -1,5 +1,12 @@
 # SKRILL-8: Hermes profile projection
 
+> **Terminology correction — 2026-10-10:** references below to ordinary
+> whole-root pack activation describe legacy runtime drift. Root replacement is
+> a **set** operation; sets are mutually exclusive. **Packs** add individual
+> links to an existing root and compose. Profile-specific projection mechanics
+> do not redefine those terms. See the
+> [core-model amendment](../architecture/ADR-0001-reference-only-skill-topology.md#core-model-amendment-2026-10-10).
+
 Implemented for [CLI Revamp](../plan/cli-revamp.md).
 Ticket: [SKRILL-8](https://plane.delo.sh/33god/projects/5aa8ec5c-3c66-49f9-b900-cca8a8446b65/issues/04fa44fa-7312-4d91-8e80-5506f22082d4).
 

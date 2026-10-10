@@ -1,5 +1,14 @@
 # SKRILL-14: Activation reconciliation
 
+> **Semantic correction — 2026-10-10:** this implementation record describes
+> reversed activation behavior. Whole-root replacement belongs to **sets**, which
+> are mutually exclusive. **Packs compose** by adding per-skill symlinks into an
+> existing canonical root. See the
+> [core-model amendment](../architecture/ADR-0001-reference-only-skill-topology.md#core-model-amendment-2026-10-10).
+> The exclusive-pack transitions below remain evidence of runtime drift, not
+> instructions for correct activation. Do not apply a plan that contradicts the
+> model; this documentation amendment does not repair or migrate live roots.
+
 Implemented for [CLI Revamp](../plan/cli-revamp.md).
 Ticket: [SKRILL-14](https://plane.delo.sh/33god/projects/5aa8ec5c-3c66-49f9-b900-cca8a8446b65/issues/a548274f-a4d9-4625-8920-f25fd1ac63d3).
 

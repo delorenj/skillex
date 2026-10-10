@@ -60,8 +60,10 @@ removed, and the normal quality suite must remain usable during that migration.
 
 ### 4. Converge activation roots
 
-- Choose whole-root alias mode or composed projection mode independently for
-  global and project scopes.
+- Apply the user's 2026-10-10 definitions in either scope: a set replaces the
+  canonical `.agents/skills/` root with a symlink to the set's skill root; packs
+  add individual member links to an existing root. Sets are mutually exclusive;
+  packs compose. Do not choose these operations independently of selection type.
 - Make every active CLI `skills/` path a directory-level alias to the scope's
   `.agents/skills` root.
 - Ensure only the reconciler writes a composed projection.

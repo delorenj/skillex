@@ -1,5 +1,12 @@
 # SKRILL-13: Set and pack commands
 
+> **Core-model clarification — 2026-10-10:** reference-only membership does not
+> make sets and packs interchangeable. A **set replaces** the canonical root
+> with a symlink to its skill root; sets are mutually exclusive. A **pack adds**
+> individual skill links to an existing root; packs compose. See the
+> [core-model amendment](../architecture/ADR-0001-reference-only-skill-topology.md#core-model-amendment-2026-10-10).
+> Paths below describe current storage, not a new definition of either operation.
+
 Implemented 2026-09-14 for [CLI Revamp](../plan/cli-revamp.md).
 Ticket: [SKRILL-13](https://plane.delo.sh/33god/projects/5aa8ec5c-3c66-49f9-b900-cca8a8446b65/issues/2db60d04-477e-448a-bdd0-d04eaf3f0859).
 
