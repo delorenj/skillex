@@ -10,7 +10,9 @@
       "bmad@6.12.1-next.1",
       "holocene-extras@1.0.0"
     ],
-    "skills": [],
+    "skills": [
+      "diagram-design"
+    ],
     "removed": []
   }
 }
