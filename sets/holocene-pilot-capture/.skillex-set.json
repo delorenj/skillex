@@ -1,0 +1,15 @@
+{
+  "schema": 1,
+  "provenance": {
+    "sources": [
+      {
+        "type": "path",
+        "label": "/home/delorenj/code/33GOD/holocene/.agents/skills"
+      },
+      {
+        "type": "path",
+        "label": "/home/delorenj/code/skillex/sets/min-global"
+      }
+    ]
+  }
+}

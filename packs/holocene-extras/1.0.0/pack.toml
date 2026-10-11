@@ -1,0 +1,62 @@
+[pack]
+name = "holocene-extras"
+version = "1.0.0"
+
+[[source.sources]]
+type = "path"
+label = "/home/delorenj/code/skillex/all-skills/anthropic-brand-guidelines"
+
+[[source.sources]]
+type = "path"
+label = "/home/delorenj/code/skillex/all-skills/docx"
+
+[[source.sources]]
+type = "path"
+label = "/home/delorenj/code/skillex/all-skills/import-memory"
+
+[[source.sources]]
+type = "path"
+label = "/home/delorenj/code/skillex/all-skills/mcp-builder"
+
+[[source.sources]]
+type = "path"
+label = "/home/delorenj/code/skillex/all-skills/morning"
+
+[[source.sources]]
+type = "path"
+label = "/home/delorenj/code/skillex/all-skills/orca-cli"
+
+[[source.sources]]
+type = "path"
+label = "/home/delorenj/code/skillex/all-skills/orchestration"
+
+[[source.sources]]
+type = "path"
+label = "/home/delorenj/code/skillex/all-skills/pdf"
+
+[[source.sources]]
+type = "path"
+label = "/home/delorenj/code/skillex/all-skills/pptx"
+
+[[source.sources]]
+type = "path"
+label = "/home/delorenj/code/skillex/all-skills/skill-evaluation"
+
+[[source.sources]]
+type = "path"
+label = "/home/delorenj/code/skillex/all-skills/slack-gif-creator"
+
+[[source.sources]]
+type = "path"
+label = "/home/delorenj/code/skillex/all-skills/theme-factory"
+
+[[source.sources]]
+type = "path"
+label = "/home/delorenj/code/skillex/all-skills/web-artifacts-builder"
+
+[[source.sources]]
+type = "path"
+label = "/home/delorenj/code/skillex/all-skills/xlsx"
+
+[freeform]
+skills = [ "anthropic-brand-guidelines", "docx", "import-memory", "mcp-builder", "morning", "orca-cli", "orchestration", "pdf", "pptx", "skill-evaluation", "slack-gif-creator", "theme-factory", "web-artifacts-builder", "xlsx" ]

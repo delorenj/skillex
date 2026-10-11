@@ -1,0 +1,16 @@
+{
+  "schema": 1,
+  "derived": {
+    "owner": {
+      "scope": "project",
+      "root": "/home/delorenj/code/33GOD/holocene"
+    },
+    "base": "min-global",
+    "packs": [
+      "bmad@6.12.1-next.1",
+      "holocene-extras@1.0.0"
+    ],
+    "skills": [],
+    "removed": []
+  }
+}
