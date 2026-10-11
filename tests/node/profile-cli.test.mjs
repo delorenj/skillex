@@ -194,18 +194,18 @@ describe("installed Hermes profile CLI", () => {
 
   it("keeps independent global contributions through project inheritance and exclusion settings", (context) => {
     const world = createProfileWorld(context, fixture);
-    world.set("tools", ["alpha", "beta", "gamma", "shared"]);
     manifest(world.home, { skills: ["alpha", "shared"] });
     for (const inherit of [false, true]) {
       manifest(world.project, {
         inherit_global: inherit,
-        sets: ["tools"],
+        skills: ["beta", "gamma", "shared"],
         exclude: ["alpha", "gamma", "shared"],
       });
       const result = world.sync().data;
       assert.deepEqual(managedNames(result), ["alpha", "beta", "shared"]);
       assert.equal(candidate(result, "alpha").winner, "global");
       assert.equal(candidate(result, "beta").winner, "project");
+      assert.equal(candidate(result, "shared").winner, "global");
       assertLinks(world, ["alpha", "beta", "shared"]);
       assert.equal(existsSync(join(world.skillsRoot, "gamma")), false);
     }
@@ -218,32 +218,31 @@ describe("installed Hermes profile CLI", () => {
     assertLinks(world, ["alpha", "shared"]);
   });
 
-  it("flattens authoritative pack membership and restores ordinary project selection in the same directory", (context) => {
+  it("flattens additive pack membership beside ordinary selections in the same directory", (context) => {
     const world = createProfileWorld(context, fixture);
     const globalPack = world.pack("global-tools", "1.0.0", ["alpha", "shared"], false);
     const projectPack = world.pack("project-tools", "2.0.0", ["beta", "shared"], false);
     manifest(world.home, {
-      skills: ["dormant-missing"],
+      skills: ["gamma"],
       packs: [{ name: "global-tools", version: "1.0.0" }],
     });
     manifest(world.project, {
       inherit_global: false,
-      skills: ["gamma"],
+      skills: ["beta"],
       packs: [{ name: "project-tools", version: "2.0.0" }],
     });
     const before = identity(world.skillsRoot);
     assert.equal(existsSync(join(globalPack, "skills")), false);
     assert.equal(existsSync(join(projectPack, "skills")), false);
     const packed = world.sync().data;
-    assert.deepEqual(managedNames(packed), ["alpha", "beta", "shared"]);
-    assertLinks(world, ["alpha", "beta", "shared"]);
+    assert.deepEqual(managedNames(packed), ["alpha", "beta", "gamma", "shared"]);
+    assertLinks(world, ["alpha", "beta", "gamma", "shared"]);
     assert.equal(lstatSync(world.skillsRoot).isDirectory(), true);
     assert.deepEqual(identity(world.skillsRoot), before);
-    manifest(world.project, { inherit_global: false, skills: ["gamma"] });
+    manifest(world.project, { inherit_global: false, skills: ["beta"] });
     const restored = world.sync().data;
-    assert.deepEqual(managedNames(restored), ["alpha", "gamma", "shared"]);
-    assertLinks(world, ["alpha", "gamma", "shared"]);
-    assert.equal(existsSync(join(world.skillsRoot, "beta")), false);
+    assert.deepEqual(managedNames(restored), ["alpha", "beta", "gamma", "shared"]);
+    assertLinks(world, ["alpha", "beta", "gamma", "shared"]);
     assert.deepEqual(identity(world.skillsRoot), before);
   });
 

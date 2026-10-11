@@ -18,34 +18,23 @@ The user-confirmed definitions (2026-10-10) are:
 links; it does not take over the root. `all-skills/` owns the definition bytes,
 not the canonical discovery root. See [AGENTS.md](AGENTS.md) for the vocabulary.
 
-> **Implementation mismatch:** the current CLI/schema still contain reversed
-> semantics: additive sets and exclusive packs. Those are defects relative to
-> this model, not alternative definitions. This documentation correction does
-> not repair the resolver or migrate live roots. Preview changes and do not apply
-> a plan that contradicts the model. The diagram's `skill-sets/global` root alias
-> agrees with set replacement; its global/project examples do not restrict which
-> scope can use either operation. Older planning defaults do not override the
-> user's definitions.
+The Node implementation enforces this model. Older installed packages and the
+retained Python migration reference may still implement the reversed semantics;
+never run both writers on the same root. Existing manifests and foreign roots
+need an explicit previewed migration, not a silent reinterpretation.
 
-Known repair points (not fixed by this documentation change):
-
-- `skills.schema.json` and `src/core/manifest.ts`: allow composable packs rather
-  than restricting them to one; enforce mutually exclusive sets.
-- `src/core/resolution.ts` and `src/core/reconciliation.ts`: replace additive-set
-  and whole-root-pack behavior with the defined operations.
-- Selection commands, migration, diagnostics, command help, and their tests:
-  remove exclusive-pack/dormant-selection assumptions.
-
-Existing manifests and live roots need an explicit migration, not an automatic
-swap based only on renamed concepts. Shared-set additions, inheritance, and
-collision policy are still to be specified.
+Adding a pack to a shared set-backed root derives a scope-owned set and switches
+only that scope. The shared set and its other consumers remain unchanged. A
+project set overrides Skillex's inherited global selection, but agent clients
+also discover global skills independently: client isolation requires a supported
+adapter and runtime verification, not merely `inherit_global: false`.
 
 ## Install
 
 Requires Node 24 or newer. The npm package contains the compiled CLI, typed ESM core, and JSON schemas. It has no Python or uv runtime dependency.
 
 ```sh
-npm install --global @delorenj/skillex@0.1.1
+npm install --global @delorenj/skillex
 skillex --help
 ```
 
@@ -53,13 +42,10 @@ Keep a local registry checkout with its `all-skills/` submodule initialized. Sel
 
 ## Select and sync skills
 
-Selection lives in global or project `.agents/skills.json`. Intended set and
-pack semantics are defined above. The current implementation also has individual
-skill selections, exclusions, and project inheritance; do not mistake its legacy
-exclusive-pack restrictions for the product contract.
-
-The commands below describe the existing CLI surface, not proof that set/pack
-behavior is correct. Preview mutating commands with `--dry-run` before applying.
+Selection lives in global or project `.agents/skills.json`. Select at most one
+set, any number of distinct packs, and residual individual skills. Use `-g` on
+selection commands for global scope, or `--project PATH` for one project. Preview
+mutating commands before applying; foreign content requires explicit adoption.
 
 ```sh
 skillex init --scope global
@@ -72,13 +58,45 @@ skillex status --project /workspace/example
 skillex explain code-reviewer --project /workspace/example
 ```
 
-`enable`, `disable`, and `inherit` save the selected scope's intent and immediately
-reconcile that scope unless previewed. The current implementation adds a local
-exclusion when disabling an inherited skill. Its behavior of making a pack the
-entire loadout is legacy drift: packs must add member links, while sets replace
-the root. Do not use that legacy behavior as an activation recipe.
+`enable`, `disable`, and `inherit` save and reconcile one scope unless previewed.
+`enable set NAME` switches its root, while `enable pack NAME@VERSION` adds that
+pack without discarding other packs. `pack add REF MEMBERS...` edits pack
+membership, not manifest selection. Exclusions and additions on a set-backed root
+use a scope-owned derivation rather than modifying the shared set.
 
 Plain `sync` reconciles global plus the nearest project, or global alone outside a project. `--scope project --project PATH` restricts writes to that project while still resolving inheritance. Existing foreign files and installer-owned content are preserved. Only recorded owned links can be pruned.
+
+## Repeatable integration repairs
+
+```sh
+# Compose references from a root, individual skill paths, or explicit Git sources.
+skillex set create project-base --from-root /workspace/skills --dry-run
+skillex pack create project-tools --version 1.0.0 --from /workspace/skill-a --from https://example.org/team/skills.git --import --dry-run
+
+# Preview normalization; --base-set is required for ambiguous legacy multi-set declarations.
+skillex normalize --project /workspace/example
+skillex normalize --project /workspace/example --apply
+skillex normalize -g --base-set min-global --dry-run
+
+# Explicit ownership cutover preserves original roots when mapping entries.
+skillex root adopt --project /workspace/example --map old-name=new-name --dry-run
+
+# Project-set override for OpenCode V2; verify with a dedicated existing session.
+skillex clients isolate --client opencode --project /workspace/example
+skillex clients verify --client opencode --project /workspace/example --session ses_probe --agent build
+```
+
+Source creation refuses differing same-name content and never silently skips
+requested unknown skills. `--import` explicitly authorizes missing definitions
+through the canonical importer; Git acquisition records a commit and never runs
+source code. Normalization replaces exact groups with references without widening
+membership. Root adoption and client isolation preview by default; apply with
+`--apply`, then repeat the preview to prove convergence.
+
+OpenCode isolation preserves unrelated configuration and uses owned permission
+rules. Conflicting user rules require an explicit decision; other clients are not
+certified by this adapter. `clients unisolate` removes only owned rules. Verification
+checks canonical paths and actual permissions, not merely the raw registered list.
 
 ## Manage the catalog
 

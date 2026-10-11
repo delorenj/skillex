@@ -28,6 +28,23 @@ import {
   withLock,
 } from "@delorenj/skillex";
 
+it("invocation inside a globally aliased set selects global, not the registry project", async (t) => {
+  const f = fixture(t);
+  f.skill("from-global-root");
+  const set = f.directory(join(f.registry, "sets", "current"));
+  f.file(join(f.registry, ".agents", "skills.json"), "{}");
+  f.directory(join(f.home, ".agents"));
+  f.manifest("global", { sets: ["current"] });
+  const activated = await sync({ ...f.options, scope: "global" });
+  assert.equal(activated.exit, 0, JSON.stringify(activated));
+  const result = await enableSelection("skill", "from-global-root", {
+    ...f.options,
+    cwd: set,
+    dryRun: true,
+  });
+  assert.equal(result.data?.scope, "global", JSON.stringify(result));
+});
+
 function fixture(t) {
   const root = realpathSync(mkdtempSync("/tmp/skillex-selection-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));
@@ -251,30 +268,75 @@ it("uses global for a checkout with no manifest and requires init for an explici
   assert.deepEqual(declaration(f.home).skills, ["alpha"]);
 });
 
-it("masks inherited and set members locally, then re-enables an explicit canonical skill", async (t) => {
+it("masks inherited set members locally, then re-enables them without editing the shared set", async (t) => {
   const f = fixture(t);
   const alpha = f.skill("alpha");
   f.skill("beta");
   const set = f.set("tools", ["alpha", "beta"]);
-  f.manifest("global", { skills: ["alpha"] });
-  f.manifest("project", { sets: ["tools"], skills: [{ name: "alpha" }] });
+  f.manifest("global", { sets: ["tools"] });
+  f.manifest("project", {});
   ok(await sync({ ...f.options, scope: "project" }));
   const globalBefore = snapshot(f.home);
   const setBefore = snapshot(set);
   const disabled = ok(await disableSelection("skill", "alpha", f.options));
-  assert.deepEqual(disabled.manifest.skills, []);
   assert.deepEqual(disabled.manifest.exclude, ["alpha"]);
   assert.equal(existsSync(join(activation(f.project), "alpha")), false);
   assert.equal(existsSync(join(activation(f.project), "beta")), true);
   const enabled = ok(await enableSelection("skill", "alpha", f.options));
-  assert.deepEqual(enabled.manifest.skills, ["alpha"]);
   assert.deepEqual(enabled.manifest.exclude, []);
   assert.equal(realpathSync(join(activation(f.project), "alpha")), alpha);
   assert.deepEqual(snapshot(f.home), globalBefore);
   assert.deepEqual(snapshot(set), setBefore);
 });
 
-it("preserves an existing filtered optional set and repairs activation on a declaration no-op", async (t) => {
+for (const contributor of ["inherited-direct", "inherited-set", "pack", "base-set"]) {
+  it(`disabling an explicit skill masks the remaining ${contributor} contribution`, async (t) => {
+    const f = fixture(t);
+    f.skill("alpha");
+    f.skill("beta");
+    f.set("tools", ["alpha"]);
+    f.pack("tools", "1.0.0", ["alpha"]);
+    if (contributor === "inherited-direct") f.manifest("global", { skills: ["alpha"] });
+    if (contributor === "inherited-set") f.manifest("global", { sets: ["tools"] });
+    if (contributor === "pack") f.manifest("project", { packs: ["tools@1.0.0"] });
+    if (contributor === "base-set") ok(await enableSelection("set", "tools", f.options));
+    ok(await enableSelection("skill", "alpha", f.options));
+    ok(await enableSelection("skill", "beta", f.options));
+    const globalBefore = snapshot(f.home);
+    const sourceBefore = snapshot(join(f.registry, "sets", "tools"));
+    const disabled = ok(await disableSelection("skill", "alpha", f.options));
+    assert.ok(disabled.manifest.exclude.includes("alpha"));
+    assert.ok(
+      !disabled.manifest.skills.some(
+        (entry) => (typeof entry === "string" ? entry : entry.name) === "alpha",
+      ),
+    );
+    assert.equal(existsSync(join(activation(f.project), "alpha")), false);
+    assert.equal(existsSync(join(activation(f.project), "beta")), true);
+    const stable = snapshot(f.root);
+    assert.deepEqual(ok(await disableSelection("skill", "alpha", f.options)).changes, []);
+    assert.deepEqual(snapshot(f.root), stable);
+    ok(await enableSelection("skill", "alpha", f.options));
+    assert.equal(existsSync(join(activation(f.project), "alpha")), true);
+    assert.deepEqual(snapshot(f.home), globalBefore);
+    assert.deepEqual(snapshot(join(f.registry, "sets", "tools")), sourceBefore);
+  });
+}
+
+it("removes a direct-only skill without adding a needless exclusion", async (t) => {
+  const f = fixture(t);
+  f.skill("alpha");
+  f.manifest("project", { inherit_global: false, skills: ["alpha"] });
+  ok(await sync({ ...f.options, scope: "project" }));
+  const disabled = ok(await disableSelection("skill", "alpha", f.options));
+  assert.deepEqual(disabled.manifest.exclude ?? [], []);
+  assert.equal(existsSync(join(activation(f.project), "alpha")), false);
+  const stable = snapshot(f.root);
+  assert.deepEqual(ok(await disableSelection("skill", "alpha", f.options)).changes, []);
+  assert.deepEqual(snapshot(f.root), stable);
+});
+
+it("refuses a legacy filtered set write-free while a clean optional set repairs activation on a no-op", async (t) => {
   const f = fixture(t);
   const alpha = f.skill("alpha");
   f.skill("beta");
@@ -283,51 +345,61 @@ it("preserves an existing filtered optional set and repairs activation on a decl
     manifestPath(f.project),
     '{ "inherit_global": false, "sets": [{"name":"tools","include":["alpha"],"optional":true}] }\n',
   );
+  const before = snapshot(f.root);
+  const refused = await enableSelection("set", "tools", f.options);
+  const legacy = finding(refused, "E_LEGACY_FIELD", 2);
+  assert.ok(legacy.fix.includes("skillex normalize --dry-run"));
+  assert.deepEqual(snapshot(f.root), before);
+
+  f.file(
+    manifestPath(f.project),
+    '{ "inherit_global": false, "sets": [{"name":"tools","optional":true}] }\n',
+  );
   chmodSync(manifestPath(f.project), 0o640);
   const bytes = readFileSync(manifestPath(f.project));
   const inode = lstatSync(manifestPath(f.project)).ino;
   const enabled = ok(await enableSelection("set", "tools", f.options));
   assert.equal(enabled.changed, false);
   assert.equal(enabled.saved, false);
-  assert.ok(enabled.applied.some((change) => change.action === "create-directory"));
+  assert.ok(enabled.applied.some((change) => change.action === "create-link"));
   assert.equal(realpathSync(join(activation(f.project), "alpha")), alpha);
-  assert.equal(existsSync(join(activation(f.project), "beta")), false);
+  assert.equal(existsSync(join(activation(f.project), "beta")), true);
   assert.deepEqual(readFileSync(manifestPath(f.project)), bytes);
   assert.equal(lstatSync(manifestPath(f.project)).ino, inode);
-  const before = snapshot(f.root);
+  const settled = snapshot(f.root);
   assert.deepEqual(ok(await enableSelection("set", "tools", f.options)).changes, []);
-  assert.deepEqual(snapshot(f.root), before);
+  assert.deepEqual(snapshot(f.root), settled);
 });
 
-it("retains dormant selections through pack switches and restores them only for a matching disable", async (t) => {
+it("adds packs additively beside selections, swaps versions, and removes only matching packs", async (t) => {
   const f = fixture(t);
   const alpha = f.skill("alpha");
-  f.skill("beta");
-  const first = f.pack("tools", "1.0.0", ["beta"]);
-  const second = f.pack("tools", "2.0.0", ["alpha", "beta"]);
+  const beta = f.skill("beta");
+  f.pack("tools", "1.0.0", ["beta"]);
+  f.pack("tools", "2.0.0", ["alpha", "beta"]);
   f.manifest("project", { inherit_global: false, skills: [{ name: "alpha" }], exclude: ["beta"] });
   ok(await sync({ ...f.options, scope: "project" }));
   const packed = ok(await enableSelection("pack", "tools@1.0.0", f.options));
   assert.deepEqual(packed.manifest.skills, [{ name: "alpha" }]);
   assert.deepEqual(packed.manifest.exclude, ["beta"]);
-  assert.equal(realpathSync(activation(f.project)), join(first, "skills"));
-  const before = snapshot(f.root);
-  for (const operation of [
-    enableSelection("skill", "beta", f.options),
-    disableSelection("set", "missing", f.options),
-    setInheritance(true, f.options),
-  ])
-    finding(await operation, "E_PACK_ACTIVE");
-  finding(await disableSelection("pack", "different", f.options), "E_PACK_SELECTION_MISMATCH");
-  finding(await disableSelection("pack", "tools@2.0.0", f.options), "E_PACK_SELECTION_MISMATCH");
-  assert.deepEqual(snapshot(f.root), before);
-  ok(await enableSelection("pack", "tools@2.0.0", f.options));
-  assert.equal(realpathSync(activation(f.project)), join(second, "skills"));
-  ok(await disableSelection("pack", "tools", f.options));
+  assert.deepEqual(packed.manifest.packs, ["tools@1.0.0"]);
   assert.equal(lstatSync(activation(f.project)).isDirectory(), true);
   assert.equal(realpathSync(join(activation(f.project), "alpha")), alpha);
   assert.equal(existsSync(join(activation(f.project), "beta")), false);
+  ok(await enableSelection("skill", "beta", f.options));
+  assert.equal(realpathSync(join(activation(f.project), "beta")), beta);
+  ok(await setInheritance(true, f.options));
+  const before = snapshot(f.root);
+  const noop = ok(await disableSelection("pack", "different", f.options));
+  assert.deepEqual(noop.changes, []);
+  assert.deepEqual(snapshot(f.root), before);
+  finding(await disableSelection("pack", "tools@2.0.0", f.options), "E_PACK_SELECTION_MISMATCH");
+  const swapped = ok(await enableSelection("pack", "tools@2.0.0", f.options));
+  assert.deepEqual(swapped.manifest.packs, ["tools@2.0.0"]);
+  ok(await disableSelection("pack", "tools", f.options));
   assert.deepEqual(declaration(f.project).packs, []);
+  assert.equal(realpathSync(join(activation(f.project), "alpha")), alpha);
+  assert.equal(existsSync(join(activation(f.project), "beta")), false);
 });
 
 it("removes missing direct declarations without looking up their absent sources", async (t) => {

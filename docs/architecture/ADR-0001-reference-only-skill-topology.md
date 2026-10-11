@@ -19,10 +19,14 @@ this ADR and reversed set/pack semantics in older implementation material:
 - A **pack populates the existing root** with per-member symlinks. Packs are
   composable; ten distinct additional skills produce ten additional links.
 
-This amendment establishes meaning, not a claim that the current resolver has
-been repaired. It does not decide name-collision precedence, inheritance, or how
-scope-local pack additions interact with a shared set target. Do not silently
-write through a shared set alias while those details remain unspecified.
+The user subsequently chose scope-owned derivation: adding a pack to a shared
+set-backed root creates/selects a derived set for that scope, leaving the base
+and other consumers unchanged. A project set replaces Skillex's inherited global
+selection without changing the global root. Agent discovery isolation is a
+separate capability requiring a supported adapter and runtime proof. Normalization
+must preserve effective membership; ambiguity is a refusal, not a guessed choice.
+The Node pilot implementation follows these rules; old installed writers and
+Python migration evidence must not be treated as current policy.
 
 ## Context
 

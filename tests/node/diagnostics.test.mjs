@@ -179,7 +179,7 @@ it("reports unowned canonical links and BMAD entries as foreign without adopting
     actual: 2,
     owned: 0,
     foreign: 2,
-    pack: 0,
+    set: 0,
     missing: 0,
   });
   assert.equal(status.actual.entries.find((entry) => entry.name === "alpha").ownership, "foreign");
@@ -250,12 +250,11 @@ it("detects exact ownership replacement and still reports the wrong alias target
   assert.deepEqual(snapshot(f.root), before);
 });
 
-it("counts pack members separately and rejects aliases that bypass the stable activation root", async (t) => {
+it("counts composed pack members as owned activation links", async (t) => {
   const f = fixture(t);
   f.skill("alpha");
   f.skill("beta");
-  const pack = f.pack("tools", "1.0.0", ["alpha", "beta"]);
-  f.pack("tools", "2.0.0", ["alpha", "beta"]);
+  f.pack("tools", "1.0.0", ["alpha", "beta"]);
   f.manifest("project", { packs: ["tools@1.0.0"] });
   for (const alias of PROJECT_CLI_ALIASES) f.link(join(f.project, alias), activation(f.project));
   const cross = join(f.project, ".codex", "skills");
@@ -263,37 +262,57 @@ it("counts pack members separately and rejects aliases that bypass the stable ac
   f.link(cross, join(f.project, ".claude", "skills"));
   result(await sync(f.options));
   const healthy = scope(result(await inspectStatus(f.options)));
-  assert.equal(healthy.mode, "pack");
+  assert.equal(healthy.mode, "composed");
+  assert.deepEqual(healthy.counts, {
+    desired: 2,
+    actual: 2,
+    owned: 2,
+    foreign: 0,
+    set: 0,
+    missing: 0,
+  });
+  assert.ok(healthy.actual.entries.every((entry) => entry.ownership === "owned"));
+  assert.equal(healthy.aliases.find((alias) => alias.path === cross).reachesRoot, true);
+});
+
+it("rejects set-root aliases that bypass the stable root and blocks them on set switches", async (t) => {
+  const f = fixture(t);
+  f.skill("alpha");
+  f.skill("beta");
+  f.set("tools", ["alpha", "beta"]);
+  f.set("suite", ["alpha", "beta"]);
+  f.manifest("project", { sets: ["tools"] });
+  for (const alias of PROJECT_CLI_ALIASES) f.link(join(f.project, alias), activation(f.project));
+  result(await sync(f.options));
+  const healthy = scope(result(await inspectStatus(f.options)));
+  assert.equal(healthy.mode, "set");
   assert.deepEqual(healthy.counts, {
     desired: 2,
     actual: 2,
     owned: 0,
     foreign: 0,
-    pack: 2,
+    set: 2,
     missing: 0,
   });
-  assert.ok(healthy.actual.entries.every((entry) => entry.ownership === "pack"));
-  assert.equal(healthy.aliases.find((alias) => alias.path === cross).reachesRoot, true);
+  // A direct alias at the selected set reaches the current skills but bypasses
+  // the stable scope root: reported, preserved, never adopted.
   const direct = join(f.project, ".claude", "skills");
   unlinkSync(direct);
-  f.link(direct, join(pack, "skills"));
-  const currentResult = await inspectStatus(f.options);
-  finding(currentResult, "W_ALIAS_BYPASS_ROOT", 6);
-  const current = scope(currentResult.data);
-  assert.equal(current.aliases.find((alias) => alias.path === direct).reachable, true);
-  assert.equal(current.aliases.find((alias) => alias.path === direct).reachesRoot, false);
-  const usable = scope(result(await explainSkill("alpha", f.options), 6));
-  assert.equal(usable.aliases.find((alias) => alias.path === direct).reachable, true);
-  assert.equal(usable.aliases.find((alias) => alias.path === cross).reachable, true);
-  // The old direct-pack alias must block a change to another version.
-  f.manifest("project", { packs: ["tools@2.0.0"] });
-  const before = snapshot(f.root);
+  f.link(direct, join(f.registry, "sets", "tools"));
   const bypassed = await inspectStatus(f.options);
-  result(bypassed, 3);
-  const aliases = scope(bypassed.data).aliases;
-  assert.equal(aliases.find((alias) => alias.path === direct).reachable, true);
+  finding(bypassed, "W_ALIAS_BYPASS_ROOT", 6);
+  assert.equal(scope(bypassed.data).aliases.find((alias) => alias.path === direct).reachable, true);
+  assert.equal(
+    scope(bypassed.data).aliases.find((alias) => alias.path === direct).reachesRoot,
+    false,
+  );
+  // The stale set-root alias must block a switch to another set, write-free.
+  f.manifest("project", { sets: ["suite"] });
+  const before = snapshot(f.root);
+  const blocked = await inspectStatus(f.options);
+  finding(blocked, "E_ACTIVATION_CONFLICT", 3);
+  const aliases = scope(blocked.data).aliases;
   assert.equal(aliases.find((alias) => alias.path === direct).reachesRoot, false);
-  assert.equal(aliases.find((alias) => alias.path === cross).reachesRoot, false);
   assert.deepEqual(snapshot(f.root), before);
 });
 
@@ -315,14 +334,14 @@ it("traces aliases through parent links while preserving the planner's redirecte
   assert.deepEqual(snapshot(f.root), before);
 });
 
-it("explains canonical contributions, inherited origins, set exclusions, and known unselected names", async (t) => {
+it("explains canonical contributions, inherited origins, scope exclusions, and known unselected names", async (t) => {
   const f = fixture(t);
   const alpha = f.skill("alpha");
   const beta = f.skill("beta");
   f.skill("unused");
-  f.set("tools", ["alpha", "beta"]);
+  f.pack("tools", "1.0.0", ["alpha", "beta"]);
   f.manifest("global", { skills: ["alpha"] });
-  f.manifest("project", { skills: ["alpha"], sets: [{ name: "tools", exclude: ["beta"] }] });
+  f.manifest("project", { skills: ["alpha"], packs: ["tools@1.0.0"], exclude: ["beta"] });
   result(await sync(f.options));
   const before = snapshot(f.root);
   const effective = result(await explainSkill("alpha", f.options));
@@ -330,7 +349,7 @@ it("explains canonical contributions, inherited origins, set exclusions, and kno
   assert.equal(scope(effective).state, "effective");
   assert.deepEqual([...new Set(scope(effective).origins.map((origin) => origin.kind))].sort(), [
     "inherit",
-    "set",
+    "pack",
     "skill",
   ]);
   assert.ok(scope(effective).origins.some((origin) => origin.scope === "global"));
@@ -338,8 +357,7 @@ it("explains canonical contributions, inherited origins, set exclusions, and kno
   const excluded = result(await explainSkill("beta", f.options));
   assert.equal(excluded.canonical, beta);
   assert.equal(scope(excluded).state, "excluded");
-  assert.equal(scope(excluded).exclusions[0].by, "set");
-  assert.equal(scope(excluded).exclusions[0].reference, "tools");
+  assert.equal(scope(excluded).exclusions[0].by, "scope");
   assert.ok(scope(excluded).aliases.every((alias) => !alias.reachable));
   assert.equal(scope(result(await explainSkill("unused", f.options))).state, "unselected");
   finding(await explainSkill("unknown", f.options), "E_SKILL_MISSING");
@@ -360,39 +378,34 @@ it("explains a local exclusion without editing inherited declarations", async (t
   assert.deepEqual(snapshot(f.root), before);
 });
 
-it("explains dormant direct, set, and global selections under an exclusive pack", async (t) => {
+it("explains composed direct, pack, and inherited contributions as simultaneously effective", async (t) => {
   const f = fixture(t);
-  for (const name of ["direct", "from-set", "global", "packed"]) f.skill(name);
-  f.set("ordinary", ["from-set"]);
-  f.pack("tools", "1.0.0", ["packed"]);
+  for (const name of ["direct", "from-pack", "global", "packed"]) f.skill(name);
+  f.pack("tools", "1.0.0", ["from-pack"]);
   f.manifest("global", { skills: ["global"] });
   f.manifest("project", {
     skills: ["direct"],
-    sets: ["ordinary", "missing-dormant"],
     packs: ["tools@1.0.0"],
   });
   result(await sync(f.options));
   const before = snapshot(f.root);
   for (const [name, kind] of [
     ["direct", "skill"],
-    ["from-set", "set"],
+    ["from-pack", "pack"],
     ["global", "inherit"],
   ]) {
     const explained = scope(result(await explainSkill(name, f.options)));
-    assert.equal(explained.state, "dormant");
-    assert.ok(explained.dormant.some((origin) => origin.kind === kind));
-    assert.equal(explained.actual.reachable, false);
+    assert.equal(explained.state, "effective");
+    assert.ok(explained.origins.some((origin) => origin.kind === kind));
+    assert.ok(explained.actual.reachable);
+    assert.ok(explained.aliases.every((alias) => alias.reachable));
   }
-  const packed = scope(result(await explainSkill("packed", f.options)));
-  assert.equal(packed.state, "effective");
-  assert.equal(packed.origins[0].kind, "pack");
-  assert.ok(packed.aliases.every((alias) => alias.reachable));
   assert.deepEqual(snapshot(f.root), before);
+  // A malformed global declaration blocks resolution instead of hiding it.
   f.file(join(f.home, ".agents", "skills.json"), "{invalid dormant global");
   const isolated = await explainSkill("direct", f.options);
-  result(isolated);
-  assert.ok(isolated.findings.some((finding) => finding.code === "I_DORMANT_UNRESOLVED"));
-  assert.equal(scope(isolated.data).state, "dormant");
+  finding(isolated, "E_MANIFEST_PARSE", 2);
+  assert.equal(scope(isolated.data).state, "blocked");
 });
 
 it("reports named CLI reachability separately from a reachable scope root", async (t) => {

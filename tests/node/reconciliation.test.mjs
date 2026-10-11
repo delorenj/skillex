@@ -77,6 +77,12 @@ function fixture(t) {
       link(join(path, "skills", member), join(registry, "all-skills", member));
     return path;
   }
+  function set(name, names) {
+    const path = join(registry, "sets", name);
+    directory(path);
+    for (const member of names) link(join(path, member), join(registry, "all-skills", member));
+    return path;
+  }
   directory(join(project, ".git"));
   directory(join(registry, "all-skills"));
   manifest("global", {});
@@ -94,6 +100,7 @@ function fixture(t) {
     manifest,
     skill,
     pack,
+    set,
   };
 }
 
@@ -244,25 +251,25 @@ it("prunes only recorded stale links while preserving foreign skills, BMAD conte
   assert.ok(existsSync(join(alpha, "SKILL.md")));
 });
 
-it("switches composed to pack, pack version to pack version, then back using the same receipt key", async (t) => {
+it("switches composed to set, set to set, then back using the same receipt key", async (t) => {
   const f = fixture(t);
   f.skill("alpha");
   f.skill("beta");
-  const first = f.pack("tools", "1.0.0", ["beta"]);
-  const second = f.pack("tools", "2.0.0", ["alpha", "beta"]);
+  const first = f.set("tools", ["beta"]);
+  const second = f.set("suite", ["alpha", "beta"]);
   f.manifest("project", { inherit_global: false, skills: ["alpha"] });
   const composed = ok(await sync({ ...f.options, scope: "project" }));
   const key = receipt(composed).path;
-  f.manifest("project", { skills: ["missing-dormant"], packs: ["tools@1.0.0"] });
-  const packed = ok(await sync({ ...f.options, scope: "project" }));
+  f.manifest("project", { sets: ["tools"] });
+  const selected = ok(await sync({ ...f.options, scope: "project" }));
   assert.equal(lstatSync(activation(f.project)).isSymbolicLink(), true);
-  assert.equal(realpathSync(activation(f.project)), join(first, "skills"));
-  assert.equal(receipt(packed).path, key);
-  assert.deepEqual(Object.keys(receipt(packed).value.data.directories), []);
-  assert.ok(receipt(packed).value.data.links[activation(f.project)]);
-  f.manifest("project", { packs: ["tools"] });
+  assert.equal(realpathSync(activation(f.project)), first);
+  assert.equal(receipt(selected).path, key);
+  assert.deepEqual(Object.keys(receipt(selected).value.data.directories), []);
+  assert.ok(receipt(selected).value.data.links[activation(f.project)]);
+  f.manifest("project", { sets: ["suite"] });
   ok(await sync({ ...f.options, scope: "project" }));
-  assert.equal(realpathSync(activation(f.project)), join(second, "skills"));
+  assert.equal(realpathSync(activation(f.project)), second);
   f.manifest("project", { inherit_global: false, skills: ["alpha"] });
   const restored = ok(await sync({ ...f.options, scope: "project" }));
   assert.equal(lstatSync(activation(f.project)).isDirectory(), true);
@@ -352,25 +359,25 @@ for (const shape of ["real-child", "wrong-link", "redirected-parent"]) {
 it("refuses whole-root transitions when the root or any contained entry is unowned", async (t) => {
   const f = fixture(t);
   f.skill("alpha");
-  f.pack("tools", "1.0.0", ["alpha"]);
+  f.set("tools", ["alpha"]);
   f.manifest("project", { inherit_global: false });
   ok(await sync({ ...f.options, scope: "project" }));
   f.file(join(activation(f.project), "foreign", "keep.txt"), "preserve\n");
-  f.manifest("project", { packs: ["tools"] });
+  f.manifest("project", { sets: ["tools"] });
   const before = snapshot(f.root);
   finding(await sync({ ...f.options, scope: "project" }), "E_ACTIVATION_CONFLICT");
   assert.deepEqual(snapshot(f.root), before);
 });
 
-it("refuses foreign aliases that point directly at the old pack when switching plans", async (t) => {
+it("refuses foreign aliases that point directly at the old set when switching plans", async (t) => {
   const f = fixture(t);
   f.skill("alpha");
-  const first = f.pack("tools", "1.0.0", ["alpha"]);
-  f.pack("tools", "2.0.0", ["alpha"]);
-  f.manifest("project", { packs: ["tools@1.0.0"] });
-  f.link(join(f.project, ".codex", "skills"), join(first, "skills"), true);
+  const first = f.set("tools", ["alpha"]);
+  f.set("suite", ["alpha"]);
+  f.manifest("project", { sets: ["tools"] });
+  f.link(join(f.project, ".codex", "skills"), first, true);
   ok(await sync({ ...f.options, scope: "project" }));
-  f.manifest("project", { packs: ["tools@2.0.0"] });
+  f.manifest("project", { sets: ["suite"] });
   const before = snapshot(f.root);
   finding(await sync({ ...f.options, scope: "project" }), "E_ACTIVATION_CONFLICT");
   assert.deepEqual(snapshot(f.root), before);
@@ -496,20 +503,20 @@ for (const changedIntent of [false, true]) {
 }
 
 for (const mode of ["root-unpublished", "root-published"]) {
-  it(`recovers ${mode} pack switching without deleting foreign or canonical content`, async (t) => {
+  it(`recovers ${mode} set switching without deleting foreign or canonical content`, async (t) => {
     const f = fixture(t);
     const alpha = f.skill("alpha");
-    const pack = f.pack("tools", "1.0.0", ["alpha"]);
+    const set = f.set("tools", ["alpha"]);
     const options = { ...f.options, scope: "project" };
     f.manifest("project", { inherit_global: false, skills: ["alpha"] });
     ok(await sync(options));
-    f.manifest("project", { packs: ["tools"] });
+    f.manifest("project", { sets: ["tools"] });
     finding(injectSync(options, mode), "E_SYNC_PARTIAL", 4);
     const before = snapshot(f.root);
     ok(await planSync(options));
     assert.deepEqual(snapshot(f.root), before);
     const recovered = ok(await sync(options));
-    assert.equal(realpathSync(activation(f.project)), join(pack, "skills"));
+    assert.equal(realpathSync(activation(f.project)), set);
     assert.ok(existsSync(join(alpha, "SKILL.md")));
     assert.ok(!receipt(recovered).value.data.pending);
     assert.deepEqual(
@@ -609,7 +616,7 @@ fs.rename = async (...args) => {
     if (receipt.data.pending) {
       changed = true;
       if (mode === 'source-skill') await fs.unlink(join(options.registryRoot, 'all-skills', 'beta', 'SKILL.md'));
-      if (mode === 'source-pack') await fs.unlink(join(options.registryRoot, 'packs', 'tools', '1.0.0', 'skills', 'alpha'));
+      if (mode === 'source-set') await fs.unlink(join(options.registryRoot, 'sets', 'tools', 'alpha'));
       if (mode === 'cancel') controller.abort();
       if (mode === 'foreign-after-journal') await fs.writeFile(receipt.data.pending.path, 'Foreign arrival before publication\\n');
     }
@@ -645,22 +652,22 @@ it("rechecks the activation-root inode captured during planning before child wri
   assert.equal(lstatSync(join(f.project, "parked-original", "alpha")).isSymbolicLink(), true);
 });
 
-for (const kind of ["skill", "pack"]) {
+for (const kind of ["skill", "set"]) {
   it(`revalidates ${kind} sources after journaling and before publication`, async (t) => {
     const f = fixture(t);
     f.skill("alpha");
     f.skill("beta");
-    f.pack("tools", "1.0.0", ["alpha"]);
+    f.set("tools", ["alpha"]);
     const options = { ...f.options, scope: "project" };
     f.manifest("project", { inherit_global: false });
     ok(await sync(options));
     f.manifest(
       "project",
-      kind === "skill" ? { inherit_global: false, skills: ["beta"] } : { packs: ["tools"] },
+      kind === "skill" ? { inherit_global: false, skills: ["beta"] } : { sets: ["tools"] },
     );
     const result = injectBoundary(options, `source-${kind}`);
     finding(result, "E_SYNC_PARTIAL", 4);
-    finding(result, kind === "skill" ? "E_SKILL_MISSING" : "E_PACK_LINK_MISSING", 4);
+    finding(result, kind === "skill" ? "E_SKILL_MISSING" : "E_OWNERSHIP_CHANGED", 4);
     assert.equal(lstatSync(activation(f.project)).isDirectory(), true);
     assert.deepEqual(readdirSync(activation(f.project)), []);
   });
@@ -719,10 +726,10 @@ it("cancellation while waiting for the bounded lock returns 130 instead of conte
   assert.equal(existsSync(activation(f.project)), false);
 });
 
-it("records actual local Git commit hashes for the catalog and pack sources", async (t) => {
+it("records actual local Git commit hashes for the catalog and set sources", async (t) => {
   const f = fixture(t);
   f.skill("alpha");
-  const pack = f.pack("tools", "1.0.0", ["alpha"]);
+  const set = f.set("tools", ["alpha"]);
   const git = (args, input = "") => {
     const result = spawnSync("git", ["-C", f.registry, ...args], { encoding: "utf8", input });
     assert.equal(result.status, 0, result.stderr);
@@ -744,11 +751,11 @@ it("records actual local Git commit hashes for the catalog and pack sources", as
   );
   git(["update-ref", "refs/heads/fixture", commit]);
   git(["symbolic-ref", "HEAD", "refs/heads/fixture"]);
-  f.manifest("project", { packs: ["tools"] });
+  f.manifest("project", { sets: ["tools"] });
   const result = ok(await sync({ ...f.options, scope: "project" }));
   assert.deepEqual(receipt(result).value.data.sources, [
     { kind: "catalog", path: join(f.registry, "all-skills"), commit, reason: null },
-    { kind: "pack", path: pack, commit, reason: null },
+    { kind: "set", path: set, commit, reason: null },
   ]);
 });
 

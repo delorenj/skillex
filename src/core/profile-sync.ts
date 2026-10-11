@@ -14,7 +14,7 @@ import {
 } from "./activation-ownership.js";
 import type { ReceiptOptions } from "./activation-state.js";
 import type { EntryIdentity, SourceRevision } from "./activation-types.js";
-import { canonicalSkill } from "./composition.js";
+import { canonicalSkill, packInventory } from "./composition.js";
 import { diagnosticExit } from "./diagnostics.js";
 import { fail, SkillexError } from "./error.js";
 import { withLock } from "./lock.js";
@@ -193,7 +193,18 @@ async function resolveProjection(
   const locations = new Map<string, SourceRevision["kind"]>();
   for (const scope of scopes) {
     locations.set(join(scope.registry.root, "all-skills"), "catalog");
-    if (scope.pack) locations.set(scope.pack.path, "pack");
+    if (scope.set) locations.set(scope.set.path, "set");
+    // Additive packs own manifest-authoritative membership; pin each one as a
+    // revision source so receipts record which pack content projected.
+    for (const selected of scope.manifest.packs) {
+      try {
+        const inventory = await packInventory(scope.registry.root, selected);
+        locations.set(inventory.path, "pack");
+      } catch (error) {
+        // Optional packs that resolution already skipped stay absent here.
+        if (!(selected.optional && error instanceof SkillexError)) throw error;
+      }
+    }
   }
   const sources: SourceRevision[] = [];
   for (const [path, kind] of locations) sources.push(await sourceRevision(kind, path));

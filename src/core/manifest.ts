@@ -10,15 +10,7 @@ interface ManifestInput {
   readonly inherit_global?: boolean;
   readonly registry?: string;
   readonly skills?: readonly (string | { readonly name: string })[];
-  readonly sets?: readonly (
-    | string
-    | {
-        readonly name: string;
-        readonly include?: readonly string[];
-        readonly exclude?: readonly string[];
-        readonly optional?: boolean;
-      }
-  )[];
+  readonly sets?: readonly (string | { readonly name: string; readonly optional?: boolean })[];
   readonly packs?: readonly (
     | string
     | { readonly name: string; readonly version?: string; readonly optional?: boolean }
@@ -82,36 +74,37 @@ function manifestFinding(error: ErrorObject, path: string): Diagnostic {
   const pointer = fieldPointer(error);
   if (error.keyword === "additionalProperties") {
     const field = String(error.params.additionalProperty);
-    const packFilter =
-      (field === "include" || field === "exclude") && /^\/packs\//.test(error.instancePath);
+    const setFilter =
+      (field === "include" || field === "exclude") && /^\/sets\//.test(error.instancePath);
     const legacy =
       retiredFields.has(field) ||
-      packFilter ||
+      setFilter ||
       (field === "registry" && /^\/(skills|sets|packs)\//.test(error.instancePath)) ||
       (field === "version" && /^\/(skills|sets)\//.test(error.instancePath));
     return {
       code: legacy ? "E_LEGACY_FIELD" : "E_MANIFEST_INVALID",
       severity: "error",
-      message: packFilter
-        ? `Pack filter ${pointer} is unsupported: a pack is an exclusive complete loadout.`
+      message: setFilter
+        ? `Legacy set filter ${pointer} is unsupported: a set exclusively replaces the root.`
         : legacy
           ? `Legacy field ${pointer} is unsupported by canonical manifest resolution.`
           : `Unknown manifest field ${pointer}.`,
       path,
-      fix: packFilter
-        ? "Remove the pack filter. Use a set for filtered composition, or disable the pack to resume ordinary selections."
+      fix: setFilter
+        ? "Run skillex normalize --dry-run to plan folding this filtered selection into an exact-membership reference, or derive a scope-owned set with skillex enable."
         : legacy
-          ? "Run skillex migrate to convert this manifest to canonical all-skills/ names and reference-only sets or packs, then remove the legacy field."
-          : "Remove or correct the field using skills.schema.json. For legacy configuration, run skillex migrate first.",
+          ? "Run skillex normalize --dry-run to plan converting this manifest to the corrected set/pack contract."
+          : "Remove or correct the field using skills.schema.json.",
     };
   }
-  if (error.keyword === "maxItems" && error.instancePath === "/packs") {
+  if (error.keyword === "maxItems" && error.instancePath === "/sets") {
     return {
-      code: "E_MANIFEST_INVALID",
+      code: "E_SET_CONFLICT",
       severity: "error",
-      message: "The /packs selection permits at most one exclusive pack.",
+      message:
+        "The /sets selection permits at most one set: sets are mutually exclusive root replacements.",
       path,
-      fix: "Keep one pack, or use sets to compose multiple selections.",
+      fix: "Run skillex normalize --dry-run to plan the exact-membership replacement, or keep the one set this scope should activate.",
     };
   }
   return {
@@ -153,13 +146,8 @@ export function parseManifest(raw: unknown, path: string): SkillsManifest {
     })),
     sets: (raw.sets ?? []).map((entry) =>
       typeof entry === "string"
-        ? { name: entry, exclude: [], optional: false }
-        : {
-            name: entry.name,
-            ...(entry.include === undefined ? {} : { include: [...entry.include] }),
-            exclude: [...(entry.exclude ?? [])],
-            optional: entry.optional ?? false,
-          },
+        ? { name: entry, optional: false }
+        : { name: entry.name, optional: entry.optional ?? false },
     ),
     packs: (raw.packs ?? []).map((entry) => {
       if (typeof entry !== "string") {

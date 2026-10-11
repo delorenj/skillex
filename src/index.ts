@@ -52,6 +52,18 @@ export {
   createSkill,
   importSkill,
 } from "./core/catalog-write.js";
+export {
+  ClientIsolationCommand,
+  type ClientIsolationOptions,
+  type ClientIsolationPlan,
+  type ClientIsolationResult,
+  type ClientVerification,
+  type ClientVerifyOptions,
+  isolateClient,
+  type OpenCodeRequest,
+  unisolateClient,
+  verifyClientIsolation,
+} from "./core/client-isolation.js";
 export type {
   CompositionChange,
   CompositionDetails,
@@ -62,6 +74,19 @@ export type {
   SetListData,
   SetShowData,
 } from "./core/composition-types.js";
+export type {
+  DerivationInputs,
+  DerivationOwner,
+  DerivationPreview,
+} from "./core/derivation.js";
+export {
+  derivedState,
+  desiredDerivedMembers,
+  materializeDerivedSet,
+  ownedDerivedName,
+  planDerivedSet,
+  retireDerivedSet,
+} from "./core/derivation.js";
 export { explainSkill, inspectStatus } from "./core/diagnostics.js";
 export type {
   AliasObservation,
@@ -85,6 +110,25 @@ export type {
   RunningLegacyWriter,
 } from "./core/doctor-types.js";
 export { SkillexError } from "./core/error.js";
+export type {
+  ExecutedImport,
+  ImportExecution,
+  PendingImport,
+  PlannedSources,
+  SourceEntry,
+  SourceInventory,
+  SourceOptions,
+  SourceProvenance,
+} from "./core/import-sources.js";
+export {
+  executeImports,
+  inventorySkillRoot,
+  inventorySource,
+  membersFromInventories,
+  planSourceMembers,
+  provenanceFrom,
+  releaseInventory,
+} from "./core/import-sources.js";
 export { type LockOptions, withLock } from "./core/lock.js";
 export { isSkillName, isVersionComponent, parseManifest, readManifest } from "./core/manifest.js";
 export { migrate } from "./core/migration.js";
@@ -94,8 +138,10 @@ export type {
   MigrationOptions,
   MigrationResult,
 } from "./core/migration-types.js";
+export { type NormalizeOptions, normalizeScope } from "./core/normalization.js";
 export {
   addPackSkills,
+  type CreatePackOptions,
   createPack,
   listPacks,
   removePackSkills,
@@ -141,6 +187,12 @@ export {
   retireMiseSkillTasks,
   retireMiseText,
 } from "./core/retired-mise.js";
+export {
+  adoptRoot,
+  type RootAdoptEntry,
+  type RootAdoptOptions,
+  type RootAdoptResult,
+} from "./core/root-cutover.js";
 export type {
   DiscoveryOptions,
   ExcludedBinding,
@@ -179,7 +231,21 @@ export {
   SelectionManifestWriteError,
   writeSelectionManifest,
 } from "./core/selection-manifest.js";
-export { addSetSkills, createSet, listSets, removeSetSkills, showSet } from "./core/sets.js";
+export {
+  type DerivedSetDeclaration,
+  derivedSetName,
+  readSetOrigin,
+  SET_ORIGIN_FILE,
+  type SetOrigin,
+} from "./core/set-origin.js";
+export {
+  addSetSkills,
+  type CreateSetOptions,
+  createSet,
+  listSets,
+  removeSetSkills,
+  showSet,
+} from "./core/sets.js";
 export { inspectVendorStatus, listVendorSources, showVendorSource } from "./core/vendor-inspect.js";
 export { syncVendorSources } from "./core/vendor-sync.js";
 export type {

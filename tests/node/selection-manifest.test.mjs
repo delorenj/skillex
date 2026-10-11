@@ -170,7 +170,7 @@ test("updates preserve permissions and replace only the declaration inode", asyn
 test("semantic no-ops preserve original bytes, mode, inode, and modification time", async (t) => {
   const f = await fixture(t);
   const bytes =
-    '{ "sets": [ {"name":"general", "optional":false, "exclude":[]} ], "skills": [{"name":"alpha"}], "inherit_global":true }\r\n';
+    '{ "sets": [ {"name":"general", "optional":false} ], "skills": [{"name":"alpha"}], "inherit_global":true }\r\n';
   const previous = await seed(f, bytes, 0o640);
   const before = await lstat(f.path, { bigint: true });
   const returned = await persist(f, previous, { skills: ["alpha"], sets: ["general"] });
@@ -233,7 +233,7 @@ test("invalid proposed declarations fail before creating .agents", async (t) => 
   const previous = await readSelectionManifest(f.scope);
   for (const [raw, code] of [
     [{ source: "legacy" }, "E_LEGACY_FIELD"],
-    [{ packs: ["alpha", "beta"] }, "E_MANIFEST_INVALID"],
+    [{ sets: ["alpha", "beta"] }, "E_SET_CONFLICT"],
     [{ inherit_global: "yes" }, "E_MANIFEST_INVALID"],
     [{ skills: ["../outside"] }, "E_MANIFEST_INVALID"],
   ]) {
@@ -255,6 +255,30 @@ test("reads refuse malformed, legacy, and invalid UTF-8 declarations without cha
     await rejectedRead(readSelectionManifest(f.scope), code, 2);
     assert.deepEqual(await readFile(f.path), bytes);
   }
+});
+
+test("tolerant reads keep object-shaped legacy declarations with their findings", async (t) => {
+  const f = await fixture(t);
+  await mkdir(f.agents);
+  for (const [bytes, code] of [
+    [Buffer.from('{"source":"legacy"}'), "E_LEGACY_FIELD"],
+    [Buffer.from('{"sets":["one","two"]}'), "E_SET_CONFLICT"],
+    [Buffer.from('{"sets":[{"name":"one","include":["alpha"]}]}'), "E_LEGACY_FIELD"],
+  ]) {
+    await writeFile(f.path, bytes);
+    const snapshot = await readSelectionManifest(f.scope, { tolerant: true });
+    assert.equal(snapshot.exists, true);
+    assert.equal(snapshot.manifest, null);
+    assert.deepEqual(snapshot.raw, JSON.parse(bytes.toString("utf8")));
+    assert.ok(
+      (snapshot.parseFindings ?? []).some((finding) => finding.code === code),
+      `expected a ${code} finding`,
+    );
+    assert.deepEqual(await readFile(f.path), bytes);
+  }
+  // Tolerant reads never accept malformed JSON or non-object shapes.
+  await writeFile(f.path, Buffer.from("[1,2]"));
+  await rejectedRead(readSelectionManifest(f.scope, { tolerant: true }), "E_MANIFEST_INVALID", 2);
 });
 
 test("symlinked or file-shaped .agents paths are refused without following them", async (t) => {

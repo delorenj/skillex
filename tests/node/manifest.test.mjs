@@ -58,7 +58,7 @@ describe("canonical manifest validation", () => {
       inherit_global: false,
       registry: "git@example.test:private/catalog.git",
       skills: ["memory", { name: "agent-v2" }, "memory"],
-      sets: ["Legacy_Set", { name: "minimal", optional: true, include: [], exclude: ["memory"] }],
+      sets: [{ name: "Legacy_Set", optional: true }],
       packs: [],
       exclude: ["agent-v2"],
     };
@@ -69,16 +69,13 @@ describe("canonical manifest validation", () => {
       inheritGlobal: false,
       registry: "git@example.test:private/catalog.git",
       skills: [{ name: "memory" }, { name: "agent-v2" }, { name: "memory" }],
-      sets: [
-        { name: "Legacy_Set", optional: false, exclude: [] },
-        { name: "minimal", optional: true, include: [], exclude: ["memory"] },
-      ],
+      sets: [{ name: "Legacy_Set", optional: true }],
       packs: [],
       exclude: ["agent-v2"],
     });
   });
 
-  it("normalizes pack shorthands and object entries without discarding dormant selections", () => {
+  it("normalizes pack shorthands and object entries while composing selections", () => {
     for (const [entry, expected] of [
       ["Hermes_Base", { name: "Hermes_Base", optional: false }],
       [
@@ -93,7 +90,7 @@ describe("canonical manifest validation", () => {
       const raw = {
         inherit_global: true,
         skills: ["dormant-skill"],
-        sets: [{ name: "Dormant_Set", include: ["dormant-skill"] }],
+        sets: ["Dormant_Set"],
         exclude: ["dormant-skill"],
         packs: [entry],
       };
@@ -101,9 +98,7 @@ describe("canonical manifest validation", () => {
       assert.equal(validateSchema(raw), true);
       assert.deepEqual(value.packs, [expected]);
       assert.deepEqual(value.skills, [{ name: "dormant-skill" }]);
-      assert.deepEqual(value.sets, [
-        { name: "Dormant_Set", include: ["dormant-skill"], exclude: [], optional: false },
-      ]);
+      assert.deepEqual(value.sets, [{ name: "Dormant_Set", optional: false }]);
       assert.deepEqual(value.exclude, ["dormant-skill"]);
       assert.equal(value.inheritGlobal, true);
     }
@@ -112,15 +107,15 @@ describe("canonical manifest validation", () => {
   it("returns independent arrays and entries for consumers", () => {
     const raw = {
       skills: [{ name: "memory" }],
-      sets: [{ name: "Core", include: ["memory"], exclude: ["old-memory"] }],
+      sets: [{ name: "Core", optional: true }],
       packs: [{ name: "Base", version: "1.0.0" }],
       exclude: ["old-memory"],
     };
     const before = structuredClone(raw);
     const value = parseManifest(raw, manifestPath);
     value.skills[0].name = "changed";
-    value.sets[0].include.push("another");
-    value.sets[0].exclude.length = 0;
+    value.sets[0].name = "replaced";
+    value.sets[0].optional = false;
     value.packs[0].version = "2.0.0";
     value.exclude.length = 0;
     assert.deepEqual(raw, before);
@@ -148,10 +143,9 @@ describe("canonical manifest validation", () => {
     ["set version shorthand", { sets: ["Core@1.0.0"] }],
     ["set traversal", { sets: [{ name: "../Core" }] }],
     ["nonboolean set optional", { sets: [{ name: "Core", optional: 1 }] }],
-    ["invalid set include", { sets: [{ name: "Core", include: ["Memory"] }] }],
-    ["scalar set exclude", { sets: [{ name: "Core", exclude: "memory" }] }],
     ["unknown set field", { sets: [{ name: "Core", include_all: true }] }],
-    ["multiple packs", { packs: ["One", "Two"] }],
+    ["pack include filter", { packs: [{ name: "Base", include: [] }] }],
+    ["pack exclude filter", { packs: [{ name: "Base", exclude: [] }] }],
     ["empty pack version", { packs: ["Base@"] }],
     ["multiple pack versions", { packs: ["Base@1@2"] }],
     ["pack traversal", { packs: ["../Base@1"] }],
@@ -170,6 +164,21 @@ describe("canonical manifest validation", () => {
     });
   }
 
+  it("composes multiple pack selections against the shipped schema", () => {
+    const raw = { packs: ["One", { name: "Two", version: "1.0.0" }] };
+    assert.equal(validateSchema(raw), true);
+    assert.deepEqual(parseManifest(raw, manifestPath).packs, [
+      { name: "One", optional: false },
+      { name: "Two", version: "1.0.0", optional: false },
+    ]);
+  });
+
+  it("rejects multiple sets against the shipped schema", () => {
+    const raw = { sets: ["One", "Two"] };
+    assert.equal(validateSchema(raw), false);
+    assert.throws(() => parseManifest(raw, manifestPath), diagnostic("E_SET_CONFLICT"));
+  });
+
   const legacy = [
     [{ source: "file:///old" }, "/source"],
     [{ slots: {} }, "/slots"],
@@ -187,8 +196,8 @@ describe("canonical manifest validation", () => {
     [{ sets: [{ name: "Core", version: "1" }] }, "/sets/0/version"],
     [{ packs: [{ name: "Base", policy: {} }] }, "/packs/0/policy"],
     [{ packs: [{ name: "Base", payload: null }] }, "/packs/0/payload"],
-    [{ packs: [{ name: "Base", include: [] }] }, "/packs/0/include"],
-    [{ packs: [{ name: "Base", exclude: [] }] }, "/packs/0/exclude"],
+    [{ sets: [{ name: "Core", include: ["Memory"] }] }, "/sets/0/include"],
+    [{ sets: [{ name: "Core", exclude: "memory" }] }, "/sets/0/exclude"],
   ];
   for (const [raw, pointer] of legacy) {
     it(`identifies retired field ${pointer} with a migration action`, () => {

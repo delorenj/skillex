@@ -274,7 +274,7 @@ describe("installed diagnostics CLI", () => {
           actual: desired.length,
           owned: desired.length,
           foreign: 0,
-          pack: 0,
+          set: 0,
           missing: 0,
         });
         assert.equal(report.aliases.length, aliases);
@@ -292,26 +292,26 @@ describe("installed diagnostics CLI", () => {
     assert.deepEqual(doctor.data.writers.running, []);
   });
 
-  it("reports exclusive pack mode and pack-owned membership through a whole-root alias", (context) => {
+  it("reports set mode and set-owned membership through a whole-root link", (context) => {
     const catalog = catalogFor(context);
-    const pack = catalog.pack("editor", "1.0.0", ["gamma"]);
-    manifest(catalog.project, { packs: ["editor"] });
+    const set = catalog.set("writers", ["gamma"]);
+    manifest(catalog.project, { sets: ["writers"], inherit_global: false });
     setup(catalog);
     const report = scope(json(catalog, ["status"]));
-    assert.equal(report.mode, "pack");
+    assert.equal(report.mode, "set");
     assert.equal(report.actual.root.kind, "link");
-    assert.equal(report.actual.root.target, join(pack, "skills"));
+    assert.equal(report.actual.root.target, set);
     assert.deepEqual(report.desired, ["gamma"]);
-    assert.equal(report.counts.pack, 1);
-    assert.equal(report.actual.entries[0].ownership, "pack");
+    assert.equal(report.counts.set, 1);
+    assert.equal(report.actual.entries[0].ownership, "set");
     assert.ok(report.aliases.every(({ reachesRoot }) => reachesRoot));
     json(catalog, ["doctor"]);
 
     const bypass = catalogFor(context);
-    const directPack = bypass.pack("editor", "1.0.0", ["gamma"]);
-    manifest(bypass.project, { packs: ["editor"] });
+    const directSet = bypass.set("writers", ["gamma"]);
+    manifest(bypass.project, { sets: ["writers"], inherit_global: false });
     const alias = join(bypass.project, ".claude", "skills");
-    link(alias, join(directPack, "skills"));
+    link(alias, directSet);
     setup(bypass);
     const drift = json(bypass, ["status", "--scope", "project"], 6);
     finding(drift, "W_ALIAS_BYPASS_ROOT");
@@ -423,7 +423,8 @@ describe("installed diagnostics CLI", () => {
   it("explains inherited, set, and direct origins as well as local exclusion", (context) => {
     const catalog = catalogFor(context);
     catalog.set("writers", ["alpha", "beta"]);
-    manifest(catalog.project, { skills: ["alpha"], sets: ["writers"], exclude: ["beta"] });
+    manifest(catalog.home, { sets: ["writers"] });
+    manifest(catalog.project, { skills: ["alpha"], exclude: ["beta"] });
     setup(catalog);
     const result = json(catalog, ["explain", "alpha", "--scope", "project"], 0, "middle");
     assert.equal(result.data.canonical, join(catalog.registry, "all-skills", "alpha"));
@@ -443,19 +444,27 @@ describe("installed diagnostics CLI", () => {
     assert.ok(excluded.aliases.every(({ reachable }) => !reachable));
   });
 
-  it("explains dormant ordinary selections without treating them as failures under an active pack", (context) => {
+  it("explains ordinary selections as effective alongside additive pack members", (context) => {
     const catalog = catalogFor(context);
     catalog.pack("editor", "1.0.0", ["gamma"]);
     manifest(catalog.project, { skills: ["beta"], packs: ["editor"] });
     setup(catalog);
     const result = json(catalog, ["explain", "beta", "--scope", "project"]);
     const report = scope(result);
-    assert.equal(report.state, "dormant");
+    assert.equal(report.state, "effective");
     assert.equal(report.canonical, join(catalog.registry, "all-skills", "beta"));
     assert.ok(
-      report.dormant.some(({ kind, reference }) => kind === "skill" && reference === "beta"),
+      report.origins.some(({ kind, reference }) => kind === "skill" && reference === "beta"),
     );
-    assert.ok(report.aliases.every(({ reachable }) => !reachable));
+    assert.deepEqual(report.dormant, []);
+    assert.ok(report.aliases.every(({ reachable }) => reachable));
+    const composed = scope(json(catalog, ["explain", "gamma", "--scope", "project"]));
+    assert.equal(composed.state, "effective");
+    assert.ok(
+      composed.origins.some(
+        ({ kind, reference }) => kind === "pack" && reference === "editor@1.0.0",
+      ),
+    );
   });
 
   it("distinguishes a known unselected name from a missing canonical name", (context) => {

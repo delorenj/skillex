@@ -33,7 +33,7 @@ function statusText(data: StatusResult): string {
       `  Manifest: ${scope.manifestPath}`,
       `  Root: ${scope.actual.root.path} (${scope.actual.root.kind}, ${scope.actual.root.ownership})`,
       `  Desired: ${count(scope.counts.desired)}; observed entries: ${scope.counts.actual}; missing: ${count(scope.counts.missing)}`,
-      `  Ownership: ${scope.counts.owned} owned; ${scope.counts.foreign} foreign; ${scope.counts.pack} pack members`,
+      `  Ownership: ${scope.counts.owned} owned; ${scope.counts.foreign} foreign; ${scope.counts.set} set members`,
       `  Receipt: ${scope.receipt.state}${scope.receipt.path ? ` (${scope.receipt.path})` : ""}`,
       ...scope.actual.entries.map(
         (entry) =>

@@ -5,7 +5,7 @@ import { type Entry, entry, matches, validateData } from "./activation-ownership
 import { readActivationReceipt } from "./activation-state.js";
 import type { ActivationData, EntryIdentity } from "./activation-types.js";
 import { aliasPaths } from "./aliases.js";
-import { canonicalSkill, setMembers } from "./composition.js";
+import { canonicalSkill } from "./composition.js";
 import type {
   AliasObservation,
   DiagnosticOptions,
@@ -31,6 +31,7 @@ import type {
   SkillOrigin,
   SkillsManifest,
 } from "./selection.js";
+import { SET_ORIGIN_FILE } from "./set-origin.js";
 
 /** Internal shared exit precedence for read-only diagnostics. */
 export function diagnosticExit(exits: readonly ExitCode[], drift = false): ExitCode {
@@ -423,7 +424,11 @@ async function observeScope(
     ["directory", "link"].includes(observedRoot.observation.kind)
   ) {
     try {
-      const names = (await readdir(root)).sort();
+      const names = (await readdir(root))
+        // Set roots may carry skillex's own origin sidecar; it is composition
+        // metadata, never a skill or foreign content.
+        .filter((name) => !(resolved?.mode === "set" && name === SET_ORIGIN_FILE))
+        .sort();
       for (const name of names) {
         cancelled(options);
         const path = join(root, name);
@@ -436,11 +441,11 @@ async function observeScope(
           )
         ).observation;
         const binding = resolved?.bindings.find((binding) => binding.name === name);
-        const packMember =
-          resolved?.mode === "pack" &&
-          resolved.pack?.skillsRoot === observedRoot.observation.target &&
+        const setMember =
+          resolved?.mode === "set" &&
+          resolved.set?.path === observedRoot.observation.target &&
           binding?.path === observed.target;
-        entries.push({ ...observed, name, ...(packMember ? { ownership: "pack" as const } : {}) });
+        entries.push({ ...observed, name, ...(setMember ? { ownership: "set" as const } : {}) });
       }
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ENOTDIR") rootConflict();
@@ -491,7 +496,7 @@ async function observeScope(
     scope: location.scope,
     root: location.root,
     manifestPath: location.path,
-    mode: resolved?.mode ?? (manifest ? (manifest.packs.length ? "pack" : "composed") : null),
+    mode: resolved?.mode ?? (manifest ? (manifest.sets.length ? "set" : "composed") : null),
     desired: resolved ? resolved.bindings.map((binding) => binding.name).sort() : null,
     actual: { root: observedRoot.observation, entries },
     counts: {
@@ -501,7 +506,7 @@ async function observeScope(
       foreign: entries.filter(
         (item) => item.ownership === "foreign" || item.ownership === "changed",
       ).length,
-      pack: entries.filter((item) => item.ownership === "pack").length,
+      set: entries.filter((item) => item.ownership === "set").length,
       missing: resolved
         ? resolved.bindings.filter(
             (binding) =>
@@ -558,6 +563,32 @@ async function inspect(options: DiagnosticOptions): Promise<Inspection> {
         });
       } catch (error) {
         collectError(report, error, location.path, location.scope);
+      }
+    }
+    if (
+      manifest &&
+      resolved &&
+      location.scope === "project" &&
+      manifest.inheritGlobal &&
+      manifest.sets.length === 0 &&
+      manifest.skills.length
+    ) {
+      const inherited = resolution.data?.scopes.find((scope) => scope.scope === "global");
+      const explicit = new Set(manifest.skills.map((skill) => skill.name));
+      if (
+        inherited?.manifest.sets.length === 1 &&
+        inherited.bindings.length &&
+        inherited.bindings.every((binding) => explicit.has(binding.name))
+      ) {
+        report.findings.push({
+          code: "W_MANIFEST_GLOBAL_EXPANDED",
+          severity: "warning",
+          path: manifest.path,
+          scope: location.scope,
+          message: "The global selection is repeated as individual project skills.",
+          fix: `Run skillex normalize --project ${JSON.stringify(location.root)}; replace repeated members with the global set reference.`,
+        });
+        report.exits.push(ExitCode.DRIFT);
       }
     }
     sources.push({ location, resolved, manifest, registry });
@@ -628,68 +659,6 @@ function uniqueOrigins(origins: readonly SkillOrigin[]): SkillOrigin[] {
   });
 }
 
-async function dormantDetails(
-  context: ScopeContext,
-  name: string,
-  report: Report,
-  options: DiagnosticOptions,
-): Promise<{ origins: SkillOrigin[]; inheritedPath: string | null }> {
-  const { manifest, registry, location } = context;
-  if (!manifest?.packs.length) return { origins: [], inheritedPath: null };
-  const origins: SkillOrigin[] = [];
-  let inheritedPath: string | null = null;
-  const origin = (kind: SkillOrigin["kind"], reference: string): SkillOrigin => ({
-    scope: location.scope,
-    manifest: location.path,
-    kind,
-    reference,
-  });
-  if (manifest.skills.some((skill) => skill.name === name)) origins.push(origin("skill", name));
-  if (location.scope === "project" && manifest.inheritGlobal) {
-    const inherited = await resolveSelection({ ...options, scope: "global" });
-    const binding = inherited.data?.scopes
-      .find((scope) => scope.scope === "global")
-      ?.bindings.find((binding) => binding.name === name);
-    if (inherited.ok && binding) {
-      origins.push(...binding.origins, origin("inherit", "global"));
-      inheritedPath = binding.path;
-    } else if (!inherited.ok) {
-      report.findings.push({
-        code: "I_DORMANT_UNRESOLVED",
-        severity: "info",
-        scope: location.scope,
-        path: location.path,
-        message:
-          "Dormant global inheritance could not be resolved while the project pack is active.",
-        fix: "Restore the global declaration before disabling the pack if inherited skills are still wanted.",
-        detail: inherited.findings.map((finding) => finding.message),
-      });
-    }
-  }
-  if (registry) {
-    for (const set of manifest.sets) {
-      try {
-        const members = await setMembers(registry.root, set.name);
-        if (members.names.includes(name)) origins.push(origin("set", set.name));
-      } catch (error) {
-        report.findings.push({
-          code: "I_DORMANT_UNRESOLVED",
-          severity: "info",
-          scope: location.scope,
-          path: location.path,
-          message: `Dormant set ${set.name} could not be inspected while the pack is active.`,
-          fix: "Restore the dormant set before disabling the pack if that ordinary selection is still wanted.",
-          detail:
-            error instanceof SkillexError
-              ? error.findings.map((finding) => finding.message)
-              : [String(error)],
-        });
-      }
-    }
-  }
-  return { origins, inheritedPath };
-}
-
 export async function explainSkill(
   name: string,
   options: DiagnosticOptions = {},
@@ -699,13 +668,9 @@ export async function explainSkill(
     const inspection = await inspect(options);
     const { report } = inspection;
     const canonicalByRoot = new Map<string, string>();
-    const dormantByRoot = new Map<string, SkillOrigin[]>();
     const missing: { error: unknown; context: ScopeContext }[] = [];
     for (const context of inspection.contexts) {
       cancelled(options);
-      const dormant = await dormantDetails(context, name, report, options);
-      dormantByRoot.set(context.location.root, dormant.origins);
-      if (dormant.inheritedPath) canonicalByRoot.set(context.location.root, dormant.inheritedPath);
       const effective = context.resolved?.bindings.find((binding) => binding.name === name);
       const inheritedExclusion = context.resolved?.excluded.some(
         (excluded) =>
@@ -782,12 +747,10 @@ export async function explainSkill(
       const direct: SkillOrigin[] = manifest?.skills.some((skill) => skill.name === name)
         ? [{ scope: location.scope, manifest: location.path, kind: "skill", reference: name }]
         : [];
-      const dormant = dormantByRoot.get(location.root) ?? [];
       const origins = uniqueOrigins([
         ...(binding?.origins ?? []),
         ...exclusions.flatMap((excluded) => excluded.origins),
         ...direct,
-        ...dormant,
       ]);
       const scopeCanonical = canonicalByRoot.get(location.root) ?? null;
       const actual =
@@ -810,7 +773,7 @@ export async function explainSkill(
             finding.severity === "error" &&
             (finding.scope === undefined ||
               finding.scope === location.scope ||
-              (manifest?.inheritGlobal && !manifest.packs.length && finding.scope === "global")),
+              (manifest?.inheritGlobal && !manifest.sets.length && finding.scope === "global")),
         ),
       );
       const state: SkillExplanation["state"] =
@@ -820,9 +783,7 @@ export async function explainSkill(
             ? "effective"
             : exclusions.length
               ? "excluded"
-              : dormant.length
-                ? "dormant"
-                : "unselected";
+              : "unselected";
       scopes.push({
         scope: location.scope,
         root: location.root,
@@ -831,7 +792,7 @@ export async function explainSkill(
         canonical: scopeCanonical,
         origins,
         exclusions,
-        dormant,
+        dormant: [],
         actual,
         aliases,
         blockers,

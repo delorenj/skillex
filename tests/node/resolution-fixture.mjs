@@ -78,6 +78,21 @@ export function createResolutionFixture(context, resolveSelection) {
       link(join(path, member), join(sourceRegistry, "all-skills", member));
     return path;
   }
+  /** Materialize a scope-owned derived set exactly like skillex enable does. */
+  function derivedSet(owner, base, members, declaration, sourceRegistry = registry) {
+    const digest = createHash("sha256").update(owner.root).digest("hex").slice(0, 6);
+    const name = `${base ?? "skills"}-${digest}`;
+    const path = set(name, members, sourceRegistry);
+    file(
+      join(path, ".skillex-set.json"),
+      `${JSON.stringify(
+        { schema: 1, derived: { owner: { scope: owner.scope, root: owner.root }, ...declaration } },
+        null,
+        2,
+      )}\n`,
+    );
+    return { name, path };
+  }
   function pack(name, version, members, sourceRegistry = registry) {
     const path = directory(join(sourceRegistry, "packs", name, version));
     file(
@@ -112,6 +127,7 @@ export function createResolutionFixture(context, resolveSelection) {
     createRegistry,
     skill,
     set,
+    derivedSet,
     pack,
     cachedRegistry,
     async resolve(options = {}) {

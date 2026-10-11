@@ -33,6 +33,12 @@ interface LinkIdentity {
   readonly target: string;
 }
 
+export interface CompositionDocument {
+  readonly path: string;
+  readonly bytes: Buffer;
+  readonly before?: { bytes: Buffer; info: Stats };
+}
+
 export interface CompositionPlan {
   readonly registry: RegistrySelection;
   readonly composition: CompositionDetails;
@@ -40,7 +46,8 @@ export interface CompositionPlan {
   readonly changes: CompositionChange[];
   readonly directories: Map<string, Stats>;
   readonly links: Map<string, LinkIdentity>;
-  manifest?: { path: string; bytes: Buffer; before?: { bytes: Buffer; info: Stats } };
+  manifest?: CompositionDocument;
+  origin?: CompositionDocument;
 }
 
 export function compositionError<T>(command: string, error: unknown): ResultEnvelope<T | null> {
@@ -197,46 +204,61 @@ async function removeTemporary(path: string): Promise<void> {
   }
 }
 
-async function saveManifest(plan: CompositionPlan, changed: () => void): Promise<void> {
-  const manifest = plan.manifest;
-  if (!manifest) return;
+async function saveDocument(
+  plan: CompositionPlan,
+  document: CompositionDocument,
+  label: string,
+  changed: () => void,
+): Promise<void> {
   const verify = async () => {
-    await parents(plan, manifest.path);
-    const info = await inspectPath(manifest.path);
-    if (manifest.before) {
+    await parents(plan, document.path);
+    const info = await inspectPath(document.path);
+    if (document.before) {
       if (
         !info?.isFile() ||
-        info.dev !== manifest.before.info.dev ||
-        info.ino !== manifest.before.info.ino ||
-        !(await readFile(manifest.path)).equals(manifest.before.bytes)
+        info.dev !== document.before.info.dev ||
+        info.ino !== document.before.info.ino ||
+        !(await readFile(document.path)).equals(document.before.bytes)
       )
-        conflict(manifest.path, "The pack declaration changed while writing was being planned.");
-    } else if (info) conflict(manifest.path, "A pack manifest appeared during creation.");
+        conflict(document.path, `The ${label} changed while writing was being planned.`);
+    } else if (info) conflict(document.path, `A ${label} appeared during creation.`);
   };
   await verify();
-  const temporary = join(dirname(manifest.path), `.pack.toml.${randomUUID()}.tmp`);
+  const temporary = join(dirname(document.path), `.${basename(document.path)}.${randomUUID()}.tmp`);
   let madeTemporary = false;
   try {
     const file = await open(
       temporary,
       "wx",
-      manifest.before ? manifest.before.info.mode & 0o777 : 0o644,
+      document.before ? document.before.info.mode & 0o777 : 0o644,
     );
     madeTemporary = true;
     changed();
     try {
-      await file.writeFile(manifest.bytes);
-      await file.chmod(manifest.before ? manifest.before.info.mode & 0o777 : 0o644);
+      await file.writeFile(document.bytes);
+      await file.chmod(document.before ? document.before.info.mode & 0o777 : 0o644);
       await file.sync();
     } finally {
       await file.close();
     }
     await verify();
-    if (manifest.before) await rename(temporary, manifest.path);
-    else await link(temporary, manifest.path);
+    if (document.before) await rename(temporary, document.path);
+    else await link(temporary, document.path);
   } finally {
     if (madeTemporary) await removeTemporary(temporary);
   }
+}
+
+async function saveManifest(plan: CompositionPlan, changed: () => void): Promise<void> {
+  const manifest = plan.manifest;
+  if (!manifest) return;
+  await saveDocument(plan, manifest, "pack declaration", changed);
+}
+
+async function saveOrigin(plan: CompositionPlan, changed: () => void): Promise<void> {
+  const origin = plan.origin;
+  if (!origin) return;
+  await saveDocument(plan, origin, "set origin metadata", changed);
 }
 
 function data(plan: CompositionPlan): CompositionMutationData {
@@ -265,6 +287,9 @@ async function apply(
     // Persist the desired membership first. Missing links then remain repairable
     // from the declaration, and explicit removals can safely finish on retry.
     await saveManifest(plan, () => {
+      wrote = true;
+    });
+    await saveOrigin(plan, () => {
       wrote = true;
     });
     for (const change of plan.changes.filter((change) => change.action === "create-link")) {

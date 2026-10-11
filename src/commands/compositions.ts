@@ -26,11 +26,29 @@ interface Options {
   dryRun?: boolean;
   description?: string;
   version?: string;
+  fromRoot?: string;
+  from?: string[];
+  import?: boolean;
 }
 
 function registryOptions(command: Command): RegistryOptions {
   const { registryRoot } = command.optsWithGlobals<Options>();
   return registryRoot === undefined ? {} : { registryRoot };
+}
+
+function collectSource(value: string, previous: string[]): string[] {
+  return [...previous, value];
+}
+
+/** Creation-time source options; only `set create` / `pack create` expose them. */
+function creationOptions(command: Command) {
+  const { fromRoot, from, import: importMissing } = command.optsWithGlobals<Options>();
+  return {
+    ...mutationOptions(command),
+    ...(fromRoot === undefined ? {} : { fromRoot }),
+    ...(from === undefined || from.length === 0 ? {} : { from }),
+    ...(importMissing === undefined ? {} : { import: importMissing }),
+  };
 }
 
 function mutationOptions(command: Command) {
@@ -117,8 +135,22 @@ export function registerCompositionCommands(program: Command, output: Output): v
     .command("create <name>")
     .description("Create a reference-only set in the selected registry.")
     .option("--dry-run", "Validate and show the intended source changes.")
+    .option(
+      "--from-root <path>",
+      "Existing local skill root whose entries become member references; definitions are never imported.",
+    )
+    .option(
+      "--from <source>",
+      "Explicit source (an existing local skill directory or root, or a Git remote URL cloned once at its pinned commit) to reference members from. Repeatable.",
+      collectSource,
+      [],
+    )
+    .option(
+      "--import",
+      "Import source skills that have no canonical definition under their source names instead of refusing.",
+    )
     .action(async (name: string, _options, command: Command) => {
-      const result = await createSet(name, mutationOptions(command));
+      const result = await createSet(name, creationOptions(command));
       output.emit(result, mutationText(result.data, result.ok));
     });
   for (const action of ["add", "remove"] as const) {
@@ -159,9 +191,23 @@ export function registerCompositionCommands(program: Command, output: Output): v
     .requiredOption("--version <version>", "Composition version to create.")
     .option("--description <text>", "Describe this complete skill loadout.")
     .option("--dry-run", "Validate and show the intended source changes.")
+    .option(
+      "--from-root <path>",
+      "Existing local skill root whose entries become member references; definitions are never imported.",
+    )
+    .option(
+      "--from <source>",
+      "Explicit source (an existing local skill directory or root, or a Git remote URL cloned once at its pinned commit) to reference members from. Repeatable.",
+      collectSource,
+      [],
+    )
+    .option(
+      "--import",
+      "Import source skills that have no canonical definition under their source names instead of refusing.",
+    )
     .action(async (name: string, _options, command: Command) => {
       const { version } = command.optsWithGlobals<Options>();
-      const result = await createPack(name, version ?? "", mutationOptions(command));
+      const result = await createPack(name, version ?? "", creationOptions(command));
       output.emit(result, mutationText(result.data, result.ok));
     });
   for (const action of ["add", "remove"] as const) {

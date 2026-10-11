@@ -25,7 +25,7 @@ export interface SyncScopePlan {
   readonly scope: ScopeName;
   readonly root: string;
   readonly activationRoot: string;
-  readonly mode: "composed" | "pack";
+  readonly mode: "composed" | "set";
   readonly skills: readonly { readonly name: string; readonly path: string }[];
   readonly receiptPath: string;
   readonly changes: readonly SyncChange[];

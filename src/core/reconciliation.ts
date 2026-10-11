@@ -2,7 +2,7 @@ import { execFile } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { mkdir, readdir, realpath, rename, rmdir, symlink, unlink } from "node:fs/promises";
 import { basename, dirname, join, relative, resolve, sep } from "node:path";
-import { promisify } from "node:util";
+import { isDeepStrictEqual, promisify } from "node:util";
 import {
   emptyData,
   entry,
@@ -30,7 +30,8 @@ import type {
   SourceRevision,
 } from "./activation-types.js";
 import { aliasPaths } from "./aliases.js";
-import { canonicalSkill } from "./composition.js";
+import { canonicalSkill, setMembers, setMemberTarget } from "./composition.js";
+import { type DerivationPreview, planDerivedSet, verifyDerivedMembers } from "./derivation.js";
 import { fail, SkillexError } from "./error.js";
 import { withLock } from "./lock.js";
 import { verifyPack } from "./packs.js";
@@ -43,7 +44,8 @@ import type {
 } from "./reconciliation-types.js";
 import { resolveSelectionWithManifests } from "./resolution.js";
 import { type Diagnostic, ExitCode, makeResult, type ResultEnvelope } from "./result.js";
-import type { Resolution, ResolvedScope, ScopeName } from "./selection.js";
+import type { Resolution, ResolvedScope, ScopeName, SkillsManifest } from "./selection.js";
+import { readSetOrigin } from "./set-origin.js";
 
 const runFile = promisify(execFile);
 const lockResource = "skillex:activation:v2";
@@ -155,20 +157,59 @@ export async function sourceRevision(
 }
 
 async function verifyResolvedPack(scope: ResolvedScope, options: SyncOptions): Promise<void> {
-  if (!scope.pack) return;
-  const selected = scope.manifest.packs[0];
-  const ref = selected?.version ? `${selected.name}@${selected.version}` : scope.pack.name;
-  const verified = await verifyPack(ref, { ...options, registryRoot: scope.registry.root });
-  if (!verified.ok) throw new SkillexError(verified.exit, verified.findings);
-  if (
-    verified.data?.pack.path !== scope.pack.path ||
-    JSON.stringify(verified.data.pack.skills.map((skill) => [skill.name, skill.path]).sort()) !==
-      JSON.stringify(scope.bindings.map((skill) => [skill.name, skill.path]).sort())
-  ) {
+  // Each pack is verified against its own members; the scope may legitimately
+  // compose several packs plus individual skills around them.
+  for (const selected of scope.manifest.packs) {
+    const ref = selected.version ? `${selected.name}@${selected.version}` : selected.name;
+    const verified = await verifyPack(ref, { ...options, registryRoot: scope.registry.root });
+    if (!verified.ok) throw new SkillexError(verified.exit, verified.findings);
+  }
+}
+
+/** Set-mode preflight: the root alias must expose exactly the set's own links. */
+async function verifySelectedSet(scope: ResolvedScope): Promise<void> {
+  if (!scope.set) return;
+  const inventory = await setMembers(scope.registry.root, scope.set.name);
+  for (const name of inventory.names)
+    await setMemberTarget(scope.registry.root, inventory.path, name);
+  const links = inventory.names;
+  const bindings = scope.bindings.map((binding) => binding.name).sort();
+  if (JSON.stringify(links) !== JSON.stringify(bindings)) {
     refuse(
-      scope.pack.path,
-      "Pack membership changed during activation preflight.",
+      inventory.path,
+      "Set membership changed during activation preflight.",
       "E_OWNERSHIP_CHANGED",
+    );
+  }
+  const derived = (await readSetOrigin(inventory.path))?.derived;
+  if (derived) await verifyDerivedMembers(scope.registry.root, inventory, derived);
+  const owned = derived?.owner.scope === scope.scope && derived.owner.root === scope.root;
+  const selected = scope.manifest.sets[0];
+  if (!selected)
+    refuse(scope.manifest.path, "The set selection disappeared.", "E_OWNERSHIP_CHANGED");
+  const declared = owned
+    ? {
+        packs: [...derived.packs],
+        skills: [...derived.skills],
+        removed: [...derived.removed],
+      }
+    : { packs: [] as string[], skills: [] as string[], removed: [] as string[] };
+  const expected = {
+    packs: scope.manifest.packs.map((pack) =>
+      pack.version === undefined ? pack.name : `${pack.name}@${pack.version}`,
+    ),
+    skills: scope.manifest.skills.map((skill) => skill.name),
+    removed: [...scope.manifest.exclude],
+  };
+  if (!isDeepStrictEqual(declared, expected)) {
+    fail(
+      "E_SET_DRIFT",
+      `Set ${scope.set.name} no longer matches the selection that selected it.`,
+      {
+        path: inventory.path,
+        fix: "Re-run the skillex enable/disable command that owns this set, or run skillex normalize --dry-run to plan the repair.",
+      },
+      ExitCode.REFUSED,
     );
   }
 }
@@ -339,6 +380,7 @@ async function buildScope(
   scope: ResolvedScope,
   options: SyncOptions,
   forbiddenRoots: readonly string[],
+  verifySet: (scope: ResolvedScope) => Promise<void> = verifySelectedSet,
 ): Promise<ScopeWork> {
   const root = join(scope.root, ".agents", "skills");
   const aliases = aliasPaths(scope.root, scope.scope);
@@ -384,32 +426,27 @@ async function buildScope(
         "E_ACTIVATION_RECURSIVE",
       );
   }
-  if (scope.mode === "pack") {
-    if (!scope.pack)
+  if (scope.mode === "set") {
+    if (!scope.set)
       fail(
         "E_INCOMPLETE_RESOLUTION",
-        "An optional pack was unavailable; existing activation is preserved.",
+        "An optional set was unavailable; existing activation is preserved.",
         {
           path: scope.manifest.path,
-          fix: "Make the selected pack available, or remove its selection before syncing.",
+          fix: "Make the selected set available, or remove its selection before syncing.",
         },
         ExitCode.PARTIAL,
       );
-    if (within(scope.pack.skillsRoot, root) || within(root, scope.pack.skillsRoot))
-      refuse(root, "Pack activation would create recursive topology.", "E_ACTIVATION_RECURSIVE");
+    if (within(scope.set.path, root) || within(root, scope.set.path))
+      refuse(root, "Set activation would create recursive topology.", "E_ACTIVATION_RECURSIVE");
+    await verifySet(scope);
+  } else {
     await verifyResolvedPack(scope, options);
   }
   const operations: Operation[] = [];
   const rootChanges =
-    scope.mode === "pack"
-      ? [
-          change(
-            scope.scope,
-            rootEntry ? "replace-root" : "create-link",
-            root,
-            scope.pack?.skillsRoot,
-          ),
-        ]
+    scope.mode === "set"
+      ? [change(scope.scope, rootEntry ? "replace-root" : "create-link", root, scope.set?.path)]
       : [
           change(scope.scope, rootEntry ? "replace-root" : "create-directory", root),
           ...[...selected].map(([name, target]) =>
@@ -440,16 +477,14 @@ async function buildScope(
   if (!rootEntry) {
     operations.push({
       path: root,
-      ...(scope.mode === "pack"
-        ? { target: scope.pack?.skillsRoot ?? "" }
-        : { children: selected }),
+      ...(scope.mode === "set" ? { target: scope.set?.path ?? "" } : { children: selected }),
       changes: rootChanges,
     });
-  } else if (scope.mode === "pack") {
+  } else if (scope.mode === "set") {
     let correct = false;
     if (rootEntry.info.isSymbolicLink()) {
       try {
-        correct = (await realpath(physicalPath(root, recovery))) === scope.pack?.skillsRoot;
+        correct = (await realpath(physicalPath(root, recovery))) === scope.set?.path;
       } catch {
         /* Wrong/dangling roots require exact ownership before replacement. */
       }
@@ -458,7 +493,7 @@ async function buildScope(
       operations.push({
         path: root,
         previous: previousRoot(),
-        target: scope.pack?.skillsRoot ?? "",
+        target: scope.set?.path ?? "",
         changes: rootChanges,
       });
   } else if (rootEntry.info.isSymbolicLink()) {
@@ -505,7 +540,7 @@ async function buildScope(
     let correct = false;
     if (actual?.info.isSymbolicLink()) {
       const target = await aliasTarget(path, actual.raw ?? "", root);
-      correct = target === root || (scope.mode === "pack" && target === scope.pack?.skillsRoot);
+      correct = target === root || (scope.mode === "set" && target === scope.set?.path);
     }
     if (correct) continue;
     const owned = links[path];
@@ -534,7 +569,7 @@ async function buildScope(
   const sources = await Promise.all(
     [...catalogPaths].sort().map((path) => sourceRevision("catalog", path)),
   );
-  if (scope.pack) sources.push(await sourceRevision("pack", scope.pack.path));
+  if (scope.set) sources.push(await sourceRevision("set", scope.set.path));
   const changes: SyncChange[] = [
     ...(recovery ? [change(scope.scope, "recover", root)] : []),
     ...parents.missing.map((path) => change(scope.scope, "create-directory", path)),
@@ -569,6 +604,97 @@ async function buildScope(
   };
 }
 
+function forbiddenActivationRoots(
+  scopes: readonly ResolvedScope[],
+  selected: readonly ResolvedScope[],
+): string[] {
+  return [
+    ...new Set([
+      ...scopes.map((scope) => scope.registry.root),
+      ...selected.flatMap((scope) => [
+        join(scope.root, ".agents"),
+        ...(scope.scope === "project" ? [scope.root] : []),
+        ...aliasPaths(scope.root, scope.scope).map(dirname),
+      ]),
+    ]),
+  ];
+}
+
+/**
+ * Plan-only boundary for a set not yet materialized. Reuses every destination,
+ * receipt, recovery and alias guard; only the on-disk set check is replaced by
+ * validated derivation inputs. No executable ScopeWork escapes this function.
+ * Activation still re-resolves and verifies the actual set after materializing.
+ */
+export async function preflightDerivedActivation(
+  options: SyncOptions,
+  manifest: SkillsManifest,
+  preview: DerivationPreview,
+): Promise<SyncScopePlan> {
+  checkCancelled(options);
+  const expected = {
+    packs: manifest.packs.map((pack) =>
+      pack.version === undefined ? pack.name : `${pack.name}@${pack.version}`,
+    ),
+    skills: manifest.skills.map((skill) => skill.name),
+    removed: [...manifest.exclude],
+  };
+  if (
+    manifest.sets[0]?.name !== preview.name ||
+    !isDeepStrictEqual(expected, {
+      packs: [...preview.inputs.packs],
+      skills: [...preview.inputs.skills],
+      removed: [...preview.inputs.removed],
+    })
+  )
+    refuse(
+      manifest.path,
+      "The derivation preview does not match this selection.",
+      "E_OWNERSHIP_CHANGED",
+    );
+  const scope: ResolvedScope = {
+    ...preview.owner,
+    manifest,
+    registry: preview.registry,
+    mode: "set",
+    set: { name: preview.name, path: preview.path },
+    bindings: preview.members.map((member) => ({
+      ...member,
+      origins: [
+        {
+          scope: preview.owner.scope,
+          manifest: manifest.path,
+          kind: "set",
+          reference: preview.name,
+        },
+      ],
+    })),
+    excluded: [],
+  };
+  const work = await buildScope(
+    scope,
+    options,
+    forbiddenActivationRoots([scope], [scope]),
+    async () => {
+      const current = await planDerivedSet({
+        ...options,
+        registryRoot: preview.registry.root,
+        owner: preview.owner,
+        inputs: preview.inputs,
+      });
+      if (current.path !== preview.path || !isDeepStrictEqual(current.members, preview.members))
+        refuse(
+          preview.path,
+          "Derived membership changed during activation preflight.",
+          "E_OWNERSHIP_CHANGED",
+        );
+      await verifyResolvedPack(scope, options);
+    },
+  );
+  checkCancelled(options);
+  return work.plan;
+}
+
 /** Read-only internal preparation; callers must not retain it across lock acquisitions. */
 export async function prepareSyncUnlocked(
   options: SyncOptions = {},
@@ -596,16 +722,7 @@ export async function prepareSyncUnlocked(
   const selected = resolution.scopes.filter((scope) =>
     resolution.writeScopes.includes(scope.scope),
   );
-  const forbiddenRoots = [
-    ...new Set([
-      ...resolution.scopes.map((scope) => scope.registry.root),
-      ...selected.flatMap((scope) => [
-        join(scope.root, ".agents"),
-        ...(scope.scope === "project" ? [scope.root] : []),
-        ...aliasPaths(scope.root, scope.scope).map(dirname),
-      ]),
-    ]),
-  ];
+  const forbiddenRoots = forbiddenActivationRoots(resolution.scopes, selected);
   const scopes: ScopeWork[] = [];
   for (const scope of selected) {
     checkCancelled(options, scope.root);
@@ -731,8 +848,8 @@ async function stageNode(
         operation.target
     )
       refuse(operation.path, "Canonical source changed during activation.");
-    if (operation.path === work.plan.activationRoot && work.scope.mode === "pack")
-      await verifyResolvedPack(work.scope, work.receiptOptions);
+    if (operation.path === work.plan.activationRoot && work.scope.mode === "set")
+      await verifySelectedSet(work.scope);
     await symlink(relative(dirname(operation.path), operation.target), path);
     const found = await entry(path);
     if (!found) refuse(path, "Prepared activation link disappeared.");
@@ -747,8 +864,8 @@ async function verifyOperationSources(work: ScopeWork, operation: Operation): Pr
       refuse(operation.path, "Canonical source changed before activation publication.");
   }
   if (operation.target === undefined) return;
-  if (operation.path === work.plan.activationRoot && work.scope.mode === "pack")
-    await verifyResolvedPack(work.scope, work.receiptOptions);
+  if (operation.path === work.plan.activationRoot && work.scope.mode === "set")
+    await verifySelectedSet(work.scope);
   else if (
     dirname(operation.path) === work.plan.activationRoot &&
     (await canonicalSkill(dirname(dirname(operation.target)), basename(operation.path))) !==
@@ -785,7 +902,7 @@ async function executeScope(
       JSON.stringify({
         mode: work.scope.mode,
         bindings: work.scope.bindings.map(({ name, path }) => ({ name, path })),
-        pack: work.scope.pack,
+        set: work.scope.set,
       }),
     )
     .digest("hex");

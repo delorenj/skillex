@@ -82,6 +82,18 @@ function fixture(t) {
     skill,
   };
 }
+it("set source revisions survive profile receipt rereads and converge", async (t) => {
+  const f = fixture(t);
+  const set = f.directory(join(f.registry, "sets", "desk"));
+  symlinkSync(join(f.registry, "all-skills", "beta"), join(set, "beta"));
+  f.manifest("project", { sets: ["desk"] });
+  ok(await syncProfile("work", f.options));
+  const result = ok(await showProfile("work", f.options));
+  assert.ok(result);
+  const again = ok(await syncProfile("work", { ...f.options, dryRun: true }));
+  assert.deepEqual(again.changes, []);
+});
+
 it("strict preview is immutable and strict ownership persists across ordinary sync", async (t) => {
   const f = fixture(t);
   const before = snapshot(f.root);
@@ -301,13 +313,12 @@ it("project inheritance and masks apply only to project contribution, including 
   // These generated links are not used when a profile flattens manifest-authoritative members.
   f.directory(join(pack, "skills"));
   symlinkSync("/not-a-definition", join(pack, "skills", "wrong"));
-  f.manifest("project", { packs: ["suite@1"], skills: ["missing-dormant"] });
+  f.manifest("project", { packs: ["suite@1"], skills: ["beta"] });
   const data = ok(await syncProfile("work", f.options));
   assert.deepEqual(
     data.managed.map((item) => item.name),
-    ["alpha", "gamma"],
+    ["alpha", "beta", "gamma"],
   );
-  assert.equal(existsSync(join(f.skills, "beta")), false);
   assert.equal(lstatSync(f.skills).isDirectory(), true);
   assert.ok(
     receipt(f).document.data.sources.some(

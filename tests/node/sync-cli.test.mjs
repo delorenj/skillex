@@ -501,23 +501,23 @@ describe("installed sync CLI", () => {
     });
   }
 
-  it("switches composed roots to exclusive packs, changes versions, and restores dormant selections", (context) => {
+  it("composes pack members additively across versions and removes packs cleanly", (context) => {
     const catalog = catalogFor(context);
     const ordinary = { skills: ["alpha", "beta"], inherit_global: false };
     manifest(catalog.project, ordinary);
-    const first = catalog.pack("editor", "1.0.0", ["gamma"]);
-    const second = catalog.pack("editor", "2.0.0", ["beta"]);
+    catalog.pack("editor", "1.0.0", ["gamma"]);
+    catalog.pack("editor", "2.0.0", ["beta"]);
     const source = snapshot(catalog.registry);
     json(catalog, ["--scope", "project"]);
     const aliases = projectAliases.map((alias) => snapshot(join(catalog.project, alias)));
-    for (const [version, pack, names] of [
-      ["1.0.0", first, ["gamma"]],
-      ["2.0.0", second, ["beta"]],
+    for (const [version, names] of [
+      ["1.0.0", ["alpha", "beta", "gamma"]],
+      ["2.0.0", ["alpha", "beta"]],
     ]) {
       manifest(catalog.project, { ...ordinary, packs: [{ name: "editor", version }] });
       const result = json(catalog, ["--scope", "project"]);
-      assert.equal(result.data.scopes.find(({ scope }) => scope === "project").mode, "pack");
-      assertProjection(catalog, catalog.project, names, "project", "pack", pack);
+      assert.equal(result.data.scopes.find(({ scope }) => scope === "project").mode, "composed");
+      assertProjection(catalog, catalog.project, names, "project");
       assert.deepEqual(readdirSync(activation(catalog.project)).sort(), names);
     }
     manifest(catalog.project, ordinary);

@@ -10,14 +10,13 @@ permissions:
 
 jobs:
   check:
-    name: Node ${{ matrix.node }} / ${{ matrix.os }}
-    runs-on: ${{ matrix.os }}
+    name: Node ${{ matrix.node }} / Linux
+    runs-on: [self-hosted, Linux, delonet]
     timeout-minutes: 10
     strategy:
       fail-fast: false
       matrix:
         node: [24, 26]
-        os: [ubuntu-latest, macos-latest]
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7

@@ -10,7 +10,7 @@ export interface PathObservation {
   readonly rawTarget: string | null;
   readonly target: string | null;
   readonly reachable: boolean;
-  readonly ownership: "owned" | "foreign" | "changed" | "pack" | "none";
+  readonly ownership: "owned" | "foreign" | "changed" | "set" | "none";
 }
 
 export interface SkillObservation extends PathObservation {
@@ -35,7 +35,7 @@ export interface StatusScope {
   readonly scope: ScopeName;
   readonly root: string;
   readonly manifestPath: string;
-  readonly mode: "composed" | "pack" | null;
+  readonly mode: "composed" | "set" | null;
   readonly desired: readonly string[] | null;
   readonly actual: {
     readonly root: PathObservation;
@@ -46,7 +46,7 @@ export interface StatusScope {
     readonly actual: number;
     readonly owned: number;
     readonly foreign: number;
-    readonly pack: number;
+    readonly set: number;
     readonly missing: number | null;
   };
   readonly aliases: readonly AliasObservation[];

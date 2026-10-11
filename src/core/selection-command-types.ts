@@ -9,7 +9,7 @@ export interface SelectionOptions extends Omit<SyncOptions, "scope" | "exitCode"
 
 export interface SelectionChange {
   readonly scope: ScopeName;
-  readonly action: "write-manifest" | SyncChange["action"];
+  readonly action: "write-manifest" | "derive-set" | "retire-set" | SyncChange["action"];
   readonly path: string;
   readonly target?: string;
 }

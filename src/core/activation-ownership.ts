@@ -191,7 +191,7 @@ export function validateData(
     if (
       !record(source) ||
       !exact(source, ["kind", "path", "commit", "reason"]) ||
-      !["catalog", "pack"].includes(String(source.kind)) ||
+      !["catalog", "pack", "set"].includes(String(source.kind)) ||
       typeof source.path !== "string" ||
       !isAbsolute(source.path) ||
       (source.commit !== null &&

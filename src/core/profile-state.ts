@@ -105,7 +105,7 @@ function validate(raw: unknown, root: string, path: string): ProfileData {
     if (
       !record(source) ||
       !exact(source, ["kind", "path", "commit", "reason"]) ||
-      !["catalog", "pack"].includes(String(source.kind)) ||
+      !["catalog", "set", "pack"].includes(String(source.kind)) ||
       typeof source.path !== "string" ||
       !isAbsolute(source.path) ||
       source.path.includes("\0") ||

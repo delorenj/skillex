@@ -25,6 +25,14 @@ import type {
 import { discoverRegistry } from "./discovery.js";
 import { fail, SkillexError } from "./error.js";
 import { inspectPath, requireDirectory } from "./filesystem.js";
+import {
+  executeImports,
+  planSourceMembers,
+  provenanceFrom,
+  releaseInventory,
+  resolveMemberTargets,
+  type SourceMembershipPlan,
+} from "./import-sources.js";
 import { isVersionComponent, parseManifest } from "./manifest.js";
 import { readSkillMetadata } from "./metadata.js";
 import { type Diagnostic, ExitCode, makeResult, type ResultEnvelope } from "./result.js";
@@ -36,6 +44,15 @@ interface PackDocument {
   readonly bytes: Buffer;
   readonly info: Stats;
   readonly description?: string;
+}
+
+export interface CreatePackOptions extends CompositionOptions {
+  /** Existing local skill root whose entries become member references. */
+  readonly fromRoot?: string;
+  /** Repeatable explicit sources: existing paths or Git remotes. */
+  readonly from?: readonly string[];
+  /** Import source skills that have no canonical definition instead of refusing. */
+  readonly import?: boolean;
 }
 
 function selection(ref: string): PackSelection {
@@ -364,30 +381,96 @@ export async function verifyPack(
   }
 }
 
+/** Order-insensitive comparison for TOML-round-tripped provenance tables. */
+function stableStringify(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(stableStringify).join(",")}]`;
+  if (value !== null && typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    return `{${Object.keys(record)
+      .sort()
+      .map((key) => `${JSON.stringify(key)}:${stableStringify(record[key])}`)
+      .join(",")}}`;
+  }
+  return JSON.stringify(value) ?? "null";
+}
+
+/**
+ * Destination admission for source-backed pack creation: the requested name
+ * and version must be valid, and an existing version must be fully explained
+ * by the sources — every declared member claimed, recorded [source]
+ * provenance agreeing. Runs unlocked before any catalog write and again
+ * inside composition planning under the lock.
+ */
+async function packAdmission(
+  registry: string,
+  selected: PackSelection,
+  source: SourceMembershipPlan,
+): Promise<void> {
+  const createdPath = join(registry, "packs", selected.name, selected.version ?? "");
+  if (!(await inspectPath(createdPath))) return;
+  // A repeated source-backed create must be a write-free no-op (or finish
+  // links an interrupted run left missing); members the sources do not
+  // explain are a named refusal, never a silent edit.
+  const current = await readPack(registry, selected);
+  const wanted = new Set(source.members);
+  const unexpected = current.inventory.names.filter((name) => !wanted.has(name));
+  if (unexpected.length)
+    conflict(
+      createdPath,
+      `Source-backed creation found existing members outside the sources (${unexpected.join(", ")}); use pack remove or a new version.`,
+    );
+  if (
+    source.provenance !== undefined &&
+    current.raw.source !== undefined &&
+    // Only the source list is identity; the first run's `imported` outcome
+    // must not make an importing repeat look like a different provenance.
+    stableStringify((current.raw.source as Record<string, unknown>).sources) !==
+      stableStringify(source.provenance.sources)
+  )
+    conflict(
+      join(createdPath, "pack.toml"),
+      "The existing pack version records different source provenance than the requested sources.",
+    );
+}
+
 async function preparePack(
   selected: PackSelection,
   names: readonly string[],
   operation: "create" | "add" | "remove",
   options: CompositionOptions,
+  source?: SourceMembershipPlan,
 ) {
   const registry = await discoverRegistry(options);
-  const requested = await requestedSkills(registry.root, names, `pack ${selected.name}`);
   const createdPath = join(registry.root, "packs", selected.name, selected.version ?? "");
-  const existing = operation !== "create" || (await inspectPath(createdPath));
+  if (source !== undefined) await packAdmission(registry.root, selected, source);
+  const exists = await inspectPath(createdPath);
+  const requested =
+    source !== undefined
+      ? await resolveMemberTargets(
+          registry.root,
+          source.members,
+          `pack ${selected.name}`,
+          source.pending,
+        )
+      : await requestedSkills(registry.root, names, `pack ${selected.name}`);
+  const existing = operation !== "create" || exists;
   const text = description(options.description, "pack description");
   let document: PackDocument | undefined;
   if (existing) document = await readPack(registry.root, selected);
   const previous = document?.inventory.names ?? [];
   const desired = [...previous];
-  if (operation === "add")
+  if (operation === "add" || source !== undefined)
     for (const name of requested.keys()) if (!desired.includes(name)) desired.push(name);
   const namesAfter =
     operation === "remove" ? desired.filter((name) => !requested.has(name)) : desired;
-  const targets = await requestedSkills(
-    registry.root,
-    namesAfter,
-    document ? join(document.inventory.path, "pack.toml") : createdPath,
-  );
+  const targets =
+    source !== undefined
+      ? requested
+      : await requestedSkills(
+          registry.root,
+          namesAfter,
+          document ? join(document.inventory.path, "pack.toml") : createdPath,
+        );
   const composition: CompositionDetails = document
     ? details(document, targets)
     : {
@@ -395,7 +478,9 @@ async function preparePack(
         name: selected.name,
         version: selected.version ?? "",
         path: createdPath,
-        skills: [],
+        skills: [...targets]
+          .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+          .map(([skillName, skillPath]) => ({ name: skillName, path: skillPath })),
         ...(text === undefined ? {} : { description: text }),
       };
   const plan = await newPlan(registry, composition, options.dryRun === true);
@@ -424,15 +509,26 @@ async function preparePack(
     !document ||
     previous.length !== namesAfter.length ||
     previous.some((name, index) => name !== namesAfter[index]);
-  if (declarationChanged) {
+  // Adopting provenance onto an unattributed pack whose membership the sources
+  // explain exactly is an honest metadata gain, so it rewrites the manifest.
+  const provenanceAdopted =
+    document !== undefined && document.raw.source === undefined && source?.provenance !== undefined;
+  if (declarationChanged || provenanceAdopted) {
     const raw: TomlTable = document
-      ? { ...document.raw, freeform: { skills: namesAfter } }
+      ? {
+          ...document.raw,
+          freeform: { skills: namesAfter },
+          ...(source?.provenance === undefined ? {} : { source: source.provenance as TomlTable }),
+        }
       : {
           pack: {
             name: selected.name,
             version: selected.version ?? "",
             ...(text === undefined ? {} : { description: text }),
           },
+          // provenanceFrom emits JSON-safe values (strings, arrays, records),
+          // which stringify as the [source] TOML table.
+          ...(source?.provenance === undefined ? {} : { source: source.provenance as TomlTable }),
           freeform: { skills: namesAfter },
         };
     const path = join(composition.path, "pack.toml");
@@ -449,11 +545,63 @@ async function preparePack(
 export async function createPack(
   name: string,
   version: string,
-  options: CompositionOptions = {},
+  options: CreatePackOptions = {},
 ): Promise<ResultEnvelope<CompositionMutationData | null>> {
-  return mutateComposition("pack create", options, () =>
-    preparePack(explicitSelection(name, version), [], "create", options),
-  );
+  const command = "pack create";
+  if (options.fromRoot === undefined && (options.from?.length ?? 0) === 0)
+    return mutateComposition(command, options, () =>
+      preparePack(explicitSelection(name, version), [], "create", options),
+    );
+  try {
+    const registry = await discoverRegistry(options);
+    // Phase 1 — acquire everything and validate every import write-free.
+    const planned = await planSourceMembers(registry.root, options);
+    try {
+      if (planned.findings.some((finding) => finding.severity === "error"))
+        return makeResult(command, null, { exit: ExitCode.REFUSED, findings: planned.findings });
+      // Phase 2 — preflight the destination before any catalog write: the
+      // pack name/version and any existing membership/provenance must admit
+      // this composition, or we refuse without having imported anything.
+      const selected = explicitSelection(name, version);
+      const provisional: SourceMembershipPlan = {
+        members: planned.names,
+        pending: planned.pending,
+        provenance: await provenanceFrom(planned.inventories, [...planned.pending.keys()].sort()),
+      };
+      await packAdmission(registry.root, selected, provisional);
+      // Phase 3 — execute the imports for real, disclosing partial survival
+      // truthfully instead of rolling back or hiding it.
+      const executed: string[] = [];
+      if (options.dryRun !== true && planned.imports.length > 0) {
+        const outcome = await executeImports(planned.imports, options);
+        if (outcome.findings.length > 0)
+          return makeResult(command, null, {
+            exit: ExitCode.REFUSED,
+            findings: [...planned.findings, ...outcome.findings],
+          });
+        executed.push(...outcome.executed.map((item) => item.name));
+      }
+      // Phase 4 — compose. Dry-run keeps planned destinations; a real run
+      // resolves every member against the catalog it just wrote.
+      const source: SourceMembershipPlan = {
+        members: planned.names,
+        pending: options.dryRun === true ? planned.pending : new Map(),
+        provenance: await provenanceFrom(
+          planned.inventories,
+          options.dryRun === true ? [...planned.pending.keys()].sort() : executed,
+        ),
+      };
+      return await mutateComposition(command, options, () =>
+        preparePack(selected, [], "create", options, source),
+      ).then((result) =>
+        result.ok ? makeResult(command, result.data, { findings: planned.findings }) : result,
+      );
+    } finally {
+      for (const inventory of planned.inventories) await releaseInventory(inventory);
+    }
+  } catch (error) {
+    return compositionError(command, error);
+  }
 }
 
 export async function addPackSkills(

@@ -7,8 +7,6 @@ export interface SkillSelection {
 
 export interface SetSelection {
   readonly name: string;
-  readonly include?: readonly string[];
-  readonly exclude: readonly string[];
   readonly optional: boolean;
 }
 
@@ -99,13 +97,19 @@ export interface ResolvedPack {
   readonly skillsRoot: string;
 }
 
+/** A selected set: the scope root becomes a symlink to its flat skill root. */
+export interface ResolvedSet {
+  readonly name: string;
+  readonly path: string;
+}
+
 export interface ResolvedScope {
   readonly scope: ScopeName;
   readonly root: string;
   readonly manifest: SkillsManifest;
   readonly registry: RegistrySelection;
-  readonly mode: "composed" | "pack";
-  readonly pack?: ResolvedPack;
+  readonly mode: "composed" | "set";
+  readonly set?: ResolvedSet;
   readonly bindings: readonly ResolvedBinding[];
   readonly excluded: readonly ExcludedBinding[];
 }

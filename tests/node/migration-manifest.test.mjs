@@ -249,13 +249,30 @@ it("translates slash references and preserves legacy empty-include selection mea
   for (const name of ["alpha", "beta"]) link(join(set, name), join(f.registry, "all-skills", name));
   f.manifest({
     inherit_global: false,
-    sets: [{ name: "tools", source: `file://${set}`, include: [] }],
     skills: ["sets/tools/alpha"],
   });
   ok(await migrate({ ...f.options, apply: true }));
-  const raw = JSON.parse(readFileSync(f.target, "utf8"));
-  assert.deepEqual(raw.sets, [{ name: "tools" }]);
-  assert.deepEqual(raw.skills, ["alpha"]);
+  assert.deepEqual(JSON.parse(readFileSync(f.target, "utf8")), {
+    inherit_global: false,
+    skills: ["alpha"],
+  });
+  const direct = ok(await resolveSelection({ ...f.options, scope: "project" }), "resolve");
+  assert.deepEqual(
+    direct.scopes
+      .at(-1)
+      .bindings.map(({ name }) => name)
+      .sort(),
+    ["alpha"],
+  );
+  f.manifest({
+    inherit_global: false,
+    sets: [{ name: "tools", source: `file://${set}`, include: [] }],
+  });
+  ok(await migrate({ ...f.options, apply: true }));
+  assert.deepEqual(JSON.parse(readFileSync(f.target, "utf8")), {
+    inherit_global: false,
+    sets: [{ name: "tools" }],
+  });
   const resolved = ok(await resolveSelection({ ...f.options, scope: "project" }), "resolve");
   assert.deepEqual(
     resolved.scopes
@@ -264,15 +281,22 @@ it("translates slash references and preserves legacy empty-include selection mea
       .sort(),
     ["alpha", "beta"],
   );
+  f.manifest({
+    inherit_global: false,
+    sets: [{ name: "tools", source: `file://${set}`, include: [] }],
+    skills: ["sets/tools/alpha"],
+  });
+  const combined = await unchanged(f.root, () => migrate({ ...f.options, apply: true }));
+  const combinedFinding = finding(combined, "E_MIGRATION_MANIFEST_MAPPING");
+  assert.ok(combinedFinding.fix.includes("skillex normalize --dry-run"));
 });
 
-it("does not infer external names or discard unknown slot, payload, and additive pack semantics", async (t) => {
+it("does not infer external names or discard unknown slot, payload, and filtered pack semantics", async (t) => {
   const f = fixture(t);
   for (const raw of [
     { skills: [{ name: "alpha", source: `file://${f.source}` }] },
     { skills: ["alpha"], slots: { workflow: "alpha" } },
     { payload: { root: f.source }, skills: ["alpha"] },
-    { packs: ["tools", "other"] },
     { packs: [{ name: "tools", flatten: true }], skills: ["alpha"] },
     { packs: [{ name: "tools", include: ["alpha"] }] },
   ]) {
@@ -282,6 +306,17 @@ it("does not infer external names or discard unknown slot, payload, and additive
     assert.equal(manifestItem(result.data).state, "blocked");
     assert.equal(manifestItem(result.data).action, "map-manifest");
   }
+  const other = directory(join(f.registry, "packs", "other", "1.0.0"));
+  file(
+    join(other, "pack.toml"),
+    "[pack]\nname='other'\nversion='1.0.0'\n[freeform]\nskills=['alpha']\n",
+  );
+  directory(join(other, "skills"));
+  link(join(other, "skills", "alpha"), join(f.registry, "all-skills", "alpha"));
+  f.manifest({ packs: ["tools", "other"] });
+  const data = ok(await migrate({ ...f.options, apply: true }));
+  assert.deepEqual(JSON.parse(readFileSync(f.target, "utf8")), { packs: ["tools", "other"] });
+  assert.equal(manifestItem(data).state, "preserved");
 });
 
 it("requires an explicit decision before legacy project packs stop inheriting global skills", async (t) => {

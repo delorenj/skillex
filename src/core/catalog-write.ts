@@ -29,6 +29,11 @@ export interface CatalogWriteResult {
 
 export interface CatalogWriteOptions extends RegistryOptions, CatalogLockOptions {
   readonly dryRun?: boolean;
+  /**
+   * Override the receipt's imported_from label, e.g. a sanitized Git URL
+   * instead of an ephemeral clone path, so provenance outlives the clone.
+   */
+  readonly importedFrom?: string;
 }
 
 export interface CreateSkillOptions extends CatalogWriteOptions {
@@ -334,7 +339,7 @@ export async function importSkill(
       receipt({
         origin: {
           type: "adhoc",
-          imported_from: sourceRoot,
+          imported_from: options.importedFrom ?? sourceRoot,
           extracted_at: new Date().toISOString(),
           digest,
           ...(entries.some((entry) => entry.kind === "link")

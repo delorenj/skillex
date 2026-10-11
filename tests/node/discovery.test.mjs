@@ -119,7 +119,7 @@ test("global-only discovery ignores project paths and nested manifest errors", a
   assert.deepEqual(result.writeScopes, ["global"]);
 });
 
-for (const mode of ["independent", "pack"]) {
+for (const mode of ["independent", "set"]) {
   for (const brokenGlobal of ["directory", "broken-link", "non-directory-parent"]) {
     test(`${mode} project defers dormant global ${brokenGlobal} validation`, async (t) => {
       const f = await fixture(t);
@@ -127,20 +127,17 @@ for (const mode of ["independent", "pack"]) {
       const skill = join(registryRoot, "all-skills", "local");
       await mkdir(skill);
       await writeFile(join(skill, "SKILL.md"), "---\nname: local\ndescription: Fixture\n---\n");
-      if (mode === "pack") {
-        const pack = join(registryRoot, "packs", "chosen", "1.0.0");
-        await mkdir(pack, { recursive: true });
-        await writeFile(
-          join(pack, "pack.toml"),
-          '[pack]\nname = "chosen"\nversion = "1.0.0"\n[freeform]\nskills = ["local"]\n',
-        );
+      if (mode === "set") {
+        // A set exclusively replaces the project root, so the broken global
+        // declaration stays dormant exactly like the legacy exclusive pack did.
+        const set = join(registryRoot, "sets", "chosen");
+        await mkdir(set, { recursive: true });
+        await symlink("../../all-skills/local", join(set, "local"));
       }
       await manifest(
         f.cwd,
         JSON.stringify(
-          mode === "pack"
-            ? { packs: ["chosen@1.0.0"] }
-            : { inherit_global: false, skills: ["local"] },
+          mode === "set" ? { sets: ["chosen"] } : { inherit_global: false, skills: ["local"] },
         ),
       );
       const globalPath = join(f.home, ".agents", "skills.json");

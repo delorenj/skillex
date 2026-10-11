@@ -258,11 +258,16 @@ describe("installed selection CLI", () => {
     }
   }
 
-  function assertActivated(catalog, root, expected, pack) {
+  function assertActivated(catalog, root, expected, wholeRoot) {
     const path = activation(root);
-    assert.equal(lstatSync(path).isSymbolicLink(), !!pack);
-    if (pack) assert.equal(realpathSync(path), join(pack, "skills"));
-    assert.deepEqual(readdirSync(path).sort(), [...expected].sort());
+    assert.equal(lstatSync(path).isSymbolicLink(), !!wholeRoot);
+    if (wholeRoot) assert.equal(realpathSync(path), wholeRoot);
+    assert.deepEqual(
+      readdirSync(path)
+        .filter((name) => !name.startsWith("."))
+        .sort(),
+      [...expected].sort(),
+    );
     for (const name of expected)
       assert.equal(realpathSync(join(path, name)), join(catalog.registry, "all-skills", name));
     for (const alias of [".claude/skills", ".codex/skills"]) {
@@ -403,6 +408,37 @@ describe("installed selection CLI", () => {
     assert.equal(existsSync(activation(catalog.project)), false);
   });
 
+  it("refuses pack derivation with a foreign alias before writing manifest or catalog", (context) => {
+    const catalog = catalogFor(context, { homeManifest: { inherit_global: false } });
+    catalog.set("writers", ["alpha"]);
+    catalog.pack("extra", "1.0.0", ["beta"]);
+    json(catalog, ["enable", "set", "writers", "--global"]);
+    json(catalog, ["enable", "set", "writers", "--project", catalog.project]);
+    const alias = join(catalog.project, ".claude", "skills");
+    unlinkSync(alias);
+    write(join(alias, "foreign.txt"), "Never replace this directory.\n");
+    const before = snapshot(catalog.root);
+    for (const dryRun of [true, false]) {
+      const result = json(
+        catalog,
+        [
+          "enable",
+          "pack",
+          "extra@1.0.0",
+          "--project",
+          catalog.project,
+          ...(dryRun ? ["--dry-run"] : []),
+        ],
+        3,
+      );
+      namedError(result, "E_OWNERSHIP_CHANGED");
+      assert.equal(result.data, null);
+      assert.deepEqual(readManifest(catalog.project).sets, ["writers"]);
+      assert.deepEqual(readdirSync(join(catalog.registry, "sets")), ["writers"]);
+      assert.deepEqual(snapshot(catalog.root), before);
+    }
+  });
+
   it("masks inherited skills locally and reenables them without editing global intent", (context) => {
     const catalog = catalogFor(context);
     const home = snapshot(catalog.home);
@@ -413,28 +449,32 @@ describe("installed selection CLI", () => {
     assertActivated(catalog, catalog.project, ["beta"]);
     json(catalog, ["enable", "skill", "alpha"]);
     assert.equal((readManifest(catalog.project).exclude ?? []).includes("alpha"), false);
-    assert.ok(names(readManifest(catalog.project), "skills").includes("alpha"));
+    assert.equal(names(readManifest(catalog.project), "skills").includes("alpha"), false);
     assertActivated(catalog, catalog.project, ["alpha", "beta"]);
     assert.deepEqual(snapshot(catalog.home), home);
   });
 
   it("manages set contributions and local skill exclusions without changing the shared set", (context) => {
     const catalog = catalogFor(context);
-    catalog.set("writers", ["beta", "gamma"]);
-    const source = snapshot(catalog.registry);
+    const set = catalog.set("writers", ["beta", "gamma"]);
+    const shared = snapshot(set);
     const home = snapshot(catalog.home);
     json(catalog, ["enable", "set", "writers"]);
-    assertActivated(catalog, catalog.project, ["alpha", "beta", "gamma"]);
+    assertActivated(catalog, catalog.project, ["beta", "gamma"], set);
     json(catalog, ["disable", "skill", "gamma"]);
-    assert.deepEqual(names(readManifest(catalog.project), "sets"), ["writers"]);
-    assert.ok(readManifest(catalog.project).exclude.includes("gamma"));
-    assertActivated(catalog, catalog.project, ["alpha", "beta"]);
+    const masked = readManifest(catalog.project);
+    const derived = names(masked, "sets")[0];
+    assert.match(derived, /^writers-/);
+    assert.ok(masked.exclude.includes("gamma"));
+    assertActivated(catalog, catalog.project, ["beta"], join(catalog.registry, "sets", derived));
     json(catalog, ["enable", "skill", "gamma"]);
-    assertActivated(catalog, catalog.project, ["alpha", "beta", "gamma"]);
+    assert.deepEqual(names(readManifest(catalog.project), "sets"), ["writers"]);
+    assertActivated(catalog, catalog.project, ["beta", "gamma"], set);
     json(catalog, ["disable", "set", "writers"]);
     assert.deepEqual(names(readManifest(catalog.project), "sets"), []);
-    assertActivated(catalog, catalog.project, ["alpha", "gamma"]);
-    assert.deepEqual(snapshot(catalog.registry), source);
+    assertActivated(catalog, catalog.project, ["alpha"]);
+    assert.deepEqual(snapshot(set), shared);
+    assert.deepEqual(readdirSync(join(catalog.registry, "sets")), ["writers"]);
     assert.deepEqual(snapshot(catalog.home), home);
   });
 
@@ -452,22 +492,18 @@ describe("installed selection CLI", () => {
     assert.deepEqual(snapshot(catalog.home), home);
   });
 
-  it("retains dormant ordinary selections under a pack and restores them when it is disabled", (context) => {
+  it("keeps ordinary selections active while adding and removing an additive pack", (context) => {
     const catalog = catalogFor(context);
     catalog.set("writers", ["alpha", "gamma"]);
-    const pack = catalog.pack("editor", "1.0.0", ["gamma"]);
-    const ordinary = {
-      skills: ["beta"],
-      sets: ["writers"],
-      exclude: ["gamma"],
-      inherit_global: true,
-    };
+    catalog.pack("editor", "1.0.0", ["gamma"]);
+    const ordinary = { skills: ["beta"], inherit_global: false };
     manifest(catalog.project, ordinary);
     const source = snapshot(catalog.registry);
     json(catalog, ["enable", "pack", "editor@1.0.0"]);
     const active = readManifest(catalog.project);
     for (const key of Object.keys(ordinary)) assert.deepEqual(active[key], ordinary[key]);
-    assertActivated(catalog, catalog.project, ["gamma"], pack);
+    assert.deepEqual(names(active, "packs"), ["editor@1.0.0"]);
+    assertActivated(catalog, catalog.project, ["beta", "gamma"]);
     const preview = unchanged(catalog.root, () =>
       json(catalog, ["disable", "pack", "editor@1.0.0", "--dry-run"]),
     );
@@ -479,35 +515,36 @@ describe("installed selection CLI", () => {
     );
     json(catalog, ["disable", "pack", "editor@1.0.0"]);
     assert.deepEqual(names(readManifest(catalog.project), "packs"), []);
-    assertActivated(catalog, catalog.project, ["alpha", "beta"]);
+    assertActivated(catalog, catalog.project, ["beta"]);
     assert.deepEqual(snapshot(catalog.registry), source);
   });
 
-  it("refuses skill, set, and inheritance edits while a pack is active", (context) => {
+  it("allows skill and inheritance edits while an additive pack stays active", (context) => {
     const catalog = catalogFor(context);
-    catalog.set("writers", ["beta"]);
     catalog.pack("editor", "1.0.0", ["gamma"]);
     json(catalog, ["enable", "pack", "editor@1.0.0"]);
-    for (const args of [
-      ["enable", "skill", "beta"],
-      ["disable", "skill", "alpha"],
-      ["enable", "set", "writers"],
-      ["disable", "set", "writers"],
-      ["inherit", "off"],
-    ])
-      namedError(unchangedProtected(catalog, () => json(catalog, args, 3)));
+    json(catalog, ["enable", "skill", "beta"]);
+    assert.deepEqual(names(readManifest(catalog.project), "packs"), ["editor@1.0.0"]);
+    assertActivated(catalog, catalog.project, ["alpha", "beta", "gamma"]);
+    json(catalog, ["inherit", "off"]);
+    assertActivated(catalog, catalog.project, ["beta", "gamma"]);
+    json(catalog, ["disable", "skill", "beta"]);
+    assertActivated(catalog, catalog.project, ["gamma"]);
   });
 
-  it("never disables a different pack name or version and accepts the matching unversioned name", (context) => {
+  it("refuses a version-mismatched pack disable while absent packs are write-free no-ops", (context) => {
     const catalog = catalogFor(context);
     catalog.pack("editor", "1.0.0", ["gamma"]);
     catalog.pack("editor", "2.0.0", ["beta"]);
     catalog.pack("other", "1.0.0", ["alpha"]);
     json(catalog, ["enable", "pack", "editor@1.0.0"]);
-    for (const reference of ["other", "editor@2.0.0"])
-      namedError(
-        unchangedProtected(catalog, () => json(catalog, ["disable", "pack", reference], 3)),
-      );
+    namedError(
+      unchangedProtected(catalog, () => json(catalog, ["disable", "pack", "editor@2.0.0"], 3)),
+      "E_PACK_SELECTION_MISMATCH",
+    );
+    const absent = unchangedProtected(catalog, () => json(catalog, ["disable", "pack", "other"]));
+    assert.equal(absent.data.changed, false);
+    assert.equal(absent.data.saved, false);
     json(catalog, ["disable", "pack", "editor"]);
     assert.deepEqual(names(readManifest(catalog.project), "packs"), []);
     assertActivated(catalog, catalog.project, ["alpha"]);

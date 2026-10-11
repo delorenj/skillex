@@ -1,5 +1,6 @@
 import { isDeepStrictEqual } from "node:util";
 import { canonicalSkill, packInventory, setMembers, setMemberTarget } from "./composition.js";
+import { verifyDerivedMembers } from "./derivation.js";
 import { discoverRegistry, discoverScopes } from "./discovery.js";
 import { fail, SkillexError } from "./error.js";
 import { parseManifest, readManifest } from "./manifest.js";
@@ -8,13 +9,14 @@ import type {
   ExcludedBinding,
   Resolution,
   ResolvedBinding,
-  ResolvedPack,
   ResolvedScope,
+  ResolvedSet,
   ResolveOptions,
   ScopeLocation,
   SkillOrigin,
   SkillsManifest,
 } from "./selection.js";
+import { readSetOrigin } from "./set-origin.js";
 
 const OPTIONAL_ABSENCE = new Set([
   "E_SET_MISSING",
@@ -86,8 +88,8 @@ async function resolveScope(
       kind,
       reference,
     });
-    const selectedPack = manifest.packs[0];
-    let pack: ResolvedPack | undefined;
+    const selectedSet = manifest.sets[0];
+    let set: ResolvedSet | undefined;
     if (manifest.scope && manifest.scope !== location.scope) {
       findings.push({
         code: "W_SCOPE_MISMATCH",
@@ -98,25 +100,74 @@ async function resolveScope(
         fix: "Correct the advisory scope label to match the manifest's location.",
       });
     }
-    if (selectedPack) {
+    if (selectedSet) {
+      // A set exclusively replaces this scope's root: inheritance is replaced,
+      // and competing selectors are refused unless this scope owns a derived
+      // set whose materialization already includes them.
       try {
-        const inventory = await packInventory(registry.root, selectedPack);
-        pack = {
-          name: inventory.name,
-          version: inventory.version,
-          path: inventory.path,
-          skillsRoot: inventory.skillsRoot,
-        };
+        const inventory = await setMembers(registry.root, selectedSet.name);
+        set = { name: selectedSet.name, path: inventory.path };
+        const derived = (await readSetOrigin(inventory.path))?.derived;
+        const owned =
+          derived !== undefined &&
+          derived.owner.scope === location.scope &&
+          derived.owner.root === location.root;
+        if (owned) {
+          const declared = {
+            packs: [...derived.packs],
+            skills: [...derived.skills],
+            removed: [...derived.removed],
+          };
+          const selected = {
+            packs: manifest.packs.map((pack) =>
+              pack.version === undefined ? pack.name : `${pack.name}@${pack.version}`,
+            ),
+            skills: manifest.skills.map((skill) => skill.name),
+            removed: [...manifest.exclude],
+          };
+          if (!isDeepStrictEqual(declared, selected)) {
+            fail(
+              "E_SET_DRIFT",
+              `Set ${selectedSet.name} was derived from a different selection than this manifest declares.`,
+              {
+                path: inventory.path,
+                detail: [
+                  `origin metadata: ${JSON.stringify(declared)}`,
+                  `manifest: ${JSON.stringify(selected)}`,
+                ],
+                fix: "Re-run the skillex enable/disable command that owns this derived set, or run skillex normalize --dry-run to plan the repair.",
+              },
+              ExitCode.REFUSED,
+            );
+          }
+        } else {
+          const competing =
+            manifest.packs.length > 0 || manifest.skills.length > 0 || manifest.exclude.length > 0;
+          if (competing)
+            fail(
+              "E_SET_CONFLICT",
+              `Set ${selectedSet.name} exclusively replaces this scope's root; packs, skills, and exclusions cannot be added through it.`,
+              {
+                path: manifest.path,
+                fix: `Run skillex enable pack or skillex enable skill to derive a scope-owned set from ${selectedSet.name}, or remove the competing selections. skillex normalize --dry-run plans this repair.`,
+              },
+              ExitCode.REFUSED,
+            );
+        }
+        // Even another scope's derived set must be a complete projection of
+        // its own sidecar. Only comparison to this manifest is owner-specific.
+        if (derived) await verifyDerivedMembers(registry.root, inventory, derived);
         for (const name of inventory.names) {
-          contribute(bindings, name, await canonicalSkill(registry.root, name), [
-            origin("pack", `${inventory.name}@${inventory.version}`),
+          contribute(bindings, name, await setMemberTarget(registry.root, inventory.path, name), [
+            origin("set", selectedSet.name),
           ]);
         }
       } catch (error) {
-        if (!optionalAbsence(error, selectedPack.optional, findings, location.scope)) throw error;
-        // A full loadout cannot degrade to a subset or an ordinary selection.
+        // An optional absent set skips its whole root replacement; a root that a
+        // full set cannot honor is never degraded to a partial activation.
+        if (!optionalAbsence(error, selectedSet.optional, findings, location.scope)) throw error;
         bindings.clear();
-        pack = undefined;
+        set = undefined;
       }
     } else {
       if (manifest.inheritGlobal && inherited) {
@@ -127,52 +178,17 @@ async function resolveScope(
           ]);
         }
       }
-      for (const selectedSet of manifest.sets) {
-        const contribution = origin("set", selectedSet.name);
+      for (const selectedPack of manifest.packs) {
         try {
-          const inventory = await setMembers(registry.root, selectedSet.name);
-          const omit = new Set(selectedSet.exclude);
-          const include =
-            selectedSet.include === undefined ? undefined : new Set(selectedSet.include);
+          const inventory = await packInventory(registry.root, selectedPack);
+          const reference = `${inventory.name}@${inventory.version}`;
           for (const name of inventory.names) {
-            if (omit.has(name) || (include && !include.has(name))) {
-              excluded.push({
-                name,
-                origins: [contribution],
-                by: "set",
-                reference: selectedSet.name,
-              });
-            }
-          }
-          const requested =
-            selectedSet.include === undefined ? inventory.names : [...new Set(selectedSet.include)];
-          for (const name of requested.filter((member) => !omit.has(member))) {
-            try {
-              if (!inventory.names.includes(name)) {
-                fail(
-                  "E_SET_MEMBER_MISSING",
-                  `Set ${selectedSet.name} has no member named ${name}.`,
-                  {
-                    path: inventory.path,
-                    name,
-                    fix: "Correct the set include list or add the canonical reference.",
-                  },
-                  ExitCode.REFUSED,
-                );
-              }
-              contribute(
-                bindings,
-                name,
-                await setMemberTarget(registry.root, inventory.path, name),
-                [contribution],
-              );
-            } catch (error) {
-              if (!optionalAbsence(error, selectedSet.optional, findings, location.scope))
-                throw error;
-            }
+            contribute(bindings, name, await canonicalSkill(registry.root, name), [
+              origin("pack", reference),
+            ]);
           }
         } catch (error) {
-          if (!optionalAbsence(error, selectedSet.optional, findings, location.scope)) throw error;
+          if (!optionalAbsence(error, selectedPack.optional, findings, location.scope)) throw error;
         }
       }
       for (const skill of manifest.skills) {
@@ -195,8 +211,8 @@ async function resolveScope(
       root: location.root,
       manifest,
       registry,
-      mode: selectedPack ? "pack" : "composed",
-      ...(pack === undefined ? {} : { pack }),
+      mode: selectedSet ? "set" : "composed",
+      ...(set === undefined ? {} : { set }),
       bindings: [...bindings.values()],
       excluded,
     };
@@ -256,7 +272,7 @@ export async function resolveSelectionWithManifests(
         : savedProjectManifest;
     const needsGlobal =
       locations.writeScopes.includes("global") ||
-      (projectManifest?.inheritGlobal && projectManifest.packs.length === 0);
+      (projectManifest?.inheritGlobal && projectManifest.sets.length === 0);
     const scopes: ResolvedScope[] = [];
     let global: ResolvedScope | undefined;
     const context = { ...options, home: locations.global.root };

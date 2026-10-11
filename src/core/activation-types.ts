@@ -11,7 +11,8 @@ export interface OwnedNode {
 }
 
 export interface SourceRevision {
-  readonly kind: "catalog" | "pack";
+  /** Legacy receipts recorded "pack" for whole-root pack sources; they stay readable. */
+  readonly kind: "catalog" | "pack" | "set";
   readonly path: string;
   readonly commit: string | null;
   readonly reason: string | null;

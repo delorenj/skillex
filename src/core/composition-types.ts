@@ -17,7 +17,12 @@ export interface CompositionDetails {
 }
 
 export interface CompositionChange {
-  readonly action: "create-directory" | "create-link" | "remove-link" | "write-manifest";
+  readonly action:
+    | "create-directory"
+    | "create-link"
+    | "remove-link"
+    | "write-manifest"
+    | "write-origin";
   readonly path: string;
   readonly target?: string;
 }

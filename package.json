@@ -1,6 +1,6 @@
 {
   "name": "@delorenj/skillex",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Canonical skill catalog and activation management for agentic CLIs.",
   "type": "module",
   "license": "MIT",

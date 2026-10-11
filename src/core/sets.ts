@@ -4,6 +4,7 @@ import { setMembers, setMemberTarget } from "./composition.js";
 import {
   collectedError,
   compositionError,
+  conflict,
   inspectCanonicalLink,
   listOutcome,
   mutateComposition,
@@ -23,8 +24,26 @@ import type {
 import { discoverRegistry } from "./discovery.js";
 import type { SkillexError } from "./error.js";
 import { inspectPath, requireDirectory } from "./filesystem.js";
+import {
+  executeImports,
+  planSourceMembers,
+  provenanceFrom,
+  releaseInventory,
+  resolveMemberTargets,
+  type SourceMembershipPlan,
+} from "./import-sources.js";
 import { parseManifest } from "./manifest.js";
-import { makeResult, type ResultEnvelope } from "./result.js";
+import { ExitCode, makeResult, type ResultEnvelope } from "./result.js";
+import { readSetOrigin, SET_ORIGIN_FILE, setOriginDocument } from "./set-origin.js";
+
+export interface CreateSetOptions extends CompositionOptions {
+  /** Existing local skill root whose entries become member references. */
+  readonly fromRoot?: string;
+  /** Repeatable explicit sources: existing paths or Git remotes. */
+  readonly from?: readonly string[];
+  /** Import source skills that have no canonical definition instead of refusing. */
+  readonly import?: boolean;
+}
 
 function validateName(name: string): void {
   parseManifest({ sets: [{ name }] }, "set name");
@@ -87,24 +106,72 @@ export async function showSet(
   }
 }
 
+/**
+ * Destination admission for source-backed creation: the requested name must
+ * be valid, and an existing set must be fully explained by the sources —
+ * every member claimed, recorded provenance agreeing. Runs unlocked as a
+ * preflight before any catalog write, and again inside composition planning
+ * under the lock.
+ */
+async function setAdmission(
+  registry: string,
+  name: string,
+  source: SourceMembershipPlan,
+): Promise<void> {
+  validateName(name);
+  const path = join(registry, "sets", name);
+  if (!(await inspectPath(path))) return;
+  // A repeated source-backed create must be a write-free no-op (or finish
+  // links an interrupted run left missing); members the sources do not
+  // explain are a named refusal, never a silent membership edit.
+  const current = await readSet(registry, name);
+  const wanted = new Set(source.members);
+  const unexpected = current.skills.filter((skill) => !wanted.has(skill.name));
+  if (unexpected.length)
+    conflict(
+      path,
+      `Source-backed creation found existing members outside the sources (${unexpected
+        .map((skill) => skill.name)
+        .join(", ")}); use set remove or a new name.`,
+    );
+  if (source.provenance !== undefined) {
+    const originPath = join(path, SET_ORIGIN_FILE);
+    if (await inspectPath(originPath)) {
+      // Identity is the source list; the historical `imported` outcome of the
+      // first run is not part of it, so a repeat that imports nothing matches.
+      const existing = await readSetOrigin(path);
+      if (
+        JSON.stringify(existing?.provenance?.sources ?? null) !==
+        JSON.stringify(source.provenance.sources ?? null)
+      )
+        conflict(originPath, "Set origin metadata already exists with different sources.");
+    }
+  }
+}
+
 async function prepareSet(
   name: string,
   names: readonly string[],
   operation: "create" | "add" | "remove",
   options: CompositionOptions,
+  source?: SourceMembershipPlan,
 ) {
   validateName(name);
   const registry = await discoverRegistry(options);
   const path = join(registry.root, "sets", name);
+  if (source !== undefined) await setAdmission(registry.root, name, source);
   const exists = await inspectPath(path);
   const previous =
     operation === "create" && !exists
       ? { kind: "set" as const, name, path, skills: [] }
       : await readSet(registry.root, name);
-  const requested = await requestedSkills(registry.root, names, path);
+  const requested =
+    source !== undefined
+      ? await resolveMemberTargets(registry.root, source.members, path, source.pending)
+      : await requestedSkills(registry.root, names, path);
   const desired = new Map(previous.skills.map((skill) => [skill.name, skill.path]));
   for (const [member, target] of requested) {
-    if (operation === "add") desired.set(member, target);
+    if (operation === "add" || source !== undefined) desired.set(member, target);
     else if (operation === "remove") desired.delete(member);
   }
   const composition: CompositionDetails = {
@@ -115,10 +182,23 @@ async function prepareSet(
   };
   const plan = await newPlan(registry, composition, options.dryRun === true);
   await planDirectory(plan, path);
+  if (source?.provenance !== undefined) {
+    // Record how this set was derived; a differing existing story was already
+    // refused by admission, so only an absent sidecar gets planned here.
+    const originPath = join(path, SET_ORIGIN_FILE);
+    if (!(await inspectPath(originPath))) {
+      plan.origin = {
+        path: originPath,
+        bytes: Buffer.from(setOriginDocument({ schema: 1, provenance: source.provenance })),
+      };
+      plan.changes.push({ action: "write-origin", path: originPath });
+    }
+  }
   for (const skill of previous.skills)
     await inspectCanonicalLink(plan, join(path, skill.name), skill.path);
   for (const [member, target] of requested) {
-    if (operation === "add") await planLink(plan, join(path, member), target);
+    if (operation === "add" || source !== undefined)
+      await planLink(plan, join(path, member), target);
     else if (operation === "remove") await planUnlink(plan, join(path, member), target);
   }
   return plan;
@@ -126,9 +206,60 @@ async function prepareSet(
 
 export async function createSet(
   name: string,
-  options: CompositionOptions = {},
+  options: CreateSetOptions = {},
 ): Promise<ResultEnvelope<CompositionMutationData | null>> {
-  return mutateComposition("set create", options, () => prepareSet(name, [], "create", options));
+  const command = "set create";
+  if (options.fromRoot === undefined && (options.from?.length ?? 0) === 0)
+    return mutateComposition(command, options, () => prepareSet(name, [], "create", options));
+  try {
+    const registry = await discoverRegistry(options);
+    // Phase 1 — acquire everything and validate every import write-free.
+    const planned = await planSourceMembers(registry.root, options);
+    try {
+      if (planned.findings.some((finding) => finding.severity === "error"))
+        return makeResult(command, null, { exit: ExitCode.REFUSED, findings: planned.findings });
+      // Phase 2 — preflight the destination before any catalog write: the
+      // creation name and any existing membership/provenance must admit this
+      // composition, or we refuse without having imported anything.
+      const provisional: SourceMembershipPlan = {
+        members: planned.names,
+        pending: planned.pending,
+        provenance: await provenanceFrom(planned.inventories, [...planned.pending.keys()].sort()),
+      };
+      await setAdmission(registry.root, name, provisional);
+      // Phase 3 — execute the imports for real, disclosing partial survival
+      // truthfully instead of rolling back or hiding it.
+      const executed: string[] = [];
+      if (options.dryRun !== true && planned.imports.length > 0) {
+        const outcome = await executeImports(planned.imports, options);
+        if (outcome.findings.length > 0)
+          return makeResult(command, null, {
+            exit: ExitCode.REFUSED,
+            findings: [...planned.findings, ...outcome.findings],
+          });
+        executed.push(...outcome.executed.map((item) => item.name));
+      }
+      // Phase 4 — compose. Dry-run keeps planned destinations; a real run
+      // resolves every member against the catalog it just wrote.
+      const source: SourceMembershipPlan = {
+        members: planned.names,
+        pending: options.dryRun === true ? planned.pending : new Map(),
+        provenance: await provenanceFrom(
+          planned.inventories,
+          options.dryRun === true ? [...planned.pending.keys()].sort() : executed,
+        ),
+      };
+      return await mutateComposition(command, options, () =>
+        prepareSet(name, [], "create", options, source),
+      ).then((result) =>
+        result.ok ? makeResult(command, result.data, { findings: planned.findings }) : result,
+      );
+    } finally {
+      for (const inventory of planned.inventories) await releaseInventory(inventory);
+    }
+  } catch (error) {
+    return compositionError(command, error);
+  }
 }
 
 export async function addSetSkills(

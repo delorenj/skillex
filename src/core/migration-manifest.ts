@@ -486,20 +486,15 @@ async function translateJson(
     if (raw[key] !== undefined && !Array.isArray(raw[key]))
       blocked(context.target, `${key} must be an array.`);
   const packs = (raw.packs ?? []) as unknown[];
-  if (
-    legacy &&
-    (packs.length > 1 ||
-      (packs.length &&
-        (((raw.skills ?? []) as unknown[]).length || ((raw.sets ?? []) as unknown[]).length)))
-  )
+  if (legacy && packs.length > 1)
     blocked(
       context.target,
-      "Legacy additive packs cannot be converted to an exclusive loadout without an authored replacement.",
+      "Legacy manifests declared at most one pack; multiple entries need an authored review.",
     );
   if (legacy && packs.length && context.scope === "project" && raw.inherit_global !== false)
     blocked(
       context.target,
-      "A legacy project pack may include inherited global skills. Supply an authored replacement that accounts for the modern exclusive loadout, or explicitly disable inheritance before migration.",
+      "A legacy project pack suppressed inherited global skills even while inherit_global stayed enabled; the corrected additive semantics would compose them instead. Choose the intended membership explicitly before migration.",
     );
   const output: Json = { ...raw };
   if (raw.skills !== undefined) {
@@ -509,6 +504,11 @@ async function translateJson(
     output.skills = [...new Set(names)];
   }
   if (raw.sets !== undefined) {
+    if (legacy && (raw.sets as unknown[]).length > 1)
+      blocked(
+        context.target,
+        "Legacy additive set selections cannot map to one exclusive root replacement; run skillex normalize --dry-run to plan the exact-membership replacement.",
+      );
     const sets: unknown[] = [];
     for (const entry of raw.sets as unknown[]) {
       if (typeof entry === "string") {
@@ -558,14 +558,16 @@ async function translateJson(
           "sets[].include: [] meant all legacy members; omit include to retain that meaning.",
         );
       }
-      for (const key of ["include", "exclude"]) {
-        if (!Array.isArray(next[key])) continue;
-        next[key] = next[key].map((name: unknown) => {
-          if (typeof name !== "string") return name;
-          const member = join(context.registry, "sets", entry.name as string, name);
-          return own(nameMap, member) ?? own(nameMap, `sets/${entry.name}/${name}`) ?? name;
-        });
-      }
+      if (
+        (Array.isArray(next.include) && next.include.length) ||
+        (Array.isArray(next.exclude) && next.exclude.length)
+      )
+        blocked(
+          context.target,
+          `Filtered legacy set ${String(entry.name)} cannot filter an exclusive root replacement; run skillex normalize --dry-run to plan the exact-membership replacement.`,
+        );
+      delete next.include;
+      delete next.exclude;
       sets.push(next);
     }
     output.sets = sets;
@@ -770,6 +772,19 @@ async function verifySelection(
   dependencies: Set<string>,
 ): Promise<void> {
   const manifest = parseManifest(raw, context.target);
+  if (
+    manifest.sets.length &&
+    (manifest.packs.length || manifest.skills.length || manifest.exclude.length)
+  )
+    fail(
+      "E_MIGRATION_MANIFEST_MAPPING",
+      "A selected set exclusively replaces this scope's root; legacy selections alongside it cannot be translated verbatim.",
+      {
+        path: context.target,
+        fix: "Run skillex normalize --dry-run to plan the exact-membership replacement, or supply mapping.manifests for this exact path with an explicitly authored current-schema replacement.",
+      },
+      ExitCode.REFUSED,
+    );
   const mappedValues = new Set(Object.values(nameMap));
   const skill = async (name: string) => {
     if (
@@ -780,16 +795,17 @@ async function verifySelection(
       dependencies.add(`catalog:all-skills/${name}`);
     else await canonicalSkill(context.registry, name);
   };
-  if (manifest.packs[0]) {
-    const pack = manifest.packs[0];
-    const planned = Object.values(context.options.mapping?.packs ?? {}).some(
-      (value) => value.name === pack.name && (!pack.version || value.version === pack.version),
-    );
-    if (context.options.apply !== true && planned) {
-      dependencies.add(`composition:packs/${pack.name}${pack.version ? `/${pack.version}` : ""}`);
-      return;
+  if (manifest.packs.length) {
+    for (const pack of manifest.packs) {
+      const planned = Object.values(context.options.mapping?.packs ?? {}).some(
+        (value) => value.name === pack.name && (!pack.version || value.version === pack.version),
+      );
+      if (context.options.apply !== true && planned) {
+        dependencies.add(`composition:packs/${pack.name}${pack.version ? `/${pack.version}` : ""}`);
+        continue;
+      }
+      for (const name of (await packInventory(context.registry, pack)).names) await skill(name);
     }
-    for (const name of (await packInventory(context.registry, pack)).names) await skill(name);
     return;
   }
   for (const set of manifest.sets) {
@@ -802,8 +818,7 @@ async function verifySelection(
       continue;
     }
     const members = await setMembers(context.registry, set.name);
-    for (const name of set.include ?? members.names) {
-      if (set.exclude.includes(name)) continue;
+    for (const name of members.names) {
       if (!members.names.includes(name))
         blocked(
           context.target,

@@ -6,7 +6,7 @@ import { isDeepStrictEqual } from "node:util";
 import { fail, SkillexError } from "./error.js";
 import { requireDirectory } from "./filesystem.js";
 import { parseManifest } from "./manifest.js";
-import { ExitCode } from "./result.js";
+import { type Diagnostic, ExitCode } from "./result.js";
 import type { SkillsManifest } from "./selection.js";
 
 export interface SelectionManifestSnapshot {
@@ -15,6 +15,11 @@ export interface SelectionManifestSnapshot {
   readonly exists: boolean;
   readonly raw: Readonly<Record<string, unknown>> | null;
   readonly manifest: SkillsManifest | null;
+  /**
+   * Parse findings a tolerant read recovered from a declaration that ordinary
+   * sync refuses. Present only when `manifest` is null while `raw` was read.
+   */
+  readonly parseFindings?: readonly Diagnostic[];
 }
 
 /** The declaration may already be saved even when later durability checks fail. */
@@ -44,6 +49,7 @@ interface StoredFile {
 interface Evidence {
   readonly context: Context;
   readonly file?: StoredFile;
+  readonly tolerant: boolean;
 }
 
 const snapshots = new WeakMap<object, Evidence>();
@@ -188,7 +194,12 @@ async function readStored(path: string): Promise<StoredFile | undefined> {
 function parseBytes(
   bytes: Buffer,
   path: string,
-): { raw: Readonly<Record<string, unknown>>; manifest: SkillsManifest } {
+  tolerant = false,
+): {
+  raw: Readonly<Record<string, unknown>>;
+  manifest: SkillsManifest | null;
+  parseFindings?: readonly Diagnostic[];
+} {
   let text: string;
   try {
     text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
@@ -207,32 +218,52 @@ function parseBytes(
       fix: "Correct the JSON syntax; comments and trailing commas are not supported.",
     });
   }
-  const manifest = parseManifest(raw, path);
-  return { raw: raw as Readonly<Record<string, unknown>>, manifest };
+  try {
+    return { raw: raw as Readonly<Record<string, unknown>>, manifest: parseManifest(raw, path) };
+  } catch (error) {
+    // Tolerant readers (normalize) keep the raw declaration and its findings so
+    // they can plan an exact-membership repair ordinary sync must refuse. Only
+    // object-shaped declarations with named findings can be normalized.
+    const shaped = typeof raw === "object" && raw !== null && !Array.isArray(raw);
+    if (!tolerant || !shaped || !(error instanceof SkillexError)) throw error;
+    return {
+      raw: raw as Readonly<Record<string, unknown>>,
+      manifest: null,
+      parseFindings: [...error.findings],
+    };
+  }
 }
 
-function snapshot(context: Context, file?: StoredFile): SelectionManifestSnapshot {
-  const parsed = file ? parseBytes(file.bytes, context.path) : null;
+function snapshot(
+  context: Context,
+  file?: StoredFile,
+  tolerant = false,
+): SelectionManifestSnapshot {
+  const parsed = file ? parseBytes(file.bytes, context.path, tolerant) : null;
   const value: SelectionManifestSnapshot = Object.freeze({
     root: context.root,
     path: context.path,
     exists: file !== undefined,
     raw: parsed?.raw ?? null,
     manifest: parsed?.manifest ?? null,
+    ...(parsed?.parseFindings === undefined ? {} : { parseFindings: parsed.parseFindings }),
   });
-  snapshots.set(value, { context, ...(file ? { file } : {}) });
+  snapshots.set(value, { context, tolerant, ...(file ? { file } : {}) });
   return value;
 }
 
 /** Inspect one source declaration. Missing .agents/skills.json never creates anything. */
-export async function readSelectionManifest(root: string): Promise<SelectionManifestSnapshot> {
+export async function readSelectionManifest(
+  root: string,
+  options: { readonly tolerant?: boolean } = {},
+): Promise<SelectionManifestSnapshot> {
   let path = root;
   try {
     const context = await contextFor(root);
     path = context.path;
     const file = context.parents.has(context.agents) ? await readStored(path) : undefined;
     await assertParents(context);
-    return snapshot(context, file);
+    return snapshot(context, file, options.tolerant === true);
   } catch (error) {
     throw failure(error, path);
   }
@@ -320,7 +351,10 @@ export async function writeSelectionManifest(
     const current = await assertPrevious(context, prior);
     if (
       current &&
-      isDeepStrictEqual(parseBytes(current.bytes, context.path).manifest, proposed.manifest)
+      isDeepStrictEqual(
+        parseBytes(current.bytes, context.path, prior.tolerant).manifest,
+        proposed.manifest,
+      )
     ) {
       return snapshot(context, current);
     }

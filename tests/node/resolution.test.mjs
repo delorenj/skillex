@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { it } from "node:test";
 import { resolveSelection } from "@delorenj/skillex";
@@ -13,40 +12,65 @@ import {
 
 const names = (scope) => scope.bindings.map((binding) => binding.name);
 
-it("composes inheritance, declared sets, and explicit skills with complete provenance", async (t) => {
+it("resolves set mode through a scope-owned derived set with complete provenance", async (t) => {
   const f = createResolutionFixture(t, resolveSelection);
   for (const name of ["shared", "zeta", "alpha", "local-only", "exclude-me"]) f.skill(name);
   f.set("first", ["zeta", "shared", "exclude-me"]);
-  f.set("second", ["alpha", "shared"]);
-  const globalManifest = f.manifest(f.home, { skills: ["shared"] });
+  const declaration = { base: "first", packs: [], skills: ["local-only"], removed: ["exclude-me"] };
+  const derived = f.derivedSet(
+    { scope: "project", root: f.project },
+    "first",
+    ["zeta", "shared", "local-only"],
+    declaration,
+  );
   const projectManifest = f.manifest(f.project, {
-    sets: ["first", "second"],
-    skills: ["local-only", "shared"],
+    sets: [derived.name],
+    skills: ["local-only"],
     exclude: ["exclude-me"],
   });
 
   const result = await f.resolve();
   assertSuccess(result);
   const project = resolvedScope(result);
-  assert.deepEqual(names(project), ["shared", "zeta", "alpha", "local-only"]);
-  assert.equal(project.mode, "composed");
+  assert.equal(project.mode, "set");
+  assert.equal(project.set.name, derived.name);
+  assert.equal(project.set.path, derived.path);
+  assert.deepEqual(names(project), ["local-only", "shared", "zeta"]);
   const shared = project.bindings.find((binding) => binding.name === "shared");
   assert.equal(shared.path, join(f.registry, "all-skills", "shared"));
   assert.ok(
-    shared.origins.some(
-      (origin) => origin.scope === "global" && origin.manifest === globalManifest,
-    ),
+    shared.origins.some((origin) => origin.kind === "set" && origin.manifest === projectManifest),
   );
-  assert.ok(shared.origins.some((origin) => origin.kind === "inherit"));
-  assert.ok(
-    shared.origins.some((origin) => origin.kind === "skill" && origin.manifest === projectManifest),
+  const local = project.bindings.find((binding) => binding.name === "local-only");
+  assert.ok(local.origins.some((origin) => origin.kind === "set"));
+  assert.equal(
+    project.bindings.some((binding) => binding.name === "exclude-me"),
+    false,
   );
-  for (const set of ["first", "second"]) {
-    assert.ok(
-      shared.origins.some((origin) => origin.kind === "set" && origin.reference.includes(set)),
-    );
-  }
-  assert.ok(project.excluded.some((entry) => entry.name === "exclude-me" && entry.by === "scope"));
+});
+
+it("set extras on a shared set are refused unless the scope owns the derived set", async (t) => {
+  const f = createResolutionFixture(t, resolveSelection);
+  f.skill("shared");
+  f.skill("extra");
+  f.set("shared-base", ["shared"]);
+  f.manifest(f.project, { sets: ["shared-base"], skills: ["extra"] });
+  assertFailure(await f.resolve(), "E_SET_CONFLICT");
+});
+
+it("derived-set drift between the sidecar and the manifest is refused", async (t) => {
+  const f = createResolutionFixture(t, resolveSelection);
+  f.skill("shared");
+  f.skill("extra");
+  f.set("base", ["shared"]);
+  const derived = f.derivedSet({ scope: "project", root: f.project }, "base", ["shared", "extra"], {
+    base: "base",
+    packs: [],
+    skills: ["extra"],
+    removed: [],
+  });
+  f.manifest(f.project, { sets: [derived.name], skills: [] });
+  assertFailure(await f.resolve(), "E_SET_DRIFT");
 });
 
 it("project-only targeting still resolves global inheritance by default", async (t) => {
@@ -108,15 +132,15 @@ it("a project may explicitly re-enable a skill excluded globally", async (t) => 
   assert.ok(resolvedScope(result, "global").excluded.some((entry) => entry.name === "shared"));
 });
 
-it("scope exclusions apply after direct entries and inherited or set contributions", async (t) => {
+it("scope exclusions apply after direct entries and inherited or pack contributions", async (t) => {
   const f = createResolutionFixture(t, resolveSelection);
-  for (const name of ["inherited", "from-set", "direct", "keep"]) f.skill(name);
-  f.set("selection", ["from-set", "keep"]);
+  for (const name of ["inherited", "from-pack", "direct", "keep"]) f.skill(name);
+  f.pack("group", "1.0.0", ["from-pack", "keep"]);
   f.manifest(f.home, { skills: ["inherited"] });
   f.manifest(f.project, {
-    sets: ["selection"],
+    packs: ["group@1.0.0"],
     skills: ["direct", "inherited"],
-    exclude: ["inherited", "from-set", "direct"],
+    exclude: ["inherited", "from-pack", "direct"],
   });
 
   const result = await f.resolve();
@@ -127,52 +151,49 @@ it("scope exclusions apply after direct entries and inherited or set contributio
     resolvedScope(result)
       .excluded.map((entry) => entry.name)
       .sort(),
-    ["direct", "from-set", "inherited"],
+    ["direct", "from-pack", "inherited"],
   );
 });
 
-it("set include and exclude filters run before resolving unselected broken references", async (t) => {
+it("a set resolves every member wholesale; broken members are errors", async (t) => {
   const f = createResolutionFixture(t, resolveSelection);
   f.skill("good");
-  f.set("filtered", ["good", "broken", "unselected"]);
-  f.manifest(f.project, {
-    sets: [{ name: "filtered", include: ["good", "broken"], exclude: ["broken"] }],
-  });
+  f.set("wholesale", ["good", "broken", "unselected"]);
+  f.manifest(f.project, { sets: ["wholesale"] });
 
-  const result = await f.resolve();
-  assertSuccess(result);
-  assert.deepEqual(names(resolvedScope(result)), ["good"]);
+  // No filters exist anymore: the broken member link is resolved and refused.
+  assertFailure(await f.resolve(), "E_SKILL_MISSING");
 });
 
-it("a requested include member absent from a required set is an error", async (t) => {
+it("a set member whose canonical definition is missing is an error", async (t) => {
   const f = createResolutionFixture(t, resolveSelection);
   f.skill("good");
-  f.set("filtered", ["good"]);
-  f.manifest(f.project, { sets: [{ name: "filtered", include: ["missing"] }] });
-  assertFailure(await f.resolve(), "E_SET_MEMBER_MISSING");
+  f.set("has-broken", ["good", "missing"]);
+  f.manifest(f.project, { sets: ["has-broken"] });
+  assertFailure(await f.resolve(), "E_SKILL_MISSING");
 });
 
-it("an optional missing set reports partial resolution while preserving direct selections", async (t) => {
+it("an optional missing set reports partial resolution with no partial activation", async (t) => {
   const f = createResolutionFixture(t, resolveSelection);
   f.skill("keep");
-  f.manifest(f.project, { sets: [{ name: "absent", optional: true }], skills: ["keep"] });
+  f.manifest(f.project, { sets: [{ name: "absent", optional: true }] });
   const result = await f.resolve();
   assertOptionalSkip(result);
-  assert.deepEqual(names(resolvedScope(result)), ["keep"]);
+  assert.deepEqual(names(resolvedScope(result)), []);
 });
 
-it("optional unresolved set members remain visible without discarding valid members", async (t) => {
+it("an optional set with unresolved members skips whole-set activation", async (t) => {
   const f = createResolutionFixture(t, resolveSelection);
   f.skill("good");
   f.set("partly-present", ["good", "broken"]);
   f.manifest(f.project, { sets: [{ name: "partly-present", optional: true }] });
   const result = await f.resolve();
   assertOptionalSkip(result);
-  assert.deepEqual(names(resolvedScope(result)), ["good"]);
+  assert.deepEqual(names(resolvedScope(result)), []);
   assert.ok(result.findings.some((finding) => JSON.stringify(finding).includes("broken")));
 });
 
-it("optional missing include members report a skip and retain present requested members", async (t) => {
+it("optional set filters are legacy fields refused before resolution", async (t) => {
   const f = createResolutionFixture(t, resolveSelection);
   f.skill("good");
   f.set("filtered", ["good"]);
@@ -180,8 +201,7 @@ it("optional missing include members report a skip and retain present requested 
     sets: [{ name: "filtered", include: ["good", "missing"], optional: true }],
   });
   const result = await f.resolve();
-  assertOptionalSkip(result);
-  assert.deepEqual(names(resolvedScope(result)), ["good"]);
+  assertFailure(result, "E_LEGACY_FIELD");
 });
 
 for (const [field, reference, code] of [
@@ -196,37 +216,23 @@ for (const [field, reference, code] of [
   });
 }
 
-it("an exclusive pack resolves its manifest without a materialized skills directory", async (t) => {
+it("an exclusive set resolves without reading a malformed global manifest", async (t) => {
   const f = createResolutionFixture(t, resolveSelection);
-  f.skill("packed");
-  const packRoot = f.pack("focus", "1.0.0", ["packed"]);
+  f.skill("member");
+  const setRoot = f.set("focus", ["member"]);
   f.file(join(f.home, ".agents", "skills.json"), "not json\n");
   f.manifest(f.project, {
-    packs: ["focus@1.0.0"],
-    sets: ["dormant-missing-set"],
-    skills: ["dormant-missing-skill"],
-    exclude: ["packed"],
+    sets: ["focus"],
     inherit_global: true,
   });
 
   const result = await f.resolve();
   assertSuccess(result);
   const project = resolvedScope(result);
-  assert.equal(project.mode, "pack");
-  assert.deepEqual(names(project), ["packed"]);
-  assert.equal(project.pack.name, "focus");
-  assert.equal(project.pack.version, "1.0.0");
-  assert.equal(project.pack.path, packRoot);
-  assert.equal(existsSync(join(packRoot, "skills")), false);
-  assert.deepEqual(
-    project.manifest.skills.map((skill) => skill.name),
-    ["dormant-missing-skill"],
-  );
-  assert.deepEqual(
-    project.manifest.sets.map((set) => set.name),
-    ["dormant-missing-set"],
-  );
-  assert.deepEqual(project.manifest.exclude, ["packed"]);
+  assert.equal(project.mode, "set");
+  assert.deepEqual(names(project), ["member"]);
+  assert.equal(project.set.name, "focus");
+  assert.equal(project.set.path, setRoot);
   assert.equal(project.manifest.inheritGlobal, true);
   assert.deepEqual(
     result.data.scopes.map((scope) => scope.scope),
@@ -234,53 +240,52 @@ it("an exclusive pack resolves its manifest without a materialized skills direct
   );
 });
 
-it("disabling a pack restores the retained composition and its exclusions", async (t) => {
+it("removing a pack from a composed selection retains the rest and its exclusions", async (t) => {
   const f = createResolutionFixture(t, resolveSelection);
-  for (const name of ["global-skill", "set-skill", "local-skill", "packed"]) f.skill(name);
-  f.set("ordinary", ["set-skill"]);
+  for (const name of ["global-skill", "local-skill", "packed"]) f.skill(name);
   f.pack("focus", "1.0.0", ["packed"]);
   f.manifest(f.home, { skills: ["global-skill"] });
-  const ordinary = {
-    sets: ["ordinary"],
-    skills: ["local-skill"],
-    exclude: ["set-skill", "packed"],
-  };
+  const ordinary = { skills: ["local-skill"], exclude: ["packed"] };
   f.manifest(f.project, { ...ordinary, packs: ["focus@1.0.0"] });
-  const active = await f.resolve();
-  assertSuccess(active);
-  assert.deepEqual(names(resolvedScope(active)), ["packed"]);
+  const composed = await f.resolve();
+  assertSuccess(composed);
+  assert.equal(resolvedScope(composed).mode, "composed");
+  assert.deepEqual(names(resolvedScope(composed)), ["global-skill", "local-skill"]);
 
   f.manifest(f.project, { ...ordinary, packs: [] });
   const restored = await f.resolve();
   assertSuccess(restored);
   assert.equal(resolvedScope(restored).mode, "composed");
   assert.deepEqual(names(resolvedScope(restored)), ["global-skill", "local-skill"]);
-  assert.ok(resolvedScope(restored).excluded.some((entry) => entry.name === "set-skill"));
+  assert.ok(resolvedScope(restored).excluded.some((entry) => entry.name === "packed"));
 });
 
-it("an optional missing pack never substitutes the dormant composition", async (t) => {
+it("an optional missing pack is a skip that never substitutes the composition", async (t) => {
   const f = createResolutionFixture(t, resolveSelection);
   f.skill("dormant");
-  f.file(join(f.home, ".agents", "skills.json"), "not json\n");
-  f.manifest(f.project, { packs: [{ name: "absent", optional: true }], skills: ["dormant"] });
+  f.manifest(f.project, {
+    packs: [{ name: "absent", optional: true }],
+    skills: ["dormant"],
+    inherit_global: false,
+  });
   const result = await f.resolve();
   assertOptionalSkip(result);
-  assert.equal(resolvedScope(result).mode, "pack");
-  assert.deepEqual(names(resolvedScope(result)), []);
+  assert.equal(resolvedScope(result).mode, "composed");
+  assert.deepEqual(names(resolvedScope(result)), ["dormant"]);
 });
 
-it("auto targeting resolves global writes even when the project uses an exclusive pack", async (t) => {
+it("auto targeting resolves global writes even when the project selects an exclusive set", async (t) => {
   const f = createResolutionFixture(t, resolveSelection);
   f.skill("global-skill");
-  f.skill("packed");
-  f.pack("focus", "1.0.0", ["packed"]);
+  f.skill("member");
+  f.set("focus", ["member"]);
   f.manifest(f.home, { skills: ["global-skill"] });
-  f.manifest(f.project, { packs: ["focus@1.0.0"] });
+  f.manifest(f.project, { sets: ["focus"] });
   const result = await f.resolve({ scope: "auto" });
   assertSuccess(result);
   assert.deepEqual(result.data.writeScopes, ["global", "project"]);
   assert.deepEqual(names(resolvedScope(result, "global")), ["global-skill"]);
-  assert.deepEqual(names(resolvedScope(result)), ["packed"]);
+  assert.deepEqual(names(resolvedScope(result)), ["member"]);
 });
 
 it("both-scope targeting validates global input even when project inheritance is disabled", async (t) => {
@@ -302,21 +307,26 @@ it("versionless pack selection uses semantic version ordering", async (t) => {
   f.manifest(f.project, { packs: ["versioned"] });
   const result = await f.resolve();
   assertSuccess(result);
-  assert.equal(resolvedScope(result).pack.version, "10.0.0");
+  assert.equal(resolvedScope(result).mode, "composed");
   assert.deepEqual(names(resolvedScope(result)), ["ten"]);
+  assert.ok(
+    resolvedScope(result)
+      .bindings.flatMap((binding) => binding.origins)
+      .some((origin) => origin.kind === "pack" && origin.reference === "versioned@10.0.0"),
+  );
 });
 
-it("multiple packs fail preflight even when neither pack exists", async (t) => {
+it("composed pack references fail on their first absent pack", async (t) => {
   const f = createResolutionFixture(t, resolveSelection);
   f.manifest(f.project, { packs: ["first", "second"] });
-  assertFailure(await f.resolve(), "E_MANIFEST_INVALID");
+  assertFailure(await f.resolve(), "E_PACK_MISSING");
 });
 
 for (const filter of ["include", "exclude"]) {
-  it(`rejects pack ${filter} filters instead of accepting ineffective selection`, async (t) => {
+  it(`rejects pack ${filter} filters as unknown manifest fields`, async (t) => {
     const f = createResolutionFixture(t, resolveSelection);
     f.manifest(f.project, { packs: [{ name: "focus", [filter]: [] }] });
-    assertFailure(await f.resolve(), "E_LEGACY_FIELD");
+    assertFailure(await f.resolve(), "E_MANIFEST_INVALID");
   });
 }
 
