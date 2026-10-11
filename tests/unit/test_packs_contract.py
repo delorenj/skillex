@@ -1129,8 +1129,9 @@ class TestCanonicalSchemaIsPublished:
     def test_schema_declares_sets(self) -> None:
         doc = json.loads(self.schema_path.read_text(encoding="utf-8"))
         assert doc["properties"]["sets"]["type"] == "array"
-        # A pack replaces the whole root, so at most one may ever be declared.
-        assert doc["properties"]["packs"]["maxItems"] == 1
+        # Published Node contract: sets replace roots; packs compose member links.
+        assert doc["properties"]["sets"]["maxItems"] == 1
+        assert "maxItems" not in doc["properties"]["packs"]
 
 
 @pytest.mark.integration
