@@ -122,6 +122,9 @@ def load_renderer(source, fleet):
         raise RuntimeError("cannot load the canonical config renderer")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
+    for name in ("expected_config", "is_render_of", "without_render_pins"):
+        if not callable(getattr(module, name, None)):
+            raise RuntimeError(f"canonical config renderer predates {name}; update hermes-agent-template")
     return module
 
 
@@ -139,12 +142,15 @@ def configure(profile, renderer, apply=False):
         base = renderer.load_yaml(renderer.BASE)
         current = renderer.load_yaml(cfg)
         old_delta = renderer.load_yaml(delta_path)
-        if current != renderer.deep_merge(base, old_delta):
+        # THE expected config is the renderer's (base + delta + every renderer pin). A bare
+        # deep_merge here called every terminal.cwd-pinned desk drift and stripped the pin on write.
+        if not renderer.is_render_of(current, base, old_delta, profile.name):
             raise RuntimeError(f"out-of-band config drift; absorb/inspect first: {profile.name}")
         delta = skill_delta(old_delta)
-        expected = renderer.deep_merge(base, delta)
-        before_other = copy.deepcopy(current)
-        after_other = copy.deepcopy(expected)
+        expected = renderer.expected_config(base, delta, profile.name)
+        # Renderer-owned pins may be refreshed; anything else outside external_dirs may not move.
+        before_other = renderer.without_render_pins(current)
+        after_other = renderer.without_render_pins(expected)
         for value in (before_other, after_other):
             value.get("skills", {}).pop("external_dirs", None)
         if before_other != after_other:

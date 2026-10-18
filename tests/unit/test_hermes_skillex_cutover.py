@@ -87,3 +87,65 @@ def test_hermes_bookkeeping_is_not_quarantined_but_archives_are(tmp_path):
     (root / ".sync_state").symlink_to(real)
     plan = helper().plan_root(profile, set())
     assert sorted(plan["children"]) == [".archive", ".hub", ".sync_state"]
+
+
+# The config gate asks THE canonical renderer for the expected config (base + delta + renderer pins).
+# A bare deep_merge here once refused every terminal.cwd-pinned PM desk as drift and stripped the pin
+# when it wrote (2026-10-18).
+RENDERER = Path(
+    __import__("os").environ.get(
+        "HERMES_PROFILE_RENDERER",
+        str(Path.home() / "code/33GOD/hermes-agent-template/scripts/hermes-profile-config.py"),
+    )
+)
+
+
+@pytest.mark.skipif(
+    not RENDERER.is_file(), reason="canonical hermes-agent-template renderer not on this host"
+)
+def test_configure_expects_and_preserves_renderer_pins(tmp_path, monkeypatch):
+    import yaml
+
+    fleet = tmp_path / "fleet"
+    project = tmp_path / "project"
+    project.mkdir()
+    profile = fleet / "profiles" / "x-pm"
+    profile.mkdir(parents=True)
+    (fleet / "config.yaml").write_text(
+        yaml.safe_dump(
+            {
+                "terminal": {"backend": "local", "cwd": "."},
+                "skills": {"external_dirs": ["legacy"]},
+            }
+        )
+    )
+    (fleet / "agents-registry.yaml").write_text(
+        yaml.safe_dump({"agents": {"x-pm": {"profile_name": "x-pm", "project_path": str(project)}}})
+    )
+    (profile / "config.delta.yaml").write_text("{}\n")
+    monkeypatch.setenv("HERMES_FLEET_HOME", str(fleet))
+    monkeypatch.delenv("HERMES_AGENTS_REGISTRY", raising=False)
+    module = helper()
+    renderer = module.load_renderer(RENDERER, fleet)
+    base = renderer.load_yaml(renderer.BASE)
+    cfg = profile / "config.yaml"
+
+    # A stale render (written before the registry row existed) is not drift: it is re-pinned.
+    renderer.write_generated(cfg, renderer.deep_merge(base, {}))
+    assert module.configure(profile, renderer, apply=True) is True
+    config = renderer.load_yaml(cfg)
+    assert config["terminal"]["cwd"] == str(project)
+    assert config["skills"]["external_dirs"] == []
+    assert "terminal" not in renderer.load_yaml(profile / "config.delta.yaml")
+    assert config == renderer.expected_config(
+        base, renderer.load_yaml(profile / "config.delta.yaml"), "x-pm"
+    )
+    assert module.configure(profile, renderer, apply=True) is False  # converged: byte no-op
+
+    # Real out-of-band drift is still refused before any write.
+    config["operator"] = {"out_of_band": True}
+    renderer.write_generated(cfg, config)
+    before = cfg.read_bytes()
+    with pytest.raises(RuntimeError, match="out-of-band config drift"):
+        module.configure(profile, renderer, apply=True)
+    assert cfg.read_bytes() == before
