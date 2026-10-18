@@ -25,6 +25,7 @@ SAFE_METADATA = {
     ".curator_suppressed",
     ".sync_state",
     ".bundled_manifest",
+    ".curator_ledger.jsonl",
 }
 SAFE_METADATA_DIRS = {".curator_backups", ".locks"}
 

@@ -119,6 +119,7 @@ it("strict ownership tolerates Hermes bookkeeping but still refuses archives and
   f.file(join(f.skills, ".sync_state"), "{}");
   f.file(join(f.skills, ".curator_backups", "2026-10-01T18-00-00Z", "skills.tar.gz"), "tar");
   f.file(join(f.skills, ".bundled_manifest"), "{}");
+  f.file(join(f.skills, ".curator_ledger.jsonl"), "");
   f.file(join(f.skills, ".locks", "0f1e2d.lock"), "");
   assert.equal((await showProfile("work", f.options)).exit, 0);
   ok(await syncProfile("work", f.options));
