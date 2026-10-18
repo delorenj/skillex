@@ -9,16 +9,19 @@ import { ExitCode } from "./result.js";
 
 // Hermes-owned bookkeeping that may live inside a strict skills root. None of it is
 // discoverable as a skill: usage counters, curator scheduler/suppression state, the
-// org sync manifest, and the curator's pre-run tarball store. .hub and .archive stay
-// refused: they mean hub installs or curator archival moved content in or out.
+// org sync manifest, the bundled-skill sync manifest, the curator's pre-run tarball
+// store, and the skill manager's per-skill lock files (tools/skill_manager_tool.py).
+// .hub and .archive stay refused: they mean hub installs or curator archival moved
+// content in or out.
 const metadataFiles = new Set([
   ".usage.json",
   ".usage.json.lock",
   ".curator_state",
   ".curator_suppressed",
   ".sync_state",
+  ".bundled_manifest",
 ]);
-const metadataDirectories = new Set([".curator_backups"]);
+const metadataDirectories = new Set([".curator_backups", ".locks"]);
 
 function hermesMetadata(item: ProfileLocalEntry): boolean {
   if (item.kind === "file") return metadataFiles.has(item.name);

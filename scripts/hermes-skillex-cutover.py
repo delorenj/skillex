@@ -24,8 +24,9 @@ SAFE_METADATA = {
     ".curator_state",
     ".curator_suppressed",
     ".sync_state",
+    ".bundled_manifest",
 }
-SAFE_METADATA_DIRS = {".curator_backups"}
+SAFE_METADATA_DIRS = {".curator_backups", ".locks"}
 
 
 def safe_metadata(path):
