@@ -55,7 +55,7 @@ async def test_search_runs_safe_mocked_subprocess_and_parses_json(tmp_path):
             {
                 "project_path": str(project),
                 "query": "auth service; echo not-a-shell",
-                "provider": "fake",
+                "provider": "voyage",
                 "top_k": 3,
             },
         )
@@ -94,3 +94,29 @@ async def test_nonzero_subprocess_includes_return_code(tmp_path):
     with patch("asyncio.create_subprocess_exec", new=AsyncMock(return_value=process)):
         with pytest.raises(RuntimeError, match="return code 7: provider unavailable"):
             await execute_tool("status", {"project_path": str(project)})
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("tool", ["index", "search", "semantic_candidates", "explore"])
+async def test_fake_provider_is_refused_without_spawning_anything(tmp_path, tool):
+    project = make_project(tmp_path)
+    arguments = {"project_path": str(project), "provider": "fake"}
+    if tool != "index":
+        arguments["query"] = "anything"
+    with patch("asyncio.create_subprocess_exec", new=AsyncMock()) as spawn:
+        with pytest.raises(RuntimeError, match="test-only"):
+            await execute_tool(tool, arguments)
+    spawn.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_provider_defaults_to_a_real_one(tmp_path):
+    project = make_project(tmp_path)
+    process = SimpleNamespace(
+        returncode=0, communicate=AsyncMock(return_value=(b"ok", b"")), kill=lambda: None
+    )
+    with patch("asyncio.create_subprocess_exec", new=AsyncMock(return_value=process)) as spawn:
+        await execute_tool("status", {"project_path": str(project)})
+        await execute_tool("index", {"project_path": str(project)})
+    index_call = spawn.await_args_list[-1].args
+    assert index_call[index_call.index("--provider") + 1] == "voyage"

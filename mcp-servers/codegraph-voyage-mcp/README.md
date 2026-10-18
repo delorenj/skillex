@@ -45,7 +45,7 @@ Example MCP client configuration:
 }
 ```
 
-The server inherits `VOYAGE_API_KEY` from its environment. For the Voyage provider, load the variable from your secret manager before starting the server; never pass it as a tool argument.
+The server inherits the provider's API key (`VOYAGE_API_KEY`, `OPENROUTER_API_KEY` or `AUTOMATICAI_API_KEY`) from its environment. Load the variable from your secret manager before starting the server; never pass it as a tool argument.
 
 ## SSE transport
 
@@ -69,4 +69,4 @@ Every tool requires `project_path` (and search/explore also require `query`). Be
 
 ### Privacy
 
-`provider: "fake"` is offline and appropriate for CI. `provider: "voyage"` sends locally sanitized source-derived text to Voyage AI and requires `VOYAGE_API_KEY` in the server environment.
+The providers are `voyage` (default), `openrouter` and `automaticai`. Each sends locally sanitized source-derived text to a remote embeddings API and needs its key in the server environment. There is deliberately no `fake` provider here: its vectors are hashes of the text, not embeddings, and used to pollute real indexes.

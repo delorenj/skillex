@@ -15,7 +15,8 @@ import mcp.types as types
 from mcp.server import Server
 
 SERVER_NAME = "codegraph-voyage"
-DEFAULT_PROVIDER = "fake"
+REAL_PROVIDERS = ("voyage", "openrouter", "automaticai")
+DEFAULT_PROVIDER = "voyage"
 DEFAULT_MODEL = "voyage-code-4"
 DEFAULT_DIMENSIONS = 512
 DEFAULT_TOP_K = 10
@@ -38,7 +39,7 @@ PROJECT_PATH = {
     "minLength": 1,
     "description": "Absolute or relative path to a project containing .codegraph/codegraph.db",
 }
-PROVIDER = {"type": "string", "enum": ["fake", "voyage"], "default": DEFAULT_PROVIDER}
+PROVIDER = {"type": "string", "enum": list(REAL_PROVIDERS), "default": DEFAULT_PROVIDER}
 MODEL = {"type": "string", "minLength": 1, "default": DEFAULT_MODEL}
 DIMENSIONS = {"type": "integer", "minimum": 1, "default": DEFAULT_DIMENSIONS}
 QUERY = {"type": "string", "minLength": 1}
@@ -193,8 +194,11 @@ def _project_root(value: Any) -> Path:
 
 def _common_arguments(arguments: Mapping[str, Any]) -> list[str]:
     provider = arguments.get("provider", DEFAULT_PROVIDER)
-    if provider not in {"fake", "voyage"}:
-        raise ToolExecutionError("provider must be 'fake' or 'voyage'")
+    if provider not in REAL_PROVIDERS:
+        raise ToolExecutionError(
+            f"provider must be one of {', '.join(REAL_PROVIDERS)}; 'fake' is test-only "
+            "(hash vectors, not semantic embeddings) and is not available here"
+        )
     model = _safe_text(arguments.get("model", DEFAULT_MODEL), "model", required=True)
     dimensions = _positive_int(arguments.get("dimensions"), "dimensions", DEFAULT_DIMENSIONS)
     return [
