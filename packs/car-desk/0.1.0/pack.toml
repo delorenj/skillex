@@ -1,0 +1,7 @@
+[pack]
+name = "car-desk"
+version = "0.1.0"
+description = "Car desk tools (Holocene in-car desk, consumer car-desk): set voice, set model"
+
+[freeform]
+skills = [ "car-set-voice", "car-set-model" ]
