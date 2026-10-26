@@ -65,17 +65,21 @@ def box(tmp_path):
     return Box(tmp_path)
 
 
-def test_install_links_the_tracked_units_and_enables_timer_and_path(box):
+def test_install_links_the_tracked_units_and_enables_only_the_path(box):
     done = box.run("install")
     assert done.returncode == 0, done.stderr
     for unit in UNITS:
         link = box.user / unit
         assert link.is_symlink() and link.resolve() == (REPO / "systemd" / unit).resolve()
+    # The .timer is retired (candybar owns the schedule, 33GOD/candybar story 7.8):
+    # install enables only the .path trigger and warns if the timer is still enabled.
     assert box.calls() == [
         "--user daemon-reload",
         "--user reset-failed " + " ".join(UNITS),
-        "--user enable --now skillex-hermes-resync.timer skillex-hermes-resync.path",
+        "--user enable --now skillex-hermes-resync.path",
+        "--user is-enabled skillex-hermes-resync.timer",
     ]
+    assert "is retired" in done.stderr  # the fake systemctl answers is-enabled=enabled
     # the default layout needs no drop-in: the tracked units already say ~/code/skillex
     assert not list(box.user.glob("*.d"))
 
