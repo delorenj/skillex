@@ -2,7 +2,9 @@
 # Install, remove or inspect the systemd USER units that keep every Skillex-only
 # Hermes desk converged with the all-skills catalog. Idempotent.
 #
-#   install-hermes-resync.sh install     link the units, daemon-reload, enable --now timer + path
+#   install-hermes-resync.sh install     link the units, daemon-reload, enable --now the .path
+#                                        (the .timer is RETIRED: candybar owns the schedule —
+#                                        33GOD/candybar deploy/migration/ledger.yaml, story 7.8)
 #   install-hermes-resync.sh uninstall   disable --now, unlink the units and drop-ins
 #   install-hermes-resync.sh status      units, last run and catalog freshness; exit 1 if unhealthy
 #
@@ -24,7 +26,8 @@ SERVICE=skillex-hermes-resync.service
 TIMER=skillex-hermes-resync.timer
 PATHU=skillex-hermes-resync.path
 UNITS=("$SERVICE" "$TIMER" "$PATHU")
-ENABLED=("$TIMER" "$PATHU")
+# The .timer is retired (candybar schedules the resync); only the .path trigger is enabled.
+ENABLED=("$PATHU")
 
 ctl() { "$CTL" --user "$@"; }
 die() { echo "install-hermes-resync: $*" >&2; exit 1; }
@@ -99,11 +102,14 @@ Environment=PJ_SKILLS_REGISTRY_ROOT=$REPO"
   ctl daemon-reload
   ctl reset-failed "${UNITS[@]}" 2>/dev/null || true
   ctl enable --now "${ENABLED[@]}"
-  echo "enabled  $TIMER (startup + every 15 min) and $PATHU (catalog HEAD: $gitdir)"
+  if ctl is-enabled "$TIMER" >/dev/null 2>&1; then
+    echo "WARNING: $TIMER is retired — disable it: systemctl --user disable --now $TIMER" >&2
+  fi
+  echo "enabled  $PATHU (catalog HEAD: $gitdir); $TIMER stays retired (candybar owns the schedule)"
 }
 
 do_uninstall() {
-  ctl disable --now "${ENABLED[@]}" 2>&1 || true
+  ctl disable --now "$TIMER" "${ENABLED[@]}" 2>&1 || true
   ctl stop "$SERVICE" 2>/dev/null || true
   for unit in "${UNITS[@]}"; do
     local dst="$DEST/$unit"

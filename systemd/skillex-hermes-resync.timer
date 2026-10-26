@@ -1,3 +1,6 @@
+# RETIRED 2026-10-26: scheduling moved to candybar (33GOD/candybar deploy/migration/ledger.yaml,
+# id systemd:skillex-hermes-resync). Kept for rollback only — never enable this timer.
+# The companion .path trigger (catalog HEAD changes) stays on systemd.
 # Fallback for skillex-hermes-resync.path: soon after the user manager starts and
 # every 15 minutes. It catches what inotify cannot: selection edits (sets and
 # manifests need no catalog commit), a commit that landed while a run was in
