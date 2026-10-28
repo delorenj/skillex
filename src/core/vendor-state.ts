@@ -11,11 +11,12 @@ import {
   rmdir,
   unlink,
 } from "node:fs/promises";
-import { homedir, hostname } from "node:os";
+import { homedir } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
 import { validateActivationStateLocation } from "./activation-state.js";
 import { isWithin } from "./content.js";
 import { fail } from "./error.js";
+import { hostIdentity, localHostIdentities } from "./host-identity.js";
 import type { LockOptions } from "./lock.js";
 import { isSkillName } from "./manifest.js";
 import { ExitCode } from "./result.js";
@@ -374,7 +375,8 @@ function validateJournal(value: unknown, catalog: string, path: string): VendorJ
     !object(value) ||
     value.schema !== 1 ||
     value.catalog !== catalog ||
-    value.host !== hostname() ||
+    typeof value.host !== "string" ||
+    !localHostIdentities().includes(value.host) ||
     value.uid !== String(process.getuid?.() ?? 0) ||
     !["preparing", "ready"].includes(String(value.phase)) ||
     !Array.isArray(value.operations)
@@ -590,7 +592,7 @@ export function newVendorJournal(
   return {
     schema: 1,
     catalog,
-    host: hostname(),
+    host: hostIdentity(),
     uid: String(process.getuid?.() ?? 0),
     phase,
     operations,

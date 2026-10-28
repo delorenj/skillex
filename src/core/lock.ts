@@ -11,10 +11,11 @@ import {
   rmdir,
   unlink,
 } from "node:fs/promises";
-import { homedir, hostname } from "node:os";
+import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { fail, SkillexError } from "./error.js";
+import { hostIdentity, localHostIdentities } from "./host-identity.js";
 import { ExitCode } from "./result.js";
 
 export interface LockOptions {
@@ -137,8 +138,8 @@ function identityFrom(name: string, path: string): Identity {
   return { name, hostHash, pid, id };
 }
 
-function ownerGone(identity: Identity, localHostHash: string): boolean {
-  if (identity.hostHash !== localHostHash) return false;
+function ownerGone(identity: Identity, localHostHashes: ReadonlySet<string>): boolean {
+  if (!localHostHashes.has(identity.hostHash)) return false;
   try {
     process.kill(identity.pid, 0);
     return false;
@@ -277,7 +278,7 @@ async function claims(
   path: string,
   directory: Stats,
   resource: string,
-  localHostHash: string,
+  localHostHashes: ReadonlySet<string>,
 ): Promise<Claim[]> {
   if (!(await sameDirectory(path, directory))) stateFailure(path, "Lock directory disappeared.");
   const result: Claim[] = [];
@@ -290,7 +291,7 @@ async function claims(
     const claim: Claim = { ...identity, path: claimPath, identity: stat };
     if (!(await claimFiles(claim))) continue;
     const number = await readTicket(claim, resource);
-    if (ownerGone(claim, localHostHash)) {
+    if (ownerGone(claim, localHostHashes)) {
       await removeClaim(claim);
       continue;
     }
@@ -345,8 +346,11 @@ export async function withLock<T>(
   const started = performance.now();
   const base = statePath(options);
   const resourceHash = hash(resource);
-  const host = hostname();
+  const host = hostIdentity();
   const hostHash = hash(host);
+  // A claim this machine wrote under the bare hostname of an earlier release is
+  // still local: its owner pid can be checked and, if gone, reaped.
+  const localHashes: ReadonlySet<string> = new Set(localHostIdentities().map(hash));
   const id = randomUUID();
   const name = `${hostHash}.${process.pid}.${id}.claim`;
   let lockPath = base;
@@ -372,7 +376,7 @@ export async function withLock<T>(
       path: claimPath,
       identity: await lstat(claimPath),
     };
-    const peers = await claims(lockPath, directory, resourceHash, hostHash);
+    const peers = await claims(lockPath, directory, resourceHash, localHashes);
     const number =
       peers.reduce(
         (largest, peer) => (peer.number && peer.number > largest ? peer.number : largest),
@@ -400,7 +404,7 @@ export async function withLock<T>(
     await link(temporary, join(claimPath, ticketFile));
     await unlink(temporary);
     while (true) {
-      const current = await claims(lockPath, directory, resourceHash, hostHash);
+      const current = await claims(lockPath, directory, resourceHash, localHashes);
       if (!current.some((peer) => peer.name === name && peer.number === number)) {
         stateFailure(
           claimPath,
@@ -410,7 +414,7 @@ export async function withLock<T>(
       const blockers = current.filter(
         (peer) =>
           peer.name !== name &&
-          (peer.hostHash !== hostHash ||
+          (!localHashes.has(peer.hostHash) ||
             peer.number === undefined ||
             peer.number < number ||
             (peer.number === number && peer.name < name)),
@@ -425,7 +429,7 @@ export async function withLock<T>(
             path: lockPath,
             detail: blockers.map(
               (peer) =>
-                `PID ${peer.pid}, ${peer.hostHash === hostHash ? "local host" : "foreign host"}, claim ${peer.id}`,
+                `PID ${peer.pid}, ${localHashes.has(peer.hostHash) ? "local host" : "foreign host"}, claim ${peer.id}`,
             ),
             fix: "Retry after the owner finishes. Age never permits stealing a live or foreign-host claim.",
           },

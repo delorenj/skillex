@@ -110,6 +110,12 @@ export type {
   RunningLegacyWriter,
 } from "./core/doctor-types.js";
 export { SkillexError } from "./core/error.js";
+export {
+  type HostIdentitySources,
+  hostIdentity,
+  localHostIdentities,
+  resolveHostIdentity,
+} from "./core/host-identity.js";
 export type {
   ExecutedImport,
   ImportExecution,

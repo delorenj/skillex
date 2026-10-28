@@ -1,9 +1,10 @@
 import { createHash, randomUUID } from "node:crypto";
 import { type BigIntStats, constants } from "node:fs";
 import { link, lstat, mkdir, open, realpath, rename, unlink } from "node:fs/promises";
-import { homedir, hostname } from "node:os";
+import { homedir } from "node:os";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fail, SkillexError } from "./error.js";
+import { hostIdentity, localHostIdentities } from "./host-identity.js";
 import type { LockOptions } from "./lock.js";
 import { ExitCode } from "./result.js";
 
@@ -324,7 +325,8 @@ function documentFrom<T>(context: Context, bytes: Buffer): ReceiptDocument<T> {
     document.schema !== 2 ||
     document.scopeRoot !== context.scopeRoot ||
     document.activationRoot !== context.activationRoot ||
-    document.host !== hostname() ||
+    typeof document.host !== "string" ||
+    !localHostIdentities().includes(document.host) ||
     document.uid !== (process.getuid?.() ?? null)
   ) {
     refused(
@@ -511,7 +513,7 @@ export async function writeBoundReceipt<T>(
     let bytes: Buffer;
     try {
       bytes = Buffer.from(
-        `${JSON.stringify({ schema: 2, scopeRoot: context.scopeRoot, activationRoot: context.activationRoot, host: hostname(), uid: process.getuid?.() ?? null, data })}\n`,
+        `${JSON.stringify({ schema: 2, scopeRoot: context.scopeRoot, activationRoot: context.activationRoot, host: hostIdentity(), uid: process.getuid?.() ?? null, data })}\n`,
       );
     } catch {
       refused("E_RECEIPT_INVALID", context.path, "Receipt data must be serializable JSON.");
