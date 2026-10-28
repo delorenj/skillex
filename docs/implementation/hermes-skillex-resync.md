@@ -196,6 +196,22 @@ baked in. With none, `install` stops and says so (`brew install python`).
 
 The script finds `skillex` itself (`$SKILLEX_BIN`, PATH, the mise shim, `mise which`);
 the plist PATH starts with `~/.local/bin`, the mise shims and `/opt/homebrew/bin`.
+
+**A host whose PATH `skillex` is a different program** (for example a Python
+`skillex` uv tool that owns the Codex skill root and must stay first on the
+interactive PATH) installs the npm CLI somewhere private and pins it into the agent:
+
+```sh
+mise x node@24 -- npm install -g --prefix ~/.local/share/skillex-npm @delorenj/skillex@0.3.1
+SKILLEX_BIN=$HOME/.local/bin/skillex-npm scripts/install-hermes-resync.sh install   # a 2-line wrapper that runs it on Node 24
+```
+
+`SKILLEX_BIN` at install time is written into the plist's `EnvironmentVariables`.
+A later `install` or `status` without it keeps the pinned value (so neither reports
+`STALE`); `SKILLEX_BIN=` (set but empty) removes it. The value must be an absolute
+path to an executable file. Never `mise use -g npm:@delorenj/skillex` on such a host:
+`mise activate` puts tool bins ahead of `~/.local/bin` and would shadow the other
+`skillex` in every interactive shell.
 Nothing else in `hermes-skillex-resync.py` is Linux-specific: it uses `fcntl.flock`,
 process groups and `git`, all POSIX, and records `trigger: launchd` when
 `XPC_SERVICE_NAME` is the job label.

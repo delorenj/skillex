@@ -10,6 +10,9 @@
 #           (macOS has no candybar, so launchd also owns the schedule the retired
 #           .timer used to). Same install | uninstall | status. See
 #           docs/implementation/hermes-skillex-resync.md "macOS".
+#           SKILLEX_BIN=/abs/path/skillex at install pins the npm CLI into the agent
+#           (for a host whose PATH `skillex` is another program); it persists in the
+#           plist until a later install sets SKILLEX_BIN= (empty).
 #
 #   install-hermes-resync.sh install     link the units, daemon-reload, enable --now the .path
 #                                        (the .timer is RETIRED: candybar owns the schedule —
@@ -246,13 +249,38 @@ resolve_python() {
   return 1
 }
 
-# render_plist PYTHON GITDIR: the LaunchAgent, as XML, on stdout.
-render_plist() {
-  py3 - "$1" "$2" "$REPO" "$LABEL" "$INTERVAL_SECONDS" "$STATE" "$HOME" <<'PY'
+# SKILLEX_BIN: the npm @delorenj/skillex the agent must run, for a host whose PATH
+# `skillex` is a different program (e.g. a Python skillex that owns the Codex skill
+# root and must stay first on the interactive PATH). Set at install time it is baked
+# into the plist's EnvironmentVariables (hermes-skillex-resync.py honours it first);
+# unset keeps whatever the installed plist already carries, so `status` and a plain
+# re-install stay idempotent; set-but-empty (SKILLEX_BIN=) removes it.
+pinned_skillex_bin() {
+  if [[ -n "${SKILLEX_BIN+set}" ]]; then
+    printf '%s\n' "$SKILLEX_BIN"
+    return 0
+  fi
+  [[ -f "$PLIST" ]] || return 0
+  py3 - "$PLIST" <<'PY' 2>/dev/null || true
 import plistlib
 import sys
 
-python, gitdir, repo, label, interval, state, home = sys.argv[1:8]
+try:
+    with open(sys.argv[1], "rb") as stream:
+        value = (plistlib.load(stream).get("EnvironmentVariables") or {}).get("SKILLEX_BIN") or ""
+except Exception:
+    value = ""
+print(value)
+PY
+}
+
+# render_plist PYTHON GITDIR [SKILLEX_BIN]: the LaunchAgent, as XML, on stdout.
+render_plist() {
+  py3 - "$1" "$2" "$REPO" "$LABEL" "$INTERVAL_SECONDS" "$STATE" "$HOME" "${3:-}" <<'PY'
+import plistlib
+import sys
+
+python, gitdir, repo, label, interval, state, home, skillex_bin = sys.argv[1:9]
 path = ":".join(
     [
         f"{home}/.local/bin",
@@ -277,7 +305,8 @@ plist = {
     "StartInterval": int(interval),
     "RunAtLoad": True,
     "WorkingDirectory": "/",
-    "EnvironmentVariables": {"PJ_SKILLS_REGISTRY_ROOT": repo, "PATH": path},
+    "EnvironmentVariables": {"PJ_SKILLS_REGISTRY_ROOT": repo, "PATH": path,
+                             **({"SKILLEX_BIN": skillex_bin} if skillex_bin else {})},
     "ProcessType": "Background",
     "Nice": 10,
     "ThrottleInterval": 30,
@@ -291,14 +320,19 @@ PY
 launchd_loaded() { lctl print "$DOMAIN/$LABEL" >/dev/null 2>&1; }
 
 do_install_launchd() {
-  local gitdir python expected verb
+  local gitdir python expected verb skillex_bin
   [[ -f "$REPO/scripts/hermes-skillex-resync.py" ]] || die "missing $REPO/scripts/hermes-skillex-resync.py"
   gitdir="$(git -C "$REPO/all-skills" rev-parse --absolute-git-dir 2>/dev/null)" \
     || die "$REPO/all-skills is not a git checkout; run: git -C $REPO submodule update --init all-skills"
   python="$(resolve_python)" \
     || die "no python3 >= 3.11 found (not the /usr/bin/python3 Xcode stub): brew install python, or set RESYNC_PYTHON=/path/to/python3"
+  skillex_bin="$(pinned_skillex_bin)"
+  if [[ -n "$skillex_bin" ]]; then
+    [[ "$skillex_bin" == /* && -x "$skillex_bin" && ! -d "$skillex_bin" ]] \
+      || die "SKILLEX_BIN=$skillex_bin is not an absolute path to an executable file"
+  fi
   mkdir -p "$AGENTS_DIR" "$STATE"
-  expected="$(render_plist "$python" "$gitdir")"
+  expected="$(render_plist "$python" "$gitdir" "$skillex_bin")"
   if [[ -f "$PLIST" && "$(cat "$PLIST")" == "$expected" ]]; then
     echo "ok       $PLIST"
     if launchd_loaded; then
@@ -343,7 +377,7 @@ do_status_launchd() {
     gitdir="$(git -C "$REPO/all-skills" rev-parse --absolute-git-dir 2>/dev/null || true)"
     python="$(resolve_python || true)"
     expected=""
-    [[ -z "$gitdir" || -z "$python" ]] || expected="$(render_plist "$python" "$gitdir")"
+    [[ -z "$gitdir" || -z "$python" ]] || expected="$(render_plist "$python" "$gitdir" "$(pinned_skillex_bin)")"
     if [[ -n "$expected" && "$(cat "$PLIST")" != "$expected" ]]; then
       echo "STALE    $PLIST differs from what install would write (python, repo or catalog gitdir moved): run install"
       bad=1

@@ -331,6 +331,36 @@ def test_darwin_install_reloads_when_the_plist_would_change(mac, tmp_path):
     ]
 
 
+def test_darwin_skillex_bin_is_pinned_into_the_agent_and_survives_a_plain_reinstall(mac, tmp_path):
+    # A host whose PATH `skillex` is another program (a Python skillex owning the Codex
+    # skill root) pins the npm CLI into the agent instead of reordering anyone's PATH.
+    npm_skillex = tmp_path / "npm-skillex"
+    npm_skillex.write_text("#!/bin/sh\necho 0.3.1\n")
+    npm_skillex.chmod(0o755)
+    done = mac.run("install", SKILLEX_BIN=str(npm_skillex))
+    assert done.returncode == 0, done.stderr
+    assert mac.spec()["EnvironmentVariables"]["SKILLEX_BIN"] == str(npm_skillex)
+    before = mac.plist.read_bytes()
+    mac.log.unlink()
+    again = mac.run("install")  # SKILLEX_BIN unset: keep what the plist carries
+    assert again.returncode == 0, again.stderr
+    assert "ok       " in again.stdout and mac.plist.read_bytes() == before
+    assert not any(call.startswith(("bootstrap", "bootout")) for call in mac.calls())
+    status = mac.run("status")
+    assert "STALE" not in status.stdout
+    cleared = mac.run("install", SKILLEX_BIN="")  # set-but-empty removes the pin
+    assert cleared.returncode == 0, cleared.stderr
+    assert "SKILLEX_BIN" not in mac.spec()["EnvironmentVariables"]
+
+
+def test_darwin_skillex_bin_must_be_an_absolute_executable(mac, tmp_path):
+    for bad in ("skillex", str(tmp_path / "missing"), str(tmp_path)):
+        done = mac.run("install", SKILLEX_BIN=bad)
+        assert done.returncode != 0
+        assert "SKILLEX_BIN=" in done.stderr
+    assert not mac.plist.exists()
+
+
 @pytest.mark.parametrize("bad", ["stub", "too-old"])
 def test_darwin_install_refuses_the_xcode_stub_and_old_pythons(mac, tmp_path, bad):
     if bad == "stub":
