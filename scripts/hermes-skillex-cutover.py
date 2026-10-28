@@ -126,7 +126,9 @@ def load_renderer(source, fleet):
     spec.loader.exec_module(module)
     for name in ("expected_config", "is_render_of", "without_render_pins"):
         if not callable(getattr(module, name, None)):
-            raise RuntimeError(f"canonical config renderer predates {name}; update hermes-agent-template")
+            raise RuntimeError(
+                f"canonical config renderer predates {name}; update hermes-agent-template"
+            )
     return module
 
 
@@ -180,6 +182,25 @@ def cli(command):
     return value
 
 
+def skillex_command(registry_root, environ=os.environ):
+    """The Skillex CLI argv prefix: $SKILLEX_BIN when set (the same override
+    hermes-skillex-resync.py honours, for a host whose catalog checkout carries
+    no built dist/ or whose PATH `skillex` is another program), else the
+    checkout's own build, node <registry-root>/dist/cli.js."""
+    explicit = environ.get("SKILLEX_BIN", "").strip()
+    if explicit:
+        if (
+            not os.path.isabs(explicit)
+            or not os.access(explicit, os.X_OK)
+            or os.path.isdir(explicit)
+        ):
+            raise RuntimeError(
+                f"SKILLEX_BIN={explicit} is not an absolute path to an executable file"
+            )
+        return [explicit]
+    return ["node", str(Path(registry_root) / "dist/cli.js")]
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--profile", required=True)
@@ -194,7 +215,7 @@ def main():
     ):
         raise RuntimeError("only explicit valid named PM profiles may be cut over")
     profile = args.fleet_home / "profiles" / args.profile
-    command = ["node", str(args.registry_root / "dist/cli.js"), "profile"]
+    command = [*skillex_command(args.registry_root), "profile"]
     shared = ["--hermes-root", str(args.fleet_home), "--registry-root", str(args.registry_root)]
     show = cli([*command, "show", args.profile, "--project", str(args.project), *shared, "--json"])
     if show["exit"] not in (0, 3, 6):

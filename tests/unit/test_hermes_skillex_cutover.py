@@ -149,3 +149,19 @@ def test_configure_expects_and_preserves_renderer_pins(tmp_path, monkeypatch):
     with pytest.raises(RuntimeError, match="out-of-band config drift"):
         module.configure(profile, renderer, apply=True)
     assert cfg.read_bytes() == before
+
+
+def test_skillex_bin_overrides_the_checkout_build(tmp_path):
+    module = helper()
+    assert module.skillex_command(tmp_path, {}) == ["node", str(tmp_path / "dist/cli.js")]
+    npm = tmp_path / "skillex-npm"
+    npm.write_text("#!/bin/sh\n")
+    npm.chmod(0o755)
+    assert module.skillex_command(tmp_path, {"SKILLEX_BIN": str(npm)}) == [str(npm)]
+    for bad in ("skillex", str(tmp_path / "missing"), str(tmp_path)):
+        try:
+            module.skillex_command(tmp_path, {"SKILLEX_BIN": bad})
+        except RuntimeError as error:
+            assert "SKILLEX_BIN=" in str(error)
+        else:
+            raise AssertionError(f"accepted {bad}")
