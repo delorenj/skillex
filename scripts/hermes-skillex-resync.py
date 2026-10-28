@@ -6,7 +6,8 @@ A strict desk (a real ~/.hermes/profiles/<name>/ holding a regular-file
 against, so ANY commit to the catalog leaves every desk "sync pending"
 (`skillex profile show` exit 6) and turns flume's hermes.runtime-singleton red
 until someone runs a strict sync per desk. This script is that someone; the
-systemd units under systemd/ run it when the catalog HEAD moves and on a timer.
+systemd units under systemd/ (Linux) or the LaunchAgent install-hermes-resync.sh writes (macOS)
+run it when the catalog HEAD moves and on a timer. Needs Python 3.11+ and fcntl (any POSIX).
 
 Per strict desk, against the project Skillex recorded for it:
 
@@ -70,7 +71,10 @@ TRANSIENT_SHOW = {SX_REFUSED, SX_PARTIAL, SX_LOCK_BUSY}
 ENV_PASS = re.compile(
     r"^(HOME|USER|LOGNAME|LANG|LC_.*|TMPDIR|TZ|NO_COLOR|XDG_.*|MISE_.*|SKILLEX_.*)$"
 )
-DEFAULT_PATH = "/usr/local/bin:/usr/bin:/bin"
+# Homebrew first on Apple silicon (/opt/homebrew); a LaunchAgent's own PATH is only /usr/bin:/bin.
+DEFAULT_PATH = "/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin"
+# launchd sets XPC_SERVICE_NAME to the job label; a Terminal shell gets "0" or an app id.
+LAUNCHD_LABEL_PREFIX = "io.33god.skillex-hermes-resync"
 
 
 class Ran(NamedTuple):
@@ -544,6 +548,15 @@ def parse_args(argv):
     return parser.parse_args(argv)
 
 
+def trigger_of(environ):
+    """Which service manager started this run: systemd, launchd or a person."""
+    if environ.get("INVOCATION_ID"):
+        return "systemd"
+    if environ.get("XPC_SERVICE_NAME", "").startswith(LAUNCHD_LABEL_PREFIX):
+        return "launchd"
+    return "manual"
+
+
 def main(argv=None, environ=None):
     args = parse_args(argv)
     environ = dict(os.environ if environ is None else environ)
@@ -564,7 +577,7 @@ def main(argv=None, environ=None):
         "started_at": stamp(now),
         # systemd's $TRIGGER_UNIT names the timer for a path-started run when a service has
         # both (measured 2026-10-02), so it is no evidence; catalog_moved_at is.
-        "trigger": "systemd" if environ.get("INVOCATION_ID") else "manual",
+        "trigger": trigger_of(environ),
         "dry_run": args.dry_run,
         "hermes_root": str(hermes_root),
         "registry_root": str(registry_root),

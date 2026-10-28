@@ -158,3 +158,65 @@ with "no recorded project" means the receipt is gone (sync that desk by hand
 once with `--project`); "not converged after sync" means skillex accepted the sync
 but the desk still reports drift (look at its findings); a timeout points at a
 hung skillex or a stuck lock.
+
+## macOS (launchd)
+
+`scripts/install-hermes-resync.sh` picks its backend from `uname -s` (set
+`SKILLEX_RESYNC_OS=Linux|Darwin` to force one, as the tests do). On Darwin it
+installs **one LaunchAgent, `io.33god.skillex-hermes-resync`**, instead of the three
+systemd units. The plist is generated, not symlinked, because it needs absolute
+paths and a real interpreter:
+
+| systemd | launchd (same job) |
+| --- | --- |
+| `.path` `PathModified=<gitdir>/logs/HEAD`, `PathChanged=<gitdir>/HEAD` | `WatchPaths` on those same two files (the resolved gitdir, so a submodule `.git` file works) |
+| `.timer` every 15 min (retired on Linux: candybar schedules it) | `StartInterval 900`: a Mac has no candybar, launchd owns the fallback schedule |
+| `.timer` `OnStartupSec=2min` | `RunAtLoad` |
+| `.service` `Environment=PJ_SKILLS_REGISTRY_ROOT`, `Nice=10`, `WorkingDirectory=/` | `EnvironmentVariables`, `Nice 10`, `WorkingDirectory /`, `ProcessType Background`, `ThrottleInterval 30` |
+| `journalctl --user -u ...` | `~/.local/state/skillex/hermes-resync.launchd.log` (plus the same `hermes-resync.jsonl` / `.last.json` evidence) |
+
+```sh
+scripts/install-hermes-resync.sh install     # write the plist, bootout + bootstrap into gui/$UID, enable
+scripts/install-hermes-resync.sh status      # loaded?, plist current?, last run, catalog freshness; exit 1 if unhealthy
+scripts/install-hermes-resync.sh uninstall   # bootout, remove the plist (the log and last-run file are kept)
+```
+
+`install` is idempotent: an unchanged plist that is already loaded changes nothing
+and reloads nothing. `status` reports `STALE` when the plist differs from what
+`install` would write now (the python, the repo or the catalog gitdir moved).
+
+**Python.** The agent runs `<python> -B scripts/hermes-skillex-resync.py --settle 4`
+and the script needs Python 3.11+ (`datetime.UTC`). `/usr/bin/python3` on macOS is
+the Xcode stub (it opens an install dialog without the Command Line Tools and is
+3.9 with them), so it is never used. Resolution order: `$RESYNC_PYTHON`,
+`/opt/homebrew/bin/python3`, `/usr/local/bin/python3`, `mise which python3`,
+`~/.local/bin/python3`, `command -v python3`; the first that is 3.11+ wins and its
+own `sys.executable` is written into the plist, so a mise or pyenv shim is not
+baked in. With none, `install` stops and says so (`brew install python`).
+
+The script finds `skillex` itself (`$SKILLEX_BIN`, PATH, the mise shim, `mise which`);
+the plist PATH starts with `~/.local/bin`, the mise shims and `/opt/homebrew/bin`.
+Nothing else in `hermes-skillex-resync.py` is Linux-specific: it uses `fcntl.flock`,
+process groups and `git`, all POSIX, and records `trigger: launchd` when
+`XPC_SERVICE_NAME` is the job label.
+
+### What flume's `hermes.skillex-resync` rule must expect on a Mac
+
+Flume owns the rule (`packages/flume-hr/src/parity/rules.ts`); it is documented here
+so the owner can add the Darwin arm. Today it asks systemd for the `.timer` and
+`.path` units and so can only pass on Linux. On Darwin the equivalent contract is:
+
+1. The agent is **installed**: `~/Library/LaunchAgents/io.33god.skillex-hermes-resync.plist` exists
+   and has `WatchPaths`, `StartInterval 900` and `RunAtLoad`.
+2. The agent is **loaded and not failing**: `launchctl print gui/$UID/io.33god.skillex-hermes-resync`
+   exits 0 (a job between runs shows `state = not running`; that is healthy). A `last exit code`
+   of 0 or 1 is healthy (1 means a desk needs a human, which the last-run record names).
+3. The last run is **fresh**: `~/.local/state/skillex/hermes-resync.last.json` (schema 1) finished
+   within 2 h, the same limit as Linux. With `StartInterval 900` a healthy Mac is never older than 15 min.
+4. That run left no desk `refused` or `error`, and the rule passes quietly when no strict desk exists.
+5. The remedy it names is the same command: `~/code/skillex/scripts/install-hermes-resync.sh install`
+   (`~/Code/skillex/...` on a Mac whose clones sit under `~/Code`; the install path is just
+   the checkout, no `33GOD/` level). `install-hermes-resync.sh status` already evaluates 1 to 4 and exits 1
+   when any fails, so the rule can shell out to it instead of re-deriving them.
+6. There is no `.timer` and no `.path` unit on a Mac: a rule that demands them there is wrong,
+   not the host.

@@ -1,6 +1,15 @@
 #!/usr/bin/env bash
-# Install, remove or inspect the systemd USER units that keep every Skillex-only
+# Install, remove or inspect the user-level service that keeps every Skillex-only
 # Hermes desk converged with the all-skills catalog. Idempotent.
+#
+# Backend by OS (uname -s; SKILLEX_RESYNC_OS overrides, for tests):
+#   Linux   systemd USER units (below)
+#   Darwin  one LaunchAgent, io.33god.skillex-hermes-resync, generated at install
+#           (it needs absolute paths and a real python3): WatchPaths on the same two
+#           catalog files the .path unit watches, StartInterval 900 and RunAtLoad
+#           (macOS has no candybar, so launchd also owns the schedule the retired
+#           .timer used to). Same install | uninstall | status. See
+#           docs/implementation/hermes-skillex-resync.md "macOS".
 #
 #   install-hermes-resync.sh install     link the units, daemon-reload, enable --now the .path
 #                                        (the .timer is RETIRED: candybar owns the schedule —
@@ -31,7 +40,19 @@ ENABLED=("$PATHU")
 
 ctl() { "$CTL" --user "$@"; }
 die() { echo "install-hermes-resync: $*" >&2; exit 1; }
-same_path() { [[ "$(realpath -m -- "$1")" == "$(realpath -m -- "$2")" ]]; }
+# realpath -m is GNU-only (macOS realpath has no -m); python resolves the same way.
+OS="${SKILLEX_RESYNC_OS:-$(uname -s)}"
+# py3 ARGS...: the python for helper snippets. On macOS a bare python3 may be the
+# Xcode stub, so use the interpreter resolve_python picks (below); elsewhere python3.
+py3() {
+  local interpreter=python3
+  if [[ "$OS" == Darwin ]]; then interpreter="$(resolve_python 2>/dev/null || true)"; fi
+  "${interpreter:-python3}" "$@"
+}
+same_path() {
+  [[ "$(py3 -c 'import os, sys; print(os.path.realpath(sys.argv[1]))' "$1")" \
+     == "$(py3 -c 'import os, sys; print(os.path.realpath(sys.argv[1]))' "$2")" ]]
+}
 
 link_unit() {
   local src="$SRC/$1" dst="$DEST/$1"
@@ -72,7 +93,7 @@ drop_dropin() {
   fi
 }
 
-do_install() {
+do_install_systemd() {
   local gitdir
   [[ -x /usr/bin/python3 ]] || die "/usr/bin/python3 not found (the service runs it by absolute path)"
   [[ -f "$REPO/scripts/hermes-skillex-resync.py" ]] || die "missing $REPO/scripts/hermes-skillex-resync.py"
@@ -108,7 +129,7 @@ Environment=PJ_SKILLS_REGISTRY_ROOT=$REPO"
   echo "enabled  $PATHU (catalog HEAD: $gitdir); $TIMER stays retired (candybar owns the schedule)"
 }
 
-do_uninstall() {
+do_uninstall_systemd() {
   ctl disable --now "$TIMER" "${ENABLED[@]}" 2>&1 || true
   ctl stop "$SERVICE" 2>/dev/null || true
   for unit in "${UNITS[@]}"; do
@@ -131,28 +152,11 @@ do_uninstall() {
   echo "uninstalled (the log and last-run file in $STATE are kept)"
 }
 
-do_status() {
-  local bad=0 unit enabled active
-  for unit in "${ENABLED[@]}"; do
-    enabled="$(ctl is-enabled "$unit" 2>&1 || true)"
-    active="$(ctl is-active "$unit" 2>&1 || true)"
-    printf '%-34s enabled=%-10s active=%s\n' "$unit" "$enabled" "$active"
-    [[ "$enabled" == enabled && "$active" == active ]] || bad=1
-  done
-  for unit in "${UNITS[@]}"; do
-    if [[ -L "$DEST/$unit" && "$(readlink "$DEST/$unit")" == "$SRC/$unit" ]]; then
-      :
-    else
-      echo "NOT LINKED to this repo: $DEST/$unit"
-      bad=1
-    fi
-  done
-  ctl show "$SERVICE" -p Result -p ExecMainStatus -p ExecMainExitTimestamp --no-pager 2>/dev/null | sed 's/^/service   /' || true
-  ctl list-timers "$TIMER" --no-pager 2>/dev/null | sed -n '1,2p' || true
-
+# report_last_run: print the last run and catalog freshness; return 1 if the last run is missing or bad.
+report_last_run() {
   local head=""
   head="$(git -C "$REPO/all-skills" rev-parse HEAD 2>/dev/null || true)"
-  if ! python3 - "$STATE/hermes-resync.last.json" "$head" <<'PY'; then
+  if ! py3 - "$STATE/hermes-resync.last.json" "$head" <<'PY'; then
 import json
 import sys
 
@@ -177,15 +181,190 @@ for desk in last.get("attention", []):
     print(f"ATTENTION {desk}")
 sys.exit(0 if last.get("status") in ("ok", "partial") else 1)
 PY
-    bad=1
+    return 1
   fi
+  return 0
+}
+
+do_status_systemd() {
+  local bad=0 unit enabled active
+  for unit in "${ENABLED[@]}"; do
+    enabled="$(ctl is-enabled "$unit" 2>&1 || true)"
+    active="$(ctl is-active "$unit" 2>&1 || true)"
+    printf '%-34s enabled=%-10s active=%s\n' "$unit" "$enabled" "$active"
+    [[ "$enabled" == enabled && "$active" == active ]] || bad=1
+  done
+  for unit in "${UNITS[@]}"; do
+    if [[ -L "$DEST/$unit" && "$(readlink "$DEST/$unit")" == "$SRC/$unit" ]]; then
+      :
+    else
+      echo "NOT LINKED to this repo: $DEST/$unit"
+      bad=1
+    fi
+  done
+  ctl show "$SERVICE" -p Result -p ExecMainStatus -p ExecMainExitTimestamp --no-pager 2>/dev/null | sed 's/^/service   /' || true
+  ctl list-timers "$TIMER" --no-pager 2>/dev/null | sed -n '1,2p' || true
+
+  report_last_run || bad=1
   if [[ "$bad" -eq 0 ]]; then echo "healthy"; else echo "NOT HEALTHY"; fi
   return "$bad"
 }
 
+# ---------------------------------------------------------------- Darwin: launchd
+
+LABEL="${SKILLEX_RESYNC_LABEL:-io.33god.skillex-hermes-resync}"
+AGENTS_DIR="${LAUNCH_AGENTS_DIR:-$HOME/Library/LaunchAgents}"
+PLIST="$AGENTS_DIR/$LABEL.plist"
+LAUNCHCTL="${LAUNCHCTL:-launchctl}"
+DOMAIN="gui/$(id -u)"
+INTERVAL_SECONDS=900
+
+lctl() { "$LAUNCHCTL" "$@"; }
+
+# A python that can run hermes-skillex-resync.py (3.11+: datetime.UTC). Never the
+# /usr/bin/python3 Xcode stub, which opens an install dialog when run without the
+# Command Line Tools and is 3.9 with them. Order: $RESYNC_PYTHON, Homebrew, mise,
+# whatever `command -v python3` finds. The result is the interpreter's own
+# sys.executable, so a mise or pyenv shim is not baked into the plist.
+resolve_python() {
+  local candidate resolved
+  local -a candidates=()
+  [[ -z "${RESYNC_PYTHON:-}" ]] || candidates+=("$RESYNC_PYTHON")
+  candidates+=(/opt/homebrew/bin/python3 /usr/local/bin/python3)
+  if command -v mise >/dev/null 2>&1; then
+    candidates+=("$(mise which python3 2>/dev/null || true)")
+  fi
+  candidates+=("$HOME/.local/bin/python3" "$(command -v python3 2>/dev/null || true)")
+  for candidate in "${candidates[@]}"; do
+    [[ -n "$candidate" && -x "$candidate" ]] || continue
+    [[ "$candidate" != /usr/bin/python3 ]] || continue
+    resolved="$("$candidate" -c 'import sys; sys.exit(1) if sys.version_info < (3, 11) else print(sys.executable)' 2>/dev/null)" || continue
+    [[ -n "$resolved" && -x "$resolved" ]] || continue
+    printf '%s\n' "$resolved"
+    return 0
+  done
+  return 1
+}
+
+# render_plist PYTHON GITDIR: the LaunchAgent, as XML, on stdout.
+render_plist() {
+  py3 - "$1" "$2" "$REPO" "$LABEL" "$INTERVAL_SECONDS" "$STATE" "$HOME" <<'PY'
+import plistlib
+import sys
+
+python, gitdir, repo, label, interval, state, home = sys.argv[1:8]
+path = ":".join(
+    [
+        f"{home}/.local/bin",
+        f"{home}/.local/share/mise/shims",
+        "/opt/homebrew/bin",
+        "/opt/homebrew/sbin",
+        "/usr/local/bin",
+        "/usr/bin",
+        "/bin",
+        "/usr/sbin",
+        "/sbin",
+    ]
+)
+plist = {
+    "Label": label,
+    "ProgramArguments": [python, "-B", f"{repo}/scripts/hermes-skillex-resync.py", "--settle", "4"],
+    # The two files the Linux .path unit watches: the append-only reflog (every commit, pull,
+    # rebase, checkout) and HEAD (symbolic-ref moves it with no reflog entry). launchd runs the
+    # job once per burst; events during a run are not queued, which is why the script re-checks
+    # the catalog HEAD before it exits and StartInterval is the fallback.
+    "WatchPaths": [f"{gitdir}/logs/HEAD", f"{gitdir}/HEAD"],
+    "StartInterval": int(interval),
+    "RunAtLoad": True,
+    "WorkingDirectory": "/",
+    "EnvironmentVariables": {"PJ_SKILLS_REGISTRY_ROOT": repo, "PATH": path},
+    "ProcessType": "Background",
+    "Nice": 10,
+    "ThrottleInterval": 30,
+    "StandardOutPath": f"{state}/hermes-resync.launchd.log",
+    "StandardErrorPath": f"{state}/hermes-resync.launchd.log",
+}
+sys.stdout.buffer.write(plistlib.dumps(plist, sort_keys=False))
+PY
+}
+
+launchd_loaded() { lctl print "$DOMAIN/$LABEL" >/dev/null 2>&1; }
+
+do_install_launchd() {
+  local gitdir python expected verb
+  [[ -f "$REPO/scripts/hermes-skillex-resync.py" ]] || die "missing $REPO/scripts/hermes-skillex-resync.py"
+  gitdir="$(git -C "$REPO/all-skills" rev-parse --absolute-git-dir 2>/dev/null)" \
+    || die "$REPO/all-skills is not a git checkout; run: git -C $REPO submodule update --init all-skills"
+  python="$(resolve_python)" \
+    || die "no python3 >= 3.11 found (not the /usr/bin/python3 Xcode stub): brew install python, or set RESYNC_PYTHON=/path/to/python3"
+  mkdir -p "$AGENTS_DIR" "$STATE"
+  expected="$(render_plist "$python" "$gitdir")"
+  if [[ -f "$PLIST" && "$(cat "$PLIST")" == "$expected" ]]; then
+    echo "ok       $PLIST"
+    if launchd_loaded; then
+      echo "loaded   $LABEL (python: $python, catalog HEAD: $gitdir)"
+      return 0
+    fi
+  else
+    verb=wrote
+    [[ ! -e "$PLIST" ]] || verb=rewrote
+    printf '%s\n' "$expected" >"$PLIST"
+    chmod 644 "$PLIST"
+    printf '%-8s %s\n' "$verb" "$PLIST"
+    lctl bootout "$DOMAIN/$LABEL" >/dev/null 2>&1 || true
+  fi
+  lctl bootstrap "$DOMAIN" "$PLIST" || die "launchctl bootstrap $DOMAIN $PLIST failed"
+  lctl enable "$DOMAIN/$LABEL" >/dev/null 2>&1 || true
+  echo "loaded   $LABEL (python: $python, catalog HEAD: $gitdir; WatchPaths + every ${INTERVAL_SECONDS}s + at load)"
+}
+
+do_uninstall_launchd() {
+  lctl bootout "$DOMAIN/$LABEL" >/dev/null 2>&1 || true
+  if [[ -e "$PLIST" || -L "$PLIST" ]]; then
+    rm -f "$PLIST"
+    echo "removed  $PLIST"
+  fi
+  echo "uninstalled (the log and last-run file in $STATE are kept)"
+}
+
+do_status_launchd() {
+  local bad=0 python gitdir expected printed
+  if launchd_loaded; then
+    printed="$(lctl print "$DOMAIN/$LABEL" 2>/dev/null | sed -nE 's/^[[:space:]]*(state|last exit code|runs) = /\1=/p' | tr '\n' ' ')"
+    printf '%-34s loaded=yes %s\n' "$LABEL" "$printed"
+  else
+    printf '%-34s loaded=no\n' "$LABEL"
+    bad=1
+  fi
+  if [[ ! -f "$PLIST" ]]; then
+    echo "NOT INSTALLED: $PLIST"
+    bad=1
+  else
+    gitdir="$(git -C "$REPO/all-skills" rev-parse --absolute-git-dir 2>/dev/null || true)"
+    python="$(resolve_python || true)"
+    expected=""
+    [[ -z "$gitdir" || -z "$python" ]] || expected="$(render_plist "$python" "$gitdir")"
+    if [[ -n "$expected" && "$(cat "$PLIST")" != "$expected" ]]; then
+      echo "STALE    $PLIST differs from what install would write (python, repo or catalog gitdir moved): run install"
+      bad=1
+    fi
+  fi
+  report_last_run || bad=1
+  if [[ "$bad" -eq 0 ]]; then echo "healthy"; else echo "NOT HEALTHY"; fi
+  return "$bad"
+}
+
+# ---------------------------------------------------------------- dispatch
+
+case "$OS" in
+  Darwin) backend=launchd ;;
+  Linux) backend=systemd ;;
+  *) die "unsupported OS: $OS (Linux systemd and macOS launchd only)" ;;
+esac
+
 case "${1:-}" in
-  install) do_install ;;
-  uninstall) do_uninstall ;;
-  status) do_status ;;
+  install) "do_install_$backend" ;;
+  uninstall) "do_uninstall_$backend" ;;
+  status) "do_status_$backend" ;;
   *) echo "usage: ${0##*/} install | uninstall | status" >&2; exit 2 ;;
 esac

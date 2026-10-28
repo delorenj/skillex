@@ -501,6 +501,19 @@ def test_json_mode_prints_the_whole_run_record_as_one_line(fleet):
     assert record["skillex"] == {"bin": str(fleet.stub), "version": "0.1.3"}
     assert record["results"][0]["status"] == "synced"
     assert json.loads(fleet.run("--json").stdout)["trigger"] == "manual"
+    # launchd names the job in XPC_SERVICE_NAME; a Terminal shell does not
+    launched = json.loads(
+        fleet.run("--json", XPC_SERVICE_NAME="io.33god.skillex-hermes-resync").stdout
+    )
+    assert launched["trigger"] == "launchd"
+    terminal = json.loads(fleet.run("--json", XPC_SERVICE_NAME="0").stdout)
+    assert terminal["trigger"] == "manual"
+
+
+def test_the_default_path_reaches_homebrew_for_a_bare_launch_agent_environment():
+    module = load()
+    assert module.DEFAULT_PATH.split(":")[0] == "/opt/homebrew/bin"
+    assert module.child_env({"HOME": "/Users/x"}, "/r")["PATH"] == module.DEFAULT_PATH
 
 
 def test_the_run_records_where_the_catalog_was_and_when_it_moved(fleet):

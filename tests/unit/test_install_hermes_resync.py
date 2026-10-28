@@ -1,8 +1,14 @@
-"""The resync installer: symlinked user units, layout drop-ins, idempotence; a fake systemctl."""
+"""The resync installer: symlinked user units, layout drop-ins, idempotence; a fake systemctl.
+
+The macOS backend (a generated LaunchAgent) is exercised below against a fake launchctl.
+"""
 
 import json
+import os
+import plistlib
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -49,6 +55,7 @@ class Box:
             "SYSTEMCTL": str(self.ctl),
             "FAKE_CTL_LOG": str(self.log),
             "XDG_STATE_HOME": str(self.state),
+            "SKILLEX_RESYNC_OS": "Linux",  # these tests are about the systemd backend on any host
         }
         merged.update(env)
         script = installer or self.repo / "scripts/install-hermes-resync.sh"
@@ -217,3 +224,183 @@ def test_status_without_a_last_run_or_links_is_not_healthy(box):
 def test_unknown_command_prints_usage(box):
     done = box.run("frobnicate")
     assert done.returncode == 2 and "install | uninstall | status" in done.stderr
+
+
+# ---------------------------------------------------------------- macOS: launchd
+
+FAKE_LAUNCHCTL = """#!/bin/sh
+echo "$@" >> "$FAKE_CTL_LOG"
+case "$1" in
+  bootstrap) touch "$FAKE_LOADED" ;;
+  bootout) rm -f "$FAKE_LOADED" ;;
+  print) [ -f "$FAKE_LOADED" ] || exit 113
+         printf '\tstate = running\n\tlast exit code = 0\n\truns = 3\n' ;;
+esac
+exit 0
+"""
+LABEL = "io.33god.skillex-hermes-resync"
+
+
+class MacBox(Box):
+    """The installer on a pretend Mac: Darwin backend, fake launchctl, a real python >= 3.11."""
+
+    def __init__(self, root, link_default=True):
+        super().__init__(root, link_default=link_default)
+        self.launchctl = root / "launchctl"
+        self.launchctl.write_text(FAKE_LAUNCHCTL)
+        self.launchctl.chmod(0o755)
+        self.loaded = root / "loaded"
+        self.agents = self.home / "Library/LaunchAgents"
+        self.plist = self.agents / f"{LABEL}.plist"
+        self.python = sys.executable
+
+    def run(self, command, **env):
+        merged = {
+            "SKILLEX_RESYNC_OS": "Darwin",
+            "LAUNCHCTL": str(self.launchctl),
+            "FAKE_LOADED": str(self.loaded),
+            "RESYNC_PYTHON": self.python,
+        }
+        merged.update(env)
+        return super().run(command, **merged)
+
+    def spec(self):
+        return plistlib.loads(self.plist.read_bytes())
+
+
+@pytest.fixture
+def mac(tmp_path):
+    return MacBox(tmp_path)
+
+
+def catalog_gitdir():
+    return subprocess.run(
+        ["git", "-C", str(REPO / "all-skills"), "rev-parse", "--absolute-git-dir"],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+
+
+def test_darwin_install_writes_a_launch_agent_with_the_same_triggers_as_the_systemd_units(mac):
+    done = mac.run("install")
+    assert done.returncode == 0, done.stderr
+    spec = mac.spec()
+    gitdir = catalog_gitdir()
+    assert spec["Label"] == LABEL
+    # the same two files the .path unit watches, plus the timer's 15 minutes, plus a run at load
+    assert spec["WatchPaths"] == [f"{gitdir}/logs/HEAD", f"{gitdir}/HEAD"]
+    assert spec["StartInterval"] == 900 and spec["RunAtLoad"] is True
+    program = spec["ProgramArguments"]
+    assert os.path.samefile(program[0], mac.python)
+    assert program[1:] == ["-B", f"{REPO}/scripts/hermes-skillex-resync.py", "--settle", "4"]
+    assert spec["EnvironmentVariables"]["PJ_SKILLS_REGISTRY_ROOT"] == str(REPO)
+    assert "/opt/homebrew/bin" in spec["EnvironmentVariables"]["PATH"].split(":")
+    assert spec["WorkingDirectory"] == "/"
+    assert spec["StandardOutPath"].endswith("skillex/hermes-resync.launchd.log")
+    uid = str(os.getuid())
+    assert mac.calls() == [
+        f"bootout gui/{uid}/{LABEL}",
+        f"bootstrap gui/{uid} {mac.plist}",
+        f"enable gui/{uid}/{LABEL}",
+    ]
+    assert not (mac.home / ".config/systemd").exists()  # nothing of the Linux backend
+
+
+def test_darwin_install_twice_changes_and_reloads_nothing(mac):
+    assert mac.run("install").returncode == 0
+    before = mac.plist.read_bytes()
+    mac.log.unlink()
+    again = mac.run("install")
+    assert again.returncode == 0, again.stderr
+    assert "ok       " in again.stdout and mac.plist.read_bytes() == before
+    assert not any(call.startswith(("bootstrap", "bootout")) for call in mac.calls())
+
+
+def test_darwin_install_reloads_when_the_plist_would_change(mac, tmp_path):
+    assert mac.run("install").returncode == 0
+    other = tmp_path / "other-python"
+    other.symlink_to(sys.executable)
+    mac.log.unlink()
+    again = mac.run("install", RESYNC_PYTHON=str(other))
+    assert again.returncode == 0, again.stderr
+    assert "rewrote" in again.stdout
+    assert [c.split()[0] for c in mac.calls() if c.split()[0] in ("bootout", "bootstrap")] == [
+        "bootout",
+        "bootstrap",
+    ]
+
+
+@pytest.mark.parametrize("bad", ["stub", "too-old"])
+def test_darwin_install_refuses_the_xcode_stub_and_old_pythons(mac, tmp_path, bad):
+    if bad == "stub":
+        python = "/usr/bin/python3"
+    else:
+        python = str(tmp_path / "python3.9")
+        Path(python).write_text("#!/bin/sh\nexit 1\n")  # `sys.version_info < (3, 11)` -> nonzero
+        Path(python).chmod(0o755)
+    done = mac.run("install", RESYNC_PYTHON=python)
+    assert done.returncode == 1
+    assert "no python3 >= 3.11" in done.stderr
+    assert not mac.plist.exists() and mac.calls() == []
+
+
+def test_darwin_install_requires_the_catalog_checkout(tmp_path):
+    skeleton = tmp_path / "home/code/skillex"
+    box = MacBox(tmp_path, link_default=False)
+    box.repo = skeleton
+    (skeleton / "scripts").mkdir(parents=True)
+    for name in ("install-hermes-resync.sh", "hermes-skillex-resync.py"):
+        shutil.copy(REPO / "scripts" / name, skeleton / "scripts" / name)
+    done = box.run("install", installer=skeleton / "scripts/install-hermes-resync.sh")
+    assert done.returncode == 1 and "is not a git checkout" in done.stderr
+
+
+def test_darwin_uninstall_removes_the_agent_and_keeps_the_evidence(mac):
+    assert mac.run("install").returncode == 0
+    last_run(mac)
+    done = mac.run("uninstall")
+    assert done.returncode == 0, done.stderr
+    assert not mac.plist.exists() and not mac.loaded.exists()
+    assert (mac.state / "skillex/hermes-resync.last.json").exists()
+    assert mac.run("uninstall").returncode == 0  # and again
+
+
+def test_darwin_status_is_healthy_only_when_loaded_current_and_last_run_good(mac):
+    assert mac.run("install").returncode == 0
+    last_run(mac)
+    ok = mac.run("status")
+    assert ok.returncode == 0, ok.stdout
+    assert "loaded=yes" in ok.stdout and "state=running" in ok.stdout and "healthy" in ok.stdout
+    assert "desks=26 synced=25" in ok.stdout
+
+    mac.loaded.unlink()
+    unloaded = mac.run("status")
+    assert (
+        unloaded.returncode == 1
+        and "loaded=no" in unloaded.stdout
+        and "NOT HEALTHY" in unloaded.stdout
+    )
+
+
+def test_darwin_status_flags_a_stale_plist_and_a_missing_one(mac):
+    assert mac.run("install").returncode == 0
+    last_run(mac)
+    mac.plist.write_bytes(plistlib.dumps({**mac.spec(), "StartInterval": 60}))
+    stale = mac.run("status")
+    assert stale.returncode == 1 and "STALE" in stale.stdout
+    mac.plist.unlink()
+    missing = mac.run("status")
+    assert missing.returncode == 1 and "NOT INSTALLED" in missing.stdout
+
+
+def test_darwin_status_names_the_desks_that_need_a_human(mac):
+    assert mac.run("install").returncode == 0
+    last_run(mac, status="attention", exit=1, attention=["voxxy-pm"])
+    done = mac.run("status")
+    assert done.returncode == 1 and "ATTENTION voxxy-pm" in done.stdout
+
+
+def test_an_unsupported_os_is_refused(mac):
+    done = mac.run("status", SKILLEX_RESYNC_OS="Plan9")
+    assert done.returncode == 1 and "unsupported OS" in done.stderr
