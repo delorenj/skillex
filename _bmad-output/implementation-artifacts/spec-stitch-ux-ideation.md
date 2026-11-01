@@ -36,3 +36,12 @@ Preserve all pre-existing WIP. Installation is not authorization to upload produ
 - medium / patch: promotion could invalidate provenance paths. Preserve original exports, promote copies, update handoff and append memlog event; covered by test.
 - medium / patch: manual fallback lacked CLI-only metadata. Accept user-provided Canvas links and mark unavailable version/IDs explicitly; covered by test.
 - low / patch: hub discovery description omitted new routing. Added Stitch UX ideation and BMAD handoffs without staging unrelated portability edits.
+- medium / patch (platform): missing external source could be hidden by a forbidden match; retain NOT VERIFIED plus all findings. Added regression fixture.
+- medium / patch (platform): absolute/parent/symlink escapes could certify files outside the declared source. Constrain resolved paths to external_root; added three escape fixtures.
+
+## Delivery Verification
+
+- Catalog landed/pushed on main: 5c73d31e411f581b6f96abcac6b381a27ffbee59. Skillex initial selection checkpoint: 25ab28197e5fd54ffc15aa3c9f5cb26f788dd0f1. Platform integration commit: 9489bb1 (33GOD owner repo).
+- Final focused suites: nine Stitch handoff tests and six platform backfill tests pass. Platform manifest validates; live bounded source check reports OK skillex-stitch-ux-handoff-v1. Source doctor reports zero errors and no Stitch findings, but 26 upstream provenance warnings remain outside this slice.
+- Whole platform backfill run remains nonzero for existing STALE gitignore-global-policy-v1 (`pjangler/.gitignore` contains `!.claude/`). Broader unittest discovery runs 16 tests with one import error in untouched test_enricher_llm: ModuleNotFoundError: No module named 'fastapi.concurrency'; 'fastapi' is not a package. Other 15 pass. Do not call the whole platform suite clean.
+- Required git unpushed sweep reports unrelated dirty/unpushed/detached repositories throughout ~/code. Preserve these per the explicit WIP decision; task commits are pushed, but the machine-wide report is not clean. The stale platform-local skills/33god-hub copy is also left for an ownership migration, not silently treated as canonical.
