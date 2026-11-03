@@ -14,23 +14,29 @@ per desk. Nothing did it automatically.
 
 ## What runs
 
-| Unit | Role |
+| Piece | Role |
 | --- | --- |
-| `skillex-hermes-resync.path` | Fires when the catalog's HEAD moves (inotify on its reflog and `HEAD`). |
-| `skillex-hermes-resync.timer` | Fallback: 2 min after the user manager starts, then at :07 :22 :37 :52, `Persistent`. |
+| `skillex-hermes-resync.path` | Event trigger: fires when the catalog's HEAD moves (inotify on its reflog and `HEAD`). |
+| Candybar `skillex-hermes-resync` | Fallback schedule (the single clock): at :07 :22 :37 :52 America/New_York, `systemd` runner starting the `.service`. Manifest: `~/code/33GOD/candybar/deploy/migration/manifests/skillex-hermes-resync/candybar.toml`. Check it with `cd ~/code/33GOD/candybar && uv run candybar show skillex-hermes-resync`. |
 | `skillex-hermes-resync.service` | `Type=oneshot`, `Nice=10`, `TimeoutStartSec=15min`, `Restart=no`. Runs `scripts/hermes-skillex-resync.py --settle 4`. |
+
+`skillex-hermes-resync.timer` is **retired** (Candybar migration wave 7.8,
+2026-10; ledger `33GOD/candybar/deploy/migration/ledger.yaml`). Its unit file
+stays in `systemd/` as the reversible-cutover record only: never enable it, since
+that would double-schedule the resync.
 
 Install, inspect and remove (units are symlinked from `systemd/`):
 
 ```sh
-scripts/install-hermes-resync.sh install     # link, daemon-reload, enable --now timer + path
+scripts/install-hermes-resync.sh install     # link, daemon-reload, enable --now the .path only (warns if the retired .timer is enabled)
 scripts/install-hermes-resync.sh status      # units, last run, catalog freshness; exit 1 if unhealthy
 scripts/install-hermes-resync.sh uninstall
 skillex profile sync <name> --project <selection-project> --skillex-only --dry-run
 ```
 
-`install` starts one run at once: the timer's `OnStartupSec` has long elapsed, so
-enabling it fires it. The units say `%h/code/skillex`. When the repo is elsewhere,
+After `install`, the next Candybar fire (within 15 minutes) or the next catalog
+commit starts a run; `systemctl --user start skillex-hermes-resync.service` runs
+one now. The units say `%h/code/skillex`. When the repo is elsewhere,
 or `all-skills` is a submodule whose gitdir lives under `.git/modules` (a `.git`
 *file*), `install` writes `<unit>.d/10-layout.conf` with the resolved paths and
 removes it again when the layout is the default.
@@ -50,8 +56,8 @@ HEAD's reflog is append-only. Measured on a scratch repo with real path units:
 
 `PathChanged` on `HEAD` also covers `git symbolic-ref`, which moves HEAD with no
 reflog entry. systemd's `$TRIGGER_UNIT` is no evidence of which unit started a
-run (with both a timer and a path unit on one service it named the timer for a
-path-started run), so the record carries `previous_catalog_commit`,
+run (when the retired timer and the path unit shared the service it named the
+timer for a path-started run), so the record carries `previous_catalog_commit`,
 `catalog_commit` and `catalog_moved_at` instead: a run that started seconds after
 `catalog_moved_at`, with a different `previous_catalog_commit`, was the path unit.
 
@@ -59,13 +65,14 @@ path-started run), so the record carries `previous_catalog_commit`,
 watching while the triggered unit is active). Three mitigations: `--settle 4`
 debounces a burst (an eight-commit rebase starts one run), the script re-reads
 the catalog HEAD after each pass and goes round again, up to `--max-passes 3`,
-when it moved, and the timer catches whatever is left. Selection edits (`sets/`,
-`.agents/skills.json`) need no catalog commit and are caught by the timer alone.
+when it moved, and the Candybar fallback catches whatever is left. Selection edits
+(`sets/`, `.agents/skills.json`) need no catalog commit and are caught by the
+Candybar fallback alone.
 
 `TriggerLimitBurst=20` per 5 min is a circuit breaker for a loop that keeps
 writing the reflog: past it the path unit FAILS and stops watching until
-restarted (`install` does that, and `status` reports it) while the timer keeps
-going. A run takes 10 to 20 seconds, so a legitimate burst of catalog commits
+restarted (`install` does that, and `status` reports it) while the Candybar
+fallback keeps going. A run takes 10 to 20 seconds, so a legitimate burst of catalog commits
 stays far below it.
 
 ## What it does per desk
@@ -219,8 +226,10 @@ process groups and `git`, all POSIX, and records `trigger: launchd` when
 ### What flume's `hermes.skillex-resync` rule must expect on a Mac
 
 Flume owns the rule (`packages/flume-hr/src/parity/rules.ts`); it is documented here
-so the owner can add the Darwin arm. Today it asks systemd for the `.timer` and
-`.path` units and so can only pass on Linux. On Darwin the equivalent contract is:
+so the owner can add the Darwin arm. Its Linux arm checks the `.path` unit in
+systemd and the schedule through the `skillex-hermes-resync` Candybar (not the
+retired `.timer`; verified in `rules.ts` 2026-11-03), so it can only pass on
+Linux today. On Darwin the equivalent contract is:
 
 1. The agent is **installed**: `~/Library/LaunchAgents/io.33god.skillex-hermes-resync.plist` exists
    and has `WatchPaths`, `StartInterval 900` and `RunAtLoad`.
