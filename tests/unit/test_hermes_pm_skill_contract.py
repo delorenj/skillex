@@ -12,7 +12,7 @@ REQUIRED_CORE = [
     "33god-projects",
     "delonet-conventions",
     "delonet-dotenv",
-    "hermes-pm-template-maintenance",
+    "agent-fleet-operations",  # replaced the retired hermes-pm-template-maintenance shim (2026-11-03)
     "hindsight",
     "subagent-driven-development",
 ]
