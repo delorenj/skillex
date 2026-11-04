@@ -16,6 +16,7 @@ import type { ReceiptOptions } from "./activation-state.js";
 import type { EntryIdentity, SourceRevision } from "./activation-types.js";
 import { canonicalSkill, packInventory } from "./composition.js";
 import { diagnosticExit } from "./diagnostics.js";
+import { resolveEffectiveSelection } from "./effective-selection.js";
 import { fail, SkillexError } from "./error.js";
 import { withLock } from "./lock.js";
 import {
@@ -48,7 +49,6 @@ import type {
   ProfileSyncResult,
 } from "./profile-types.js";
 import { sourceRevision } from "./reconciliation.js";
-import { resolveSelection } from "./resolution.js";
 import { type Diagnostic, ExitCode, makeResult, type ResultEnvelope } from "./result.js";
 import type { ResolvedScope, SkillOrigin } from "./selection.js";
 
@@ -132,64 +132,21 @@ async function resolveProjection(
   options: ProfileOptions & { project: string },
 ): Promise<Projection> {
   checkProfileSignal(options);
-  const inheritGlobal = await profileInheritsGlobal(profile);
-  const global = inheritGlobal
-    ? await resolveSelection({ ...options, scope: "global" })
-    : undefined;
-  const project = await resolveSelection({
-    ...options,
-    scope: "project",
-    ...(inheritGlobal ? {} : { inheritGlobal: false }),
-  });
-  const findings = [...(global?.findings ?? []), ...project.findings].filter(
-    (finding, index, all) => all.findIndex((other) => isDeepStrictEqual(other, finding)) === index,
+  // Validate even when false: Hermes still sees the universal global layer.
+  await profileInheritsGlobal(profile);
+  const effective = await resolveEffectiveSelection(options);
+  if (!effective.ok || !effective.data) throw new SkillexError(effective.exit, effective.findings);
+  const { scopes } = effective.data;
+  const findings = [...effective.findings];
+  const desired = effective.data.bindings.map(
+    (binding): Desired => ({
+      name: binding.name,
+      target: binding.path,
+      registry: binding.registry,
+      origins: binding.origins,
+      winner: binding.winner,
+    }),
   );
-  if ((global && (!global.ok || !global.data)) || !project.ok || !project.data)
-    throw new SkillexError(
-      diagnosticExit([global?.exit ?? ExitCode.SUCCESS, project.exit]),
-      findings.length
-        ? findings
-        : [
-            {
-              code: "E_PROFILE_RESOLUTION",
-              severity: "error",
-              message: "Profile selection could not be resolved completely.",
-              fix: "Correct the global and explicit project manifests before syncing the profile.",
-            },
-          ],
-    );
-  const globalScope = global?.data?.scopes.find((scope) => scope.scope === "global");
-  const projectScope = project.data.scopes.find((scope) => scope.scope === "project");
-  if ((inheritGlobal && !globalScope) || !projectScope)
-    fail("E_PROJECT", "Profile sync requires an explicit project manifest.", {
-      fix: "Pass --project PATH for the intended project containing .agents/skills.json.",
-    });
-  const scopes = [...(globalScope ? [globalScope] : []), projectScope];
-  const desired = new Map<string, Desired>();
-  for (const scope of scopes)
-    for (const binding of scope.bindings) {
-      const previous = desired.get(binding.name);
-      if (previous && previous.target !== binding.path)
-        refused(
-          "E_DIVERGENT_CANONICAL_NAME",
-          `Canonical name ${binding.name} resolves to different global and project definitions.`,
-          binding.path,
-          "Use one canonical definition for this name; profile-local shadows do not resolve canonical divergence.",
-        );
-      const origins = [...(previous?.origins ?? []), ...binding.origins].filter(
-        (origin, index, all) =>
-          all.findIndex((other) => isDeepStrictEqual(other, origin)) === index,
-      );
-      const winner =
-        [...origins].reverse().find((origin) => origin.kind !== "inherit")?.scope ?? scope.scope;
-      desired.set(binding.name, {
-        name: binding.name,
-        target: binding.path,
-        registry: scope.registry.root,
-        origins,
-        winner,
-      });
-    }
   const locations = new Map<string, SourceRevision["kind"]>();
   for (const scope of scopes) {
     locations.set(join(scope.registry.root, "all-skills"), "catalog");
@@ -210,9 +167,9 @@ async function resolveProjection(
   for (const [path, kind] of locations) sources.push(await sourceRevision(kind, path));
   checkProfileSignal(options);
   return {
-    project: projectScope.root,
+    project: effective.data.project,
     scopes,
-    desired: [...desired.values()].sort((a, b) => a.name.localeCompare(b.name)),
+    desired,
     sources,
     findings,
   };

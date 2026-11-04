@@ -89,12 +89,20 @@ export async function assertStrictProfile(
     const document = parseDocument(await readFile(path, "utf8"), { uniqueKeys: true });
     if (document.errors.length) refuse(path, "Cannot validate strict skills configuration.");
     const dirs: unknown = document.toJS()?.skills?.external_dirs;
+    const create: unknown = document.toJS()?.skills?.create_dir;
     if (dirs !== undefined && (!Array.isArray(dirs) || dirs.length))
       refuse(path, "Skillex-only profiles require skills.external_dirs: [].");
+    if (create !== undefined && create !== null && create !== "")
+      refuse(path, "Skillex-only profiles require skills.create_dir to be unset.");
   }
   const optOut = await entry(join(profile.root, ".no-bundled-skills"));
   if (optOut && !optOut.info.isFile())
     refuse(optOut.path, "Bundled opt-out marker must be a regular file.");
+  if (!optOut && (await entry(join(profile.root, ".skillex-only"))))
+    refuse(
+      join(profile.root, ".no-bundled-skills"),
+      "Strict profile is missing its bundled opt-out marker.",
+    );
   return true;
 }
 

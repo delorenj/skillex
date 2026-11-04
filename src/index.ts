@@ -65,6 +65,15 @@ export {
   verifyClientIsolation,
 } from "./core/client-isolation.js";
 export type {
+  ClientName,
+  ClientParityCandidate,
+  ClientParityObservation,
+  ClientParityOptions,
+  ClientParityResult,
+  KimiDialect,
+} from "./core/client-parity.js";
+export { inspectClientParity } from "./core/client-parity.js";
+export type {
   CompositionChange,
   CompositionDetails,
   CompositionMutationData,
@@ -109,6 +118,8 @@ export type {
   DoctorWriterInspection,
   RunningLegacyWriter,
 } from "./core/doctor-types.js";
+export type { EffectiveBinding, EffectiveSelection } from "./core/effective-selection.js";
+export { resolveEffectiveSelection } from "./core/effective-selection.js";
 export { SkillexError } from "./core/error.js";
 export {
   type HostIdentitySources,

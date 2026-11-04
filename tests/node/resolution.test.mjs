@@ -548,7 +548,11 @@ it("auto targeting outside a project resolves and selects only the global scope"
   const f = createResolutionFixture(t, resolveSelection);
   f.skill("global-skill");
   f.manifest(f.home, { skills: ["global-skill"] });
-  const result = await f.resolve({ cwd: f.directory(join(f.root, "outside")), scope: "auto" });
+  // An ambient HOME/project manifest above TMPDIR must not turn this fixture's
+  // deliberately unselected checkout into a real project selection.
+  const outside = f.directory(join(f.root, "outside"));
+  f.directory(join(outside, ".git"));
+  const result = await f.resolve({ cwd: outside, scope: "auto" });
   assertSuccess(result);
   assert.deepEqual(result.data.writeScopes, ["global"]);
   assert.deepEqual(

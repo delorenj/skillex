@@ -5,6 +5,7 @@ import {
   unisolateClient,
   verifyClientIsolation,
 } from "../core/client-isolation.js";
+import { type ClientParityOptions, inspectClientParity } from "../core/client-parity.js";
 import type { ResultEnvelope } from "../core/result.js";
 
 interface Output {
@@ -15,8 +16,42 @@ interface Output {
 export function registerClientCommands(program: Command, output: Output): void {
   const clients = program
     .command("clients")
-    .description("Project-local client visibility controls; currently OpenCode V2 only.")
+    .description("Project-local visibility and read-only cross-client parity diagnostics.")
     .action(() => output.help(clients));
+  clients
+    .command("parity")
+    .description(
+      "Read-only global + project skill membership and bounded Claude/Codex/Kimi/Hermes filesystem audit; runtime remains unverified.",
+    )
+    .requiredOption("--project <path>", "Explicit project scope to inspect.")
+    .requiredOption(
+      "--profile <name>",
+      "Explicit Hermes profile to inspect (not the ambient default).",
+    )
+    .option("--hermes-root <path>", "Explicit Hermes installation root.")
+    .option(
+      "--kimi-dialect <dialect>",
+      "Kimi evidence model: code-2.1 or python-1.47 (not binary auto-detection).",
+      "code-2.1",
+    )
+    .action(async (_local, command: Command) => {
+      const result = await inspectClientParity(command.optsWithGlobals<ClientParityOptions>());
+      const data = result.data;
+      output.emit(
+        result,
+        data
+          ? [
+              `Effective global + ${data.project}: ${data.expected.length} unique canonical skills`,
+              ...data.consumers.map(
+                (consumer) =>
+                  `${consumer.client}: ${consumer.filesystem}; missing ${consumer.missing.length}; unreachable ${consumer.unreachable.length}; foreign ${consumer.foreign.length}; canonical conflicts ${consumer.canonicalConflicts.length}; metadata issues ${consumer.metadataIssues.length}; index/lookup disagreements ${consumer.indexLookupDisagreements.length}`,
+              ),
+              "Runtime unverified: use fresh sessions and Hermes skill_view to prove advertisement, trust and quarantine.",
+              "",
+            ].join("\n")
+          : "",
+      );
+    });
   const target = (command: Command) =>
     command
       .requiredOption("--client <client>", "Client adapter: opencode.")

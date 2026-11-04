@@ -261,7 +261,7 @@ describe("installed diagnostics CLI", () => {
       assert.deepEqual(result.data.changes, []);
       for (const [name, root, desired, aliases] of [
         ["global", catalog.home, ["alpha"], 8],
-        ["project", catalog.project, ["alpha", "beta"], 7],
+        ["project", catalog.project, ["alpha", "beta"], 8],
       ]) {
         const report = scope(result, name);
         assert.equal(report.root, root);

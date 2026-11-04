@@ -16,12 +16,15 @@ import {
   unlinkSync,
   writeFileSync,
 } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join, relative } from "node:path";
 import { it } from "node:test";
 import { readActivationReceipt, showProfile, syncProfile } from "@delorenj/skillex";
 
 function fixture(t) {
-  const root = realpathSync(mkdtempSync("/tmp/skillex-profile-sync-"));
+  const root = realpathSync(
+    mkdtempSync(join(process.env.SKILLEX_TEST_TMPDIR ?? tmpdir(), "skillex-profile-sync-")),
+  );
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const directory = (path) => {
     mkdirSync(path, { recursive: true });
@@ -144,28 +147,23 @@ it("strict sync refuses external discovery without mutating local overrides", as
   assert.deepEqual(snapshot(f.root), before);
 });
 
-it("profile inheritance opt-out persists through ordinary show and resync", async (t) => {
+it("profile inheritance opt-out cannot suppress the universal global selection", async (t) => {
   const f = fixture(t);
   f.file(join(f.profile, "config.yaml"), "skills:\n  external_dirs: []\n  inherit_global: false\n");
   const saved = readFileSync(join(f.project, ".agents/skills.json"), "utf8");
   const synced = ok(await syncProfile("work", { ...f.options, skillexOnly: true }));
   assert.deepEqual(
     synced.managed.map(({ name }) => name),
-    ["beta"],
+    ["alpha", "beta"],
   );
   assert.equal(readFileSync(join(f.project, ".agents/skills.json"), "utf8"), saved);
-  // The ordinary operator home has an invalid global selection. It must not
-  // influence the exact profile, including project manifests that inherit it.
+  // The global selection remains mandatory despite the profile-local legacy flag.
   f.manifest("global", { skills: ["missing"] });
   const before = snapshot(f.root);
-  assert.deepEqual(ok(await showProfile("work", f.options)).changes, []);
+  assert.notEqual((await showProfile("work", f.options)).exit, 0);
   assert.deepEqual(snapshot(f.root), before);
-  assert.deepEqual(ok(await syncProfile("work", f.options)).applied, []);
-  const managed = (rows) =>
-    rows.filter(
-      ([path]) => path !== "state/skillex/locks" && !path.startsWith("state/skillex/locks/"),
-    );
-  assert.deepEqual(managed(snapshot(f.root)), managed(before));
+  assert.notEqual((await syncProfile("work", f.options)).exit, 0);
+  assert.deepEqual(snapshot(f.root), before);
 });
 
 it("profile inheritance policy refuses non-boolean and strict symlink config", async (t) => {
@@ -197,18 +195,18 @@ it("ordinary linked profile config keeps legacy global inheritance", async (t) =
   assert.equal(readlinkSync(path), target);
 });
 
-it("ordinary linked profile config can declare persistent inheritance opt-out", async (t) => {
+it("ordinary linked profile config cannot suppress universal globals", async (t) => {
   const f = fixture(t);
   const target = f.file(join(f.root, "shared-config.yaml"), "skills:\n  inherit_global: false\n");
   const path = join(f.profile, "config.yaml");
   symlinkSync(target, path);
   assert.deepEqual(
     ok(await syncProfile("work", f.options)).managed.map(({ name }) => name),
-    ["beta"],
+    ["alpha", "beta"],
   );
   f.manifest("global", { skills: ["missing"] });
-  assert.deepEqual(ok(await showProfile("work", f.options)).changes, []);
-  assert.deepEqual(ok(await syncProfile("work", f.options)).applied, []);
+  assert.notEqual((await showProfile("work", f.options)).exit, 0);
+  assert.notEqual((await syncProfile("work", f.options)).exit, 0);
   assert.equal(readlinkSync(path), target);
 });
 
