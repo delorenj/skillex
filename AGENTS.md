@@ -12,7 +12,11 @@ outrank contrary implementation behavior, older docs, tests, and recalled memory
 - **Canonical Skill Root**: Skillex's SSOT skill root: `~/.agents/skills/` globally, or `<project>/.agents/skills/` locally. Agent-specific discovery roots alias this root.
 - **Skill Set**: Replaces a skill root. Selecting one in the manifest replaces `.agents/skills/` with a symlink to the set's skill root. **Sets are mutually exclusive.**
 - **Skill Pack**: Populates an existing skill root with per-skill symlinks. A pack containing ten distinct additional skills adds ten links, not a root replacement. **Packs are composable.**
-- **`all-skills/`**: The Git submodule holding canonical skill definitions from [skills](https://github.com/delorenj/skills). This definition catalog is not the canonical discovery root.
+- **`all-skills/`**: The Git submodule holding canonical skill definitions from [skills](https://github.com/delorenj/skills). Since ADR-0002 (2026-11-05) it holds **wild skills** and vendored third-party skills only. This definition catalog is not the canonical discovery root.
+- **Repo-owned skill**: A skill whose bytes live in the repo it describes, at `<repo>/skills/<hub>/`, declared in `all-skills/sources.toml` with `mode = "link"` and resolved to a checkout per machine (ADR-0002).
+- **Hub Skill**: The one top-level skill a repo owns. A router `SKILL.md` that hoists the repo's cross-cutting rules and routes each situation to exactly one reference or sub-skill, loaded on demand. Named for the repo's subject (`heyma`, `vinyl`). See [hub-skill-standard](./docs/skills/hub-skill-standard.md).
+- **Sub-skill**: A skill-shaped procedure inside a hub at `subskills/<name>/SUBSKILL.md`, loaded by path when the hub routes to it. Never named `SKILL.md`, so no scanner auto-lists it.
+- **Wild Skill**: A skill no codebase owns (a method, a style, a vendor API guide). Lives in `all-skills/`. Creating one requires first answering "which repo changes when this skill is wrong?" — if one does, it is not wild.
 - **agentpack**: A skill pack with CLI-agnostic support assets, similar to Claude's `Plugin`. Its skills retain additive pack semantics. Contains:
   - **skills**: A `Skill Root` containing a collection of non-overlapping synergistic skills.
   - **references/**: A set of supporting docs that the skills may refer to in cases where clarity is worth the token cost of extra context.
@@ -31,12 +35,15 @@ outrank contrary implementation behavior, older docs, tests, and recalled memory
 - `Skill Roots` must not contain competing or overlapping skills. The exception is `[all-skills](./all-skills/)` which is a special case and by definition, contains all skills regardless of compatibility.
   - NOTE: Consider modifying how this is named/arranged around unix-like available/enabled pattern.
 - There must be no duplicate skills.
-- All skills are defined once in [all-skills](./all-skills/) and symlinked elsewhere when needed.
+- Every skill is defined once, in the place it is maintained: a repo-owned hub at `<repo>/skills/<hub>/`, or a wild/vendored skill in [all-skills](./all-skills/). Everything else is a generated link. A name that resolves in two places is a refusal, never a precedence rule (ADR-0002).
+- One hub per repo. A new topic in a repo that already has a hub is a new route or sub-skill in that hub, not a new skill.
 - Skill sets and agentpacks are reference-only compositions. They may own
   composition metadata and pack-level support assets, but must never contain a
   real `SKILL.md`; there is no snapshot-pack exception.
 - The enforceable ownership contract is
-  [ADR-0001](./docs/architecture/ADR-0001-reference-only-skill-topology.md).
+  [ADR-0001](./docs/architecture/ADR-0001-reference-only-skill-topology.md) as
+  amended by [ADR-0002](./docs/architecture/ADR-0002-repo-owned-hub-skills.md)
+  (repo-owned hub skills replace "all-skills owns the bytes").
 
 > WIP
 > To be iterated on and refined over time
