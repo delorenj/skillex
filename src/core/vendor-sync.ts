@@ -19,6 +19,7 @@ import {
   readVendorSources,
   resolveVendorCheckout,
   selectVendorSources,
+  vendorVersion,
 } from "./vendor-sources.js";
 import {
   assertVendorIdentity,
@@ -143,7 +144,7 @@ async function planSkill(
         provenance.upstreamCommit === commit &&
         provenance.upstreamTree === skill.tree &&
         provenance.upstreamPath === skill.upstreamPath &&
-        provenance.upstreamVersion === source.version &&
+        provenance.upstreamVersion === vendorVersion(source) &&
         provenance.extractedAt !== null &&
         baseline(provenance)
           ? "unchanged"
@@ -228,7 +229,32 @@ async function prepare(options: VendorSyncOptions, extractedAt: string): Promise
   const findings: Diagnostic[] = [];
   const enumerated = new Map<string, VendorSource>();
   const names = new Map<string, string>();
+  // Repo-owned (link) names are never vendored, and no vendored source may claim one.
+  const linked = new Map(
+    manifest.sources
+      .filter((source) => source.mode === "link")
+      .flatMap((source) => source.skills.map((skill) => [skill.name, source.name] as const)),
+  );
   for (const source of selected) {
+    if (source.mode === "link") {
+      sources.push({
+        name: source.name,
+        linked: true,
+        checkout: null,
+        commit: null,
+        refKind: null,
+        skipped: true,
+      });
+      findings.push({
+        code: "I_SOURCE_LINKED",
+        severity: "info",
+        message: `Source ${source.name} is a link source; its skills are read from the checkout, never vendored.`,
+        name: source.name,
+        path: manifest.path,
+        fix: "Inspect it with skillex skill show or skillex skill lint.",
+      });
+      continue;
+    }
     const checkout = await resolveVendorCheckout(source, options);
     if (!checkout.root) {
       if (!source.optional)
@@ -287,6 +313,13 @@ async function prepare(options: VendorSyncOptions, extractedAt: string): Promise
         fix: "Verify this is the intended local repository and correct its mapping or source declaration.",
       });
     for (const skill of upstream.skills) {
+      if (linked.has(skill.name))
+        refuse(
+          "E_VENDOR_DUPLICATE_SKILL",
+          `Link source ${linked.get(skill.name)} owns ${skill.name}; source ${source.name} cannot vendor it.`,
+          manifest.path,
+          "A repo-owned name lives only in its owning repository; exclude it from the vendored source.",
+        );
       if (names.has(skill.name))
         refuse(
           "E_VENDOR_DUPLICATE_SKILL",
@@ -393,6 +426,7 @@ async function assertCurrentIntent(
       "Run vendor sync again to recover staged content and prepare the current source declarations.",
     );
   for (const source of selected) {
+    if (source.mode === "link") continue;
     const checkout = await resolveVendorCheckout(source, options);
     const previous = prepared.result.sources.find((entry) => entry.name === source.name);
     if (!previous || checkout.root !== previous.checkout)

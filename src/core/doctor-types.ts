@@ -14,6 +14,9 @@ export interface DoctorSourceInspection {
   readonly packs: number;
   readonly provenance: number;
   readonly digestsChecked: number;
+  /** Skills declared by link sources (ADR-0002); each resolved one is hub-linted. */
+  readonly repoOwnedSkills: number;
+  readonly hubsLinted: number;
 }
 
 export interface ConfiguredLegacyWriter {

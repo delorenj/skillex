@@ -167,6 +167,8 @@ test("sources-only is write-free and independent of missing scope, state, and pr
     packs: 0,
     provenance: 0,
     digestsChecked: 0,
+    repoOwnedSkills: 0,
+    hubsLinted: 0,
   });
   assert.deepEqual(await snapshot(f.root), before);
 });

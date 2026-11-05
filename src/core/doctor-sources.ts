@@ -6,8 +6,10 @@ import { isWithin } from "./content.js";
 import type { DoctorSourceInspection } from "./doctor-types.js";
 import { fail, SkillexError } from "./error.js";
 import { inspectPath, requireDirectory } from "./filesystem.js";
+import { hubLintExit, lintOwnedSkill } from "./hub-lint.js";
 import { isSkillName, isVersionComponent } from "./manifest.js";
 import { readSkillMetadata } from "./metadata.js";
+import { ownedCheckout, ownedSkills } from "./owned-sources.js";
 import { verifyPack } from "./packs.js";
 import { type Diagnostic, ExitCode } from "./result.js";
 import type { RegistrySelection } from "./selection.js";
@@ -34,6 +36,8 @@ export async function inspectDoctorSources(registry: RegistrySelection): Promise
     packs: 0,
     provenance: 0,
     digestsChecked: 0,
+    repoOwnedSkills: 0,
+    hubsLinted: 0,
   };
   const report = (finding: Diagnostic, exit: ExitCode) => {
     findings.push(finding);
@@ -106,8 +110,8 @@ export async function inspectDoctorSources(registry: RegistrySelection): Promise
         !isSkillName(value.name) ||
         typeof value.repo !== "string" ||
         !value.repo.trim() ||
-        typeof value.version !== "string" ||
-        !value.version.trim() ||
+        // Link sources expose a working tree; only vendored sources pin a version.
+        (value.mode !== "link" && (typeof value.version !== "string" || !value.version.trim())) ||
         parsed.has(value.name)
       ) {
         fail(
@@ -303,10 +307,50 @@ export async function inspectDoctorSources(registry: RegistrySelection): Promise
         }
         if (!info.isDirectory() || !(await inspectPath(join(path, "SKILL.md")))) return;
         data.canonicalSkills++;
-        const canonical = await canonicalSkill(registry.root, name);
+        const canonical = await canonicalSkill(registry, name);
         const metadata = await readSkillMetadata(canonical);
         if (metadata.provenance) await inspectProvenance(canonical, metadata.provenance);
       });
+    }
+  });
+
+  // Repo-owned hubs (ADR-0002): resolve each declared skill and lint its hub. Link sources have
+  // no catalog bytes, so digest and vendor drift never apply to them.
+  await attempt(sourcesPath, async () => {
+    if (!sourcesPresent || !declarations) return;
+    for (const owned of await ownedSkills(registry)) {
+      data.repoOwnedSkills++;
+      if (owned.error) {
+        const absent =
+          owned.source.optional && !(await ownedCheckout(registry, owned.source)).checkout.root;
+        if (absent)
+          findings.push({
+            code: "I_SOURCE_OPTIONAL_UNAVAILABLE",
+            severity: "info",
+            message: `Optional link source ${owned.source.name} has no checkout on this machine.`,
+            name: owned.name,
+            path: sourcesPath,
+            fix: "Clone it and map its checkout ID to lint and activate its hub here.",
+          });
+        else {
+          findings.push(...owned.error.findings);
+          exits.push(owned.error.exit);
+        }
+        continue;
+      }
+      if (!owned.skill) continue;
+      try {
+        await canonicalSkill(registry, owned.name);
+      } catch (error) {
+        if (!(error instanceof SkillexError)) throw error;
+        findings.push(...error.findings);
+        exits.push(error.exit);
+        continue;
+      }
+      const linted = await lintOwnedSkill(registry, owned.name);
+      data.hubsLinted++;
+      findings.push(...linted.findings);
+      exits.push(hubLintExit(linted.findings));
     }
   });
 

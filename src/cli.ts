@@ -15,6 +15,7 @@ import {
   createSkill,
   ExitCode,
   importSkill,
+  lintSkill,
   listSkills,
   makeResult,
   type RegistryOptions,
@@ -71,6 +72,8 @@ interface CliOptions {
   dryRun?: boolean;
   description?: string;
   name?: string;
+  path?: string;
+  maxLines?: string;
 }
 
 function registryOptions(command: Command): RegistryOptions {
@@ -90,6 +93,7 @@ function referenceText(skill: SkillDetails): string {
 }
 
 function originText(skill: SkillDetails): string {
+  if (skill.owner.kind === "repo") return `repo: ${skill.owner.source ?? "unknown"}`;
   const origin = skill.provenance?.origin;
   if (!origin || typeof origin !== "object" || Array.isArray(origin)) return "Unrecorded";
   const fields = origin as Record<string, unknown>;
@@ -111,6 +115,9 @@ function skillText(skill: SkillDetails): string {
   return [
     skill.name,
     `Path: ${skill.path}`,
+    skill.owner.kind === "repo"
+      ? `Owner: repo ${skill.owner.source} (${skill.owner.repo}) at ${skill.owner.checkout}${skill.owner.commit ? ` @ ${skill.owner.commit.slice(0, 12)}` : ""}`
+      : "Owner: catalog (all-skills/)",
     `Description: ${skill.description ?? "No description"}`,
     `References: ${referenceText(skill) || "None"}`,
     ...(skill.provenance ? [`Provenance:\n${JSON.stringify(skill.provenance, null, 2)}`] : []),
@@ -120,12 +127,16 @@ function skillText(skill: SkillDetails): string {
 
 const skill = program
   .command("skill")
-  .description("Browse and author canonical definitions in the registry's all-skills/ catalog.")
+  .description(
+    "Browse, author and lint skills: wild and vendored skills in all-skills/, repo-owned hubs in their owning repositories (ADR-0002).",
+  )
   .action(() => help(skill));
 
 skill
   .command("list")
-  .description("List canonical names, descriptions, provenance, and composition references.")
+  .description(
+    "List canonical names from all-skills/ and repo-owned link sources, with owner, provenance and composition references.",
+  )
   .option("--query <text>", "Filter canonical names and descriptions.")
   .action(async (_local, command: Command) => {
     const { query } = command.optsWithGlobals<CliOptions>();
@@ -154,7 +165,7 @@ skill
 skill
   .command("show <name>")
   .description(
-    "Inspect a canonical definition, its provenance, and sets or packs that reference it.",
+    "Inspect a canonical definition (catalog or repo-owned), its owner, provenance, and sets or packs that reference it.",
   )
   .action(async (name: string, _local, command: Command) => {
     const result = await showSkill(name, registryOptions(command));
@@ -163,7 +174,9 @@ skill
 
 skill
   .command("create <name>")
-  .description("Create a new canonical skill in the selected registry's all-skills/ catalog.")
+  .description(
+    "Create a new wild skill in all-skills/. A skill about a codebase belongs in that repository's hub instead.",
+  )
   .option("--description <text>", "Describe when an agent should use this skill.")
   .option("--dry-run", "Validate and show the intended catalog changes.")
   .action(async (name: string, _local, command: Command) => {
@@ -189,6 +202,46 @@ skill
       ...(dryRun === undefined ? {} : { dryRun }),
     });
     emit(result, mutationText(result.data, result.ok));
+  });
+
+skill
+  .command("lint [name]")
+  .description(
+    "Lint a repo-owned hub (ADR-0002 §6) by its declared name, or any hub directory with --path.",
+  )
+  .option("--path <dir>", "Lint this hub directory instead of a declared name.")
+  .option("--max-lines <n>", "SKILL.md line budget before W_HUB_SIZE (default 500).")
+  .action(async (name: string | undefined, _local, command: Command) => {
+    const { path, maxLines } = command.optsWithGlobals<CliOptions>();
+    const limit = maxLines === undefined ? undefined : Number(maxLines);
+    if (limit !== undefined && (!Number.isInteger(limit) || limit < 1)) {
+      emit(
+        makeResult("skill lint", null, {
+          exit: ExitCode.CONFIG,
+          findings: [
+            {
+              code: "E_USAGE",
+              severity: "error",
+              message: "--max-lines must be a positive integer.",
+              fix: "Pass a line budget such as --max-lines 500.",
+            },
+          ],
+        }),
+      );
+      return;
+    }
+    const result = await lintSkill(name, {
+      ...registryOptions(command),
+      ...(path === undefined ? {} : { path }),
+      ...(limit === undefined ? {} : { maxLines: limit }),
+    });
+    const data = result.data;
+    emit(
+      result,
+      data
+        ? `${data.name}: ${data.path}\n  ${data.lines ?? 0} SKILL.md lines; ${data.files} Markdown files; ${data.links} relative links${data.source ? `; source ${data.source}` : ""}\n  ${result.findings.length ? `${result.findings.length} findings` : "clean"}\n`
+        : "",
+    );
   });
 
 function mutationText(

@@ -1,3 +1,4 @@
+import type { SkillOwner } from "./catalog-types.js";
 import type { SyncChange, SyncOptions } from "./reconciliation-types.js";
 import type { Diagnostic } from "./result.js";
 import type { ExcludedBinding, Resolution, ScopeName, SkillOrigin } from "./selection.js";
@@ -77,5 +78,7 @@ export interface SkillExplanation {
 export interface ExplainResult {
   readonly name: string;
   readonly canonical: string | null;
+  /** Owner of the canonical definition: all-skills/ or a repo-owned link source (ADR-0002). */
+  readonly owner: SkillOwner | null;
   readonly scopes: readonly SkillExplanation[];
 }

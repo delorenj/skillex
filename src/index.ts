@@ -41,6 +41,7 @@ export type {
   SkillDetails,
   SkillListData,
   SkillMetadata,
+  SkillOwner,
   SkillReference,
   SkillShowData,
 } from "./core/catalog-types.js";
@@ -116,6 +117,22 @@ export {
   localHostIdentities,
   resolveHostIdentity,
 } from "./core/host-identity.js";
+export {
+  HUB_SIZE_LIMIT,
+  type HubLintData,
+  type HubLintOptions,
+  type HubLintReport,
+  type HubLintTarget,
+  hubLintExit,
+  knownSkillIn,
+  type LintSkillOptions,
+  linkTargets,
+  lintHub,
+  lintOwnedSkill,
+  lintSkill,
+  localTarget,
+  markdownLines,
+} from "./core/hub-lint.js";
 export type {
   ExecutedImport,
   ImportExecution,
@@ -145,6 +162,13 @@ export type {
   MigrationResult,
 } from "./core/migration-types.js";
 export { type NormalizeOptions, normalizeScope } from "./core/normalization.js";
+export {
+  type OwnedDeclarations,
+  type OwnedSkill,
+  ownedDeclarations,
+  ownedSkill,
+  ownedSkills,
+} from "./core/owned-sources.js";
 export {
   addPackSkills,
   type CreatePackOptions,

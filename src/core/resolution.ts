@@ -158,7 +158,7 @@ async function resolveScope(
         // its own sidecar. Only comparison to this manifest is owner-specific.
         if (derived) await verifyDerivedMembers(registry.root, inventory, derived);
         for (const name of inventory.names) {
-          contribute(bindings, name, await setMemberTarget(registry.root, inventory.path, name), [
+          contribute(bindings, name, await setMemberTarget(registry, inventory.path, name), [
             origin("set", selectedSet.name),
           ]);
         }
@@ -180,19 +180,22 @@ async function resolveScope(
       }
       for (const selectedPack of manifest.packs) {
         try {
-          const inventory = await packInventory(registry.root, selectedPack);
+          const inventory = await packInventory(registry, selectedPack);
           const reference = `${inventory.name}@${inventory.version}`;
           for (const name of inventory.names) {
-            contribute(bindings, name, await canonicalSkill(registry.root, name), [
-              origin("pack", reference),
-            ]);
+            contribute(
+              bindings,
+              name,
+              await canonicalSkill(registry, name, { composition: "pack" }),
+              [origin("pack", reference)],
+            );
           }
         } catch (error) {
           if (!optionalAbsence(error, selectedPack.optional, findings, location.scope)) throw error;
         }
       }
       for (const skill of manifest.skills) {
-        contribute(bindings, skill.name, await canonicalSkill(registry.root, skill.name), [
+        contribute(bindings, skill.name, await canonicalSkill(registry, skill.name), [
           origin("skill", skill.name),
         ]);
       }

@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { constants } from "node:fs";
 import { mkdir, open, readdir, realpath, rename, symlink, unlink } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import {
   type Entry,
@@ -50,12 +50,14 @@ import type {
 import { sourceRevision } from "./reconciliation.js";
 import { resolveSelection } from "./resolution.js";
 import { type Diagnostic, ExitCode, makeResult, type ResultEnvelope } from "./result.js";
-import type { ResolvedScope, SkillOrigin } from "./selection.js";
+import type { RegistrySelection, ResolvedScope, SkillOrigin } from "./selection.js";
 
 interface Desired {
   readonly name: string;
   readonly target: string;
   readonly registry: string;
+  /** The selection that resolved this binding; repo-owned skills re-resolve through it. */
+  readonly selection: RegistrySelection;
   readonly origins: readonly SkillOrigin[];
   readonly winner: "global" | "project";
 }
@@ -186,6 +188,7 @@ async function resolveProjection(
         name: binding.name,
         target: binding.path,
         registry: scope.registry.root,
+        selection: scope.registry,
         origins,
         winner,
       });
@@ -193,6 +196,10 @@ async function resolveProjection(
   const locations = new Map<string, SourceRevision["kind"]>();
   for (const scope of scopes) {
     locations.set(join(scope.registry.root, "all-skills"), "catalog");
+    // A repo-owned binding's revision is its owning repository's HEAD (ADR-0002).
+    for (const binding of scope.bindings)
+      if (dirname(binding.path) !== join(scope.registry.root, "all-skills"))
+        locations.set(dirname(binding.path), "catalog");
     if (scope.set) locations.set(scope.set.path, "set");
     // Additive packs own manifest-authoritative membership; pin each one as a
     // revision source so receipts record which pack content projected.
@@ -671,7 +678,7 @@ async function apply(
       let next: EntryIdentity | undefined;
       if (change.target) {
         const desired = work.projection.desired.find((item) => item.name === name);
-        if (!desired || (await canonicalSkill(desired.registry, name)) !== change.target)
+        if (!desired || (await canonicalSkill(desired.selection, name)) !== change.target)
           refused(
             "E_PROFILE_SOURCE_CHANGED",
             "A canonical definition changed before profile publication.",
@@ -709,7 +716,7 @@ async function apply(
       }
       if (next) {
         const desired = work.projection.desired.find((item) => item.name === name) as Desired;
-        if ((await canonicalSkill(desired.registry, name)) !== change.target)
+        if ((await canonicalSkill(desired.selection, name)) !== change.target)
           refused(
             "E_PROFILE_SOURCE_CHANGED",
             "The canonical skill is no longer valid at publication.",

@@ -34,6 +34,7 @@ import { canonicalSkill, setMembers, setMemberTarget } from "./composition.js";
 import { type DerivationPreview, planDerivedSet, verifyDerivedMembers } from "./derivation.js";
 import { fail, SkillexError } from "./error.js";
 import { withLock } from "./lock.js";
+import { ownedSkill, ownedSource } from "./owned-sources.js";
 import { verifyPack } from "./packs.js";
 import type {
   SyncChange,
@@ -44,7 +45,13 @@ import type {
 } from "./reconciliation-types.js";
 import { resolveSelectionWithManifests } from "./resolution.js";
 import { type Diagnostic, ExitCode, makeResult, type ResultEnvelope } from "./result.js";
-import type { Resolution, ResolvedScope, ScopeName, SkillsManifest } from "./selection.js";
+import type {
+  RegistrySelection,
+  Resolution,
+  ResolvedScope,
+  ScopeName,
+  SkillsManifest,
+} from "./selection.js";
 import { readSetOrigin } from "./set-origin.js";
 
 const runFile = promisify(execFile);
@@ -68,6 +75,8 @@ interface Recovery {
 interface ScopeWork {
   readonly options: SyncOptions;
   readonly scope: ResolvedScope;
+  /** Every registry the resolution consulted; inherited bindings may come from another one. */
+  readonly registries: readonly RegistrySelection[];
   readonly snapshot: ReceiptSnapshot<ActivationData>;
   readonly receiptOptions: ReceiptOptions;
   readonly data: ActivationData;
@@ -381,6 +390,7 @@ async function buildScope(
   options: SyncOptions,
   forbiddenRoots: readonly string[],
   verifySet: (scope: ResolvedScope) => Promise<void> = verifySelectedSet,
+  registries: readonly RegistrySelection[] = [scope.registry],
 ): Promise<ScopeWork> {
   const root = join(scope.root, ".agents", "skills");
   const aliases = aliasPaths(scope.root, scope.scope);
@@ -584,6 +594,7 @@ async function buildScope(
   return {
     options,
     scope,
+    registries: [scope.registry, ...registries.filter((registry) => registry !== scope.registry)],
     snapshot,
     receiptOptions,
     data: currentData,
@@ -604,13 +615,27 @@ async function buildScope(
   };
 }
 
-function forbiddenActivationRoots(
+async function forbiddenActivationRoots(
   scopes: readonly ResolvedScope[],
   selected: readonly ResolvedScope[],
-): string[] {
+): Promise<string[]> {
+  // A repo-owned skill's checkout is a source root too: receipts never live inside it. A project
+  // that is itself the owning repository already forbids its own root, and still activates
+  // its hub through an ordinary relative link (.agents/skills/<hub> -> ../../skills/<hub>).
+  const owned: string[] = [];
+  for (const scope of scopes)
+    for (const binding of scope.bindings) {
+      const skill = await ownedBinding(
+        scopes.map((candidate) => candidate.registry),
+        binding.name,
+        binding.path,
+      );
+      if (skill) owned.push(skill.checkoutRoot);
+    }
   return [
     ...new Set([
       ...scopes.map((scope) => scope.registry.root),
+      ...owned,
       ...selected.flatMap((scope) => [
         join(scope.root, ".agents"),
         ...(scope.scope === "project" ? [scope.root] : []),
@@ -618,6 +643,41 @@ function forbiddenActivationRoots(
       ]),
     ]),
   ];
+}
+
+/** The repo-owned skill a binding resolved to, looked up in the registries that could own it. */
+async function ownedBinding(
+  registries: readonly RegistrySelection[],
+  name: string,
+  target: string,
+) {
+  const unique = [...new Set(registries)];
+  if (unique.some((registry) => dirname(target) === join(registry.root, "all-skills")))
+    return undefined;
+  for (const registry of unique) {
+    if (!(await ownedSource(registry, name))) continue;
+    const skill = await ownedSkill(registry, name);
+    if (skill?.path === target) return skill;
+  }
+  return undefined;
+}
+
+/**
+ * Re-resolve a planned link target immediately before publication. A catalog target names its
+ * own registry (registry/all-skills/name, possibly inherited from another scope's registry); a
+ * repo-owned target is re-resolved through the registries this activation consulted.
+ */
+async function canonicalTarget(work: ScopeWork, name: string, target: string): Promise<boolean> {
+  const registries = [...new Set(work.registries)];
+  for (const registry of registries)
+    if (dirname(target) === join(registry.root, "all-skills"))
+      return (await canonicalSkill(registry, name)) === target;
+  // A refusal here (missing checkout, wrong identity, escape) is the precise reason to stop.
+  for (const registry of registries)
+    if (await ownedSource(registry, name)) return (await canonicalSkill(registry, name)) === target;
+  if (basename(dirname(target)) === "all-skills")
+    return (await canonicalSkill(dirname(dirname(target)), name)) === target;
+  return false;
 }
 
 /**
@@ -674,7 +734,7 @@ export async function preflightDerivedActivation(
   const work = await buildScope(
     scope,
     options,
-    forbiddenActivationRoots([scope], [scope]),
+    await forbiddenActivationRoots([scope], [scope]),
     async () => {
       const current = await planDerivedSet({
         ...options,
@@ -722,11 +782,12 @@ export async function prepareSyncUnlocked(
   const selected = resolution.scopes.filter((scope) =>
     resolution.writeScopes.includes(scope.scope),
   );
-  const forbiddenRoots = forbiddenActivationRoots(resolution.scopes, selected);
+  const forbiddenRoots = await forbiddenActivationRoots(resolution.scopes, selected);
+  const registries = resolution.scopes.map((scope) => scope.registry);
   const scopes: ScopeWork[] = [];
   for (const scope of selected) {
     checkCancelled(options, scope.root);
-    scopes.push(await buildScope(scope, options, forbiddenRoots));
+    scopes.push(await buildScope(scope, options, forbiddenRoots, verifySelectedSet, registries));
   }
   checkCancelled(options);
   return {
@@ -829,7 +890,7 @@ async function stageNode(
     const children: Record<string, EntryIdentity> = {};
     for (const [name, target] of operation.children) {
       const destination = join(operation.path, name);
-      if ((await canonicalSkill(dirname(dirname(target)), name)) !== target)
+      if (!(await canonicalTarget(work, name, target)))
         refuse(destination, "Canonical source changed during activation.");
       const child = join(path, name);
       await symlink(relative(dirname(destination), target), child);
@@ -844,8 +905,7 @@ async function stageNode(
   if (operation.target !== undefined) {
     if (
       dirname(operation.path) === work.plan.activationRoot &&
-      (await canonicalSkill(dirname(dirname(operation.target)), basename(operation.path))) !==
-        operation.target
+      !(await canonicalTarget(work, basename(operation.path), operation.target))
     )
       refuse(operation.path, "Canonical source changed during activation.");
     if (operation.path === work.plan.activationRoot && work.scope.mode === "set")
@@ -860,7 +920,7 @@ async function stageNode(
 
 async function verifyOperationSources(work: ScopeWork, operation: Operation): Promise<void> {
   for (const [name, target] of operation.children ?? []) {
-    if ((await canonicalSkill(dirname(dirname(target)), name)) !== target)
+    if (!(await canonicalTarget(work, name, target)))
       refuse(operation.path, "Canonical source changed before activation publication.");
   }
   if (operation.target === undefined) return;
@@ -868,8 +928,7 @@ async function verifyOperationSources(work: ScopeWork, operation: Operation): Pr
     await verifySelectedSet(work.scope);
   else if (
     dirname(operation.path) === work.plan.activationRoot &&
-    (await canonicalSkill(dirname(dirname(operation.target)), basename(operation.path))) !==
-      operation.target
+    !(await canonicalTarget(work, basename(operation.path), operation.target))
   )
     refuse(operation.path, "Canonical source changed before activation publication.");
 }

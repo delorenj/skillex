@@ -60,7 +60,8 @@ skills   = []                                      # explicit selection; omit to
 | --- | --- | --- |
 | `name` | yes | Unique across the file. Addresses the source in `--source`, and every receipt records it. |
 | `repo` | yes | Must start with `https://`, `http://`, `ssh://`, `git://`, `git@` or `file://`. Recorded, compared to the checkout's `origin` (mismatch warns), and **never dialed**. |
-| `version` | yes | The pin's target: tag, branch, or 40-hex SHA. `..` and a leading `-` are refused. The **resolved commit** is what the receipt records. |
+| `version` | yes for `mode = "vendor"` | The pin's target: tag, branch, or 40-hex SHA. `..` and a leading `-` are refused. The **resolved commit** is what the receipt records. Unused in `mode = "link"` (see below). |
+| `mode` | no, default `"vendor"` | `"link"` declares a repo-owned hub (ADR-0002): the checkout's working tree is the definition, nothing is copied. Link mode requires explicit `skills`, requires each skill's `dir` to equal its name, and verifies the checkout's origin. See [implementation/link-sources.md](implementation/link-sources.md). |
 | `subdir` | no, default `"skills"` | Repo-relative directory holding the skills. `""` means the repository root. |
 | `checkout` | no, default `name` | Logical checkout id. Two sources may share one — 33GOD owns skills at two unrelated paths. |
 | `skills` | no | Explicit selection. Each item is `"name"` or `{ name = "...", dir = "..." }`. Omit to discover every skill directory under `subdir`. |

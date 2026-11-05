@@ -6,6 +6,7 @@ import { dirname, join, parse, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { fail } from "./error.js";
+import { bindRegistryContext, contextFromOptions } from "./registry-context.js";
 import { type Diagnostic, ExitCode } from "./result.js";
 import type {
   DiscoveryOptions,
@@ -362,7 +363,10 @@ export async function discoverRegistry(options: RegistryOptions = {}): Promise<R
     if (searched.includes(path)) return undefined;
     searched.push(path);
     const root = await catalogRoot(path, required, source);
-    return root ? { root, source, searched: [...searched] } : undefined;
+    if (!root) return undefined;
+    const selection: RegistrySelection = { root, source, searched: [...searched] };
+    bindRegistryContext(selection, contextFromOptions({ ...options, home, cwd, env }));
+    return selection;
   };
   if (options.registryRoot !== undefined) {
     // A required candidate either returns a selection or throws a named failure.

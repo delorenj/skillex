@@ -129,6 +129,7 @@ async function packDetails(registry: string, document: PackDocument): Promise<Co
     registry,
     inventory.names,
     join(inventory.path, "pack.toml"),
+    "pack",
   );
   return details(document, targets);
 }
@@ -452,7 +453,7 @@ async function preparePack(
           `pack ${selected.name}`,
           source.pending,
         )
-      : await requestedSkills(registry.root, names, `pack ${selected.name}`);
+      : await requestedSkills(registry.root, names, `pack ${selected.name}`, "pack");
   const existing = operation !== "create" || exists;
   const text = description(options.description, "pack description");
   let document: PackDocument | undefined;
@@ -470,6 +471,7 @@ async function preparePack(
           registry.root,
           namesAfter,
           document ? join(document.inventory.path, "pack.toml") : createdPath,
+          "pack",
         );
   const composition: CompositionDetails = document
     ? details(document, targets)
