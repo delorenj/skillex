@@ -14,6 +14,12 @@ from pathlib import Path
 import pytest
 
 REPO = Path(__file__).parents[2]
+# The "default layout" is a primary checkout with all-skills' gitdir under .git/modules. A linked
+# worktree (release worktrees, agent worktrees) keeps it under .git/worktrees/<name>/modules, so
+# the installer correctly writes a drop-in there and these default-layout assertions cannot hold.
+primary_checkout = pytest.mark.skipif(
+    (REPO / ".git").is_file(), reason="linked worktree: not the default layout"
+)
 UNITS = [
     "skillex-hermes-resync.service",
     "skillex-hermes-resync.timer",
@@ -72,6 +78,7 @@ def box(tmp_path):
     return Box(tmp_path)
 
 
+@primary_checkout
 def test_install_links_the_tracked_units_and_enables_only_the_path(box):
     done = box.run("install")
     assert done.returncode == 0, done.stderr
@@ -91,6 +98,7 @@ def test_install_links_the_tracked_units_and_enables_only_the_path(box):
     assert not list(box.user.glob("*.d"))
 
 
+@primary_checkout
 def test_install_twice_changes_nothing(box):
     assert box.run("install").returncode == 0
     before = sorted(str(p) for p in box.user.rglob("*"))
@@ -112,6 +120,7 @@ def test_a_stale_symlink_is_repointed_and_a_real_file_is_refused(box):
     assert (box.user / UNITS[0]).resolve() == (REPO / "systemd" / UNITS[0]).resolve()
 
 
+@primary_checkout
 def test_off_default_layout_gets_a_drop_in_and_loses_it_when_it_becomes_default(tmp_path):
     box = Box(tmp_path, link_default=False)
     assert box.run("install").returncode == 0

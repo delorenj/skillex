@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { readdir, readlink, realpath } from "node:fs/promises";
+import { lstat, readdir, readlink, realpath } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { promisify } from "node:util";
 import type { SkillOwner } from "./catalog-types.js";
@@ -51,25 +51,54 @@ const scanLimit = 50_000;
 
 async function readDeclarations(root: string): Promise<OwnedDeclarations> {
   const path = join(root, "all-skills", "sources.toml");
-  const text = await readVendorText(path, "E_SOURCES_MANIFEST_INVALID");
   let sources: VendorSource[] = [];
-  if (text !== null) {
-    try {
+  try {
+    const text = await readVendorText(path, "E_SOURCES_MANIFEST_INVALID");
+    if (text !== null) {
       sources = parseVendorSourcesText(text, path).filter((source) => source.mode === "link");
-    } catch (error) {
-      // Catalog and resolution paths never parsed this manifest before ADR-0002; the strict
-      // manifest errors belong to the vendor commands and doctor, which parse it themselves.
-      if (!(error instanceof SkillexError)) throw error;
     }
+  } catch (error) {
+    // Catalog and resolution paths never read this manifest before ADR-0002. A manifest that
+    // cannot be read or parsed (symlinked, non-UTF-8, oversized, rewritten mid-read by a pull)
+    // declares no owned names here; the vendor commands and doctor read it strictly and report.
+    if (!(error instanceof SkillexError) && !isErrno(error)) throw error;
   }
   const owners = new Map<string, VendorSource>();
   for (const source of sources) for (const skill of source.skills) owners.set(skill.name, source);
   return { path, sources, owners };
 }
 
-/** Declared repo-owned names. A selection memoizes them; a bare root reads them each time. */
+function isErrno(error: unknown): boolean {
+  return error instanceof Error && typeof (error as NodeJS.ErrnoException).code === "string";
+}
+
+/** Bare-root reads are memoized per process, keyed by the manifest's lstat identity. */
+const rootMemo = new Map<
+  string,
+  { readonly stamp: string; readonly pending: Promise<OwnedDeclarations> }
+>();
+
+async function manifestStamp(root: string): Promise<string> {
+  try {
+    const info = await lstat(join(root, "all-skills", "sources.toml"));
+    return `${info.dev}:${info.ino}:${info.size}:${info.mtimeMs}:${info.ctimeMs}`;
+  } catch {
+    return "absent";
+  }
+}
+
+async function readDeclarationsMemo(root: string): Promise<OwnedDeclarations> {
+  const stamp = await manifestStamp(root);
+  const cached = rootMemo.get(root);
+  if (cached && cached.stamp === stamp) return cached.pending;
+  const pending = readDeclarations(root);
+  rootMemo.set(root, { stamp, pending });
+  return pending;
+}
+
+/** Declared repo-owned names. A selection memoizes them; a bare root reuses an unchanged read. */
 export function ownedDeclarations(registry: RegistryRef): Promise<OwnedDeclarations> {
-  if (typeof registry === "string") return readDeclarations(registry);
+  if (typeof registry === "string") return readDeclarationsMemo(registry);
   let pending = declarationMemo.get(registry);
   if (!pending) {
     pending = readDeclarations(registry.root);

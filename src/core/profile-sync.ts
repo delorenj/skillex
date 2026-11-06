@@ -47,7 +47,7 @@ import type {
   ProfileSyncOptions,
   ProfileSyncResult,
 } from "./profile-types.js";
-import { sourceRevision } from "./reconciliation.js";
+import { settledRevisions, sourceRevision } from "./reconciliation.js";
 import { resolveSelection } from "./resolution.js";
 import { type Diagnostic, ExitCode, makeResult, type ResultEnvelope } from "./result.js";
 import type { RegistrySelection, ResolvedScope, SkillOrigin } from "./selection.js";
@@ -381,7 +381,14 @@ async function buildWork(
     sources: projection.sources,
     links,
   };
-  if (changes.length || !isDeepStrictEqual(next, state.data))
+  const catalogRoots = new Set(
+    projection.scopes.map((scope) => join(scope.registry.root, "all-skills")),
+  );
+  const comparable = {
+    ...next,
+    sources: settledRevisions(next.sources, state.data.sources, catalogRoots),
+  };
+  if (changes.length || !isDeepStrictEqual(comparable, state.data))
     changes.push({ action: "write-receipt", path: state.snapshot.path });
   const result: ProfileShowResult = {
     profile,

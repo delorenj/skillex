@@ -282,6 +282,22 @@ it("skill lint --path lints any hub directory", async (t) => {
   assert.equal(clean.exit, ExitCode.SUCCESS, JSON.stringify(clean.findings));
 });
 
+it("skill lint --path on a wild hub in all-skills skips the repository rules", async (t) => {
+  const f = hub(t);
+  const registry = join(f.root, "registry");
+  const catalog = join(registry, "all-skills");
+  for (const name of ["wild", "other"])
+    f.file(join(catalog, name, "SKILL.md"), `---\nname: ${name}\ndescription: Wild\n---\n`);
+  f.file(join(catalog, "wild", ".source.yaml"), "repo: example\n");
+  const options = { registryRoot: registry, home: f.root, cwd: f.root, env: {} };
+  const wild = await lintSkill(undefined, { ...options, path: join(catalog, "wild") });
+  assert.equal(wild.exit, ExitCode.SUCCESS, JSON.stringify(wild.findings));
+  // The same tree outside the catalog is a repository and keeps both rules.
+  const repo = await lintHub({ path: join(catalog, "wild") });
+  assert.ok(has(repo, "E_HUB_COUNT"));
+  assert.ok(has(repo, "W_HUB_PROVENANCE"));
+});
+
 it("skill lint <name> requires a link declaration and lints the owning checkout", async (t) => {
   const f = hub(t);
   // A name nobody owns is a configuration error, not a missing-hub refusal.

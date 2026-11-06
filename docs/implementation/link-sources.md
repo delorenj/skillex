@@ -63,10 +63,18 @@ entries report `owner: { kind: "catalog", ... }`; repo-owned skills report
 `owner: { kind: "repo", source, repo, checkout, commit }` in `skill list`,
 `skill show`, and `skill explain`.
 
+Resolution reads `all-skills/sources.toml` tolerantly: a manifest that cannot
+be read or parsed declares no owned names (so catalog-only selections still
+sync), and `doctor`/`vendor` report it strictly. Declare a source
+`optional = true` when only some machines have its checkout.
+
 Activation is unchanged. Sync writes the same relative links, now pointing into
 the owning repo (`~/HeyMa/.agents/skills/heyma -> ../../skills/heyma`), and
 receipts record the owning repo's HEAD through the existing
-`dirname(binding.path)` source evidence. The owning repo's checkout root is a
+`dirname(binding.path)` source evidence. Because the link follows the live
+checkout, that HEAD moving on its own never makes a receipt pending (`status`,
+`profile show` stay at exit 0); the fresh commit is written the next time the
+receipt is rewritten for a link change. The owning repo's checkout root is a
 forbidden receipt root like the catalog itself; a project that is the owning
 repository still activates its own hub through an ordinary relative link.
 
@@ -87,7 +95,9 @@ hub instead.
 ## Hub lint (`skillex skill lint`)
 
 `skillex skill lint <name>` lints a declared repo-owned hub in its owning
-checkout; `skillex skill lint --path <dir>` lints any hub directory; passing
+checkout; `skillex skill lint --path <dir>` lints any hub directory (a wild hub
+directly under the registry's `all-skills/` skips the repository rules
+`E_HUB_COUNT` and `W_HUB_PROVENANCE`); passing
 both or neither is `E_USAGE`. `--max-lines` overrides the 500-line budget.
 Exit codes follow the envelope: errors refuse (3), warnings drift (6), info
 and clean succeed (0). `skillex doctor` runs the same rules for every link

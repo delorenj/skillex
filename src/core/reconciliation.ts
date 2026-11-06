@@ -165,6 +165,26 @@ export async function sourceRevision(
   };
 }
 
+/**
+ * Revisions to compare a fresh plan against its receipt. A repo-owned hub is a live link into
+ * its owning checkout, so that repository's HEAD moving changes no link: a source that is not
+ * some registry's all-skills/ keeps its recorded commit for the comparison. The fresh commit
+ * is still written whenever the receipt is rewritten for any other reason.
+ */
+export function settledRevisions(
+  next: readonly SourceRevision[],
+  recorded: readonly SourceRevision[] | undefined,
+  catalogRoots: ReadonlySet<string>,
+): SourceRevision[] {
+  return next.map((source) => {
+    if (source.kind !== "catalog" || catalogRoots.has(source.path)) return source;
+    const previous = recorded?.find(
+      (entry) => entry.kind === source.kind && entry.path === source.path,
+    );
+    return previous && previous.commit !== null && source.commit !== null ? previous : source;
+  });
+}
+
 async function verifyResolvedPack(scope: ResolvedScope, options: SyncOptions): Promise<void> {
   // Each pack is verified against its own members; the scope may legitimately
   // compose several packs plus individual skills around them.
@@ -588,7 +608,14 @@ async function buildScope(
   if (
     changes.length ||
     (snapshot.document &&
-      JSON.stringify({ ...currentData, sources }) !== JSON.stringify(withoutPending(rawData)))
+      JSON.stringify({
+        ...currentData,
+        sources: settledRevisions(
+          sources,
+          rawData.sources,
+          new Set(registries.map((registry) => join(registry.root, "all-skills"))),
+        ),
+      }) !== JSON.stringify(withoutPending(rawData)))
   )
     changes.push(change(scope.scope, "write-receipt", snapshot.path));
   return {

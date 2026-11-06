@@ -34,6 +34,10 @@ ROLE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ROLE_YAML="$ROLE_DIR/role.yaml"
 PROFILE_NAME=fixture-pm
 AGENT_ID=fixture-pm
+HERMES_CODE_ROOT="$HOME/code"
+HERMES_TEMPLATE_REPO="${HERMES_TEMPLATE_REPO:-$HERMES_CODE_ROOT/33GOD/hermes-agent-template}"
+HERMES_SKILLEX_REPO="${HERMES_SKILLEX_REPO:-$HERMES_CODE_ROOT/skillex}"
+HERMES_TEMPLATE_CONFIG="$HOME/.config/hermes-agent-template/config.toml"
 REGISTRY_FILE="$HOME/no-registry"
 load_role_env() { :; }
 project_repo_path() { printf '%s' "$TEST_PROJECT"; }

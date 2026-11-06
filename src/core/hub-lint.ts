@@ -36,6 +36,11 @@ export interface HubLintOptions {
   readonly maxLines?: number;
   /** Decide whether a skill name is known; omit to skip E_HUB_SKILL_REF_UNKNOWN. */
   readonly knownSkill?: (name: string) => Promise<boolean>;
+  /**
+   * A wild hub lives in all-skills/ beside every other catalog skill and keeps its .source.yaml
+   * provenance there, so the repository rules (E_HUB_COUNT, W_HUB_PROVENANCE) do not apply.
+   */
+  readonly wild?: boolean;
 }
 
 export interface HubLintTarget {
@@ -239,7 +244,7 @@ export async function lintHub(
       /* Not a skill directory. */
     }
   }
-  if (hubs.length !== 1)
+  if (!options.wild && hubs.length !== 1)
     add(
       "E_HUB_COUNT",
       `${parent} holds ${hubs.length} skills; a repository has exactly one hub.`,
@@ -342,7 +347,7 @@ export async function lintHub(
         entry.path,
         "Rename it to SUBSKILL.md under subskills/<name>/ and route to it from the hub.",
       );
-    else if (entry.kind === "file" && basename(entry.path) === ".source.yaml")
+    else if (!options.wild && entry.kind === "file" && basename(entry.path) === ".source.yaml")
       add(
         "W_HUB_PROVENANCE",
         "A repo-owned skill carries a .source.yaml; its provenance is the repository itself.",
@@ -559,12 +564,20 @@ export async function lintSkill(
       const cwd = resolve(options.cwd ?? process.cwd());
       const path = resolve(cwd, options.path ?? ".");
       let knownSkill: ((name: string) => Promise<boolean>) | undefined;
+      let wild = false;
       try {
-        knownSkill = knownSkillIn(await discoverRegistry(options));
+        const registry = await discoverRegistry(options);
+        knownSkill = knownSkillIn(registry);
+        wild =
+          (await realpathOrSelf(dirname(path))) ===
+          (await realpathOrSelf(join(registry.root, "all-skills")));
       } catch {
         knownSkill = undefined;
       }
-      report = await lintHub({ path }, { ...lintOptions, ...(knownSkill ? { knownSkill } : {}) });
+      report = await lintHub(
+        { path },
+        { ...lintOptions, ...(knownSkill ? { knownSkill } : {}), ...(wild ? { wild } : {}) },
+      );
     }
     return makeResult("skill lint", report.data, {
       exit: hubLintExit(report.findings),

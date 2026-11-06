@@ -320,6 +320,38 @@ it("records the owning repo HEAD in activation receipts", async (t) => {
   assert.equal(source.commit, owned.head);
 });
 
+it("a commit in the owning repo alone does not make the receipt pending", async (t) => {
+  const f = fixture(t);
+  const owned = f.hub();
+  f.sources([
+    { name: "heyma", repo: SSH_REPO, checkout: "HeyMa", mode: "link", skills: ["heyma"] },
+  ]);
+  f.manifest(f.project, { inherit_global: false, skills: ["heyma"] });
+  ok(await sync({ ...f.options, scope: "project" }));
+  f.file(join(owned.root, "NOTES.md"), "unrelated change\n");
+  f.git(owned.root, "add", "--all");
+  f.git(owned.root, "commit", "-qm", "Unrelated commit");
+  const again = await sync({ ...f.options, scope: "project", dryRun: true, exitCode: true });
+  assert.equal(again.exit, 0, JSON.stringify(again.data?.scopes ?? again.findings, null, 2));
+  assert.deepEqual(
+    again.data.scopes.flatMap((scope) => scope.changes),
+    [],
+  );
+});
+
+it("an unreadable sources.toml never blocks catalog-only resolution", async (t) => {
+  const f = fixture(t);
+  f.file(
+    join(f.registry, "all-skills", "wild", "SKILL.md"),
+    "---\nname: wild\ndescription: A catalog skill\n---\n",
+  );
+  const real = f.file(join(f.root, "elsewhere", "sources.toml"), "version = 1\n");
+  symlinkSync(real, join(f.registry, "all-skills", "sources.toml"));
+  f.manifest(f.project, { inherit_global: false, skills: ["wild"] });
+  ok(await showSkill("wild", f.options));
+  ok(await sync({ ...f.options, scope: "project" }));
+});
+
 it("vendor sync reports link sources as linked and never vendors them", async (t) => {
   const f = fixture(t);
   const owned = f.hub();
