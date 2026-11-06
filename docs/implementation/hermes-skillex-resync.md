@@ -104,6 +104,15 @@ Node 24 directory put in front, and anything older than 0.1.3 is refused. The
 child gets an allowlisted environment (no credentials). Proven under
 `env -i HOME=$HOME PATH=/usr/bin:/bin`.
 
+**The registry root is a working tree, and its branch is production.** Sets,
+packs and link-source declarations are read from whatever `~/code/skillex` has
+checked out. On 2026-11-06 a wip checkpoint there had deleted Holocene's derived
+set `min-global-91a161`, and holocene-pm was refused until the set was restored
+(SKRILL-42). Each run records `registry_branch`; when it is not `main` the
+summary line ends `REGISTRY ON <branch> (not main)` and a `WARNING` line follows.
+It is a warning, not a failure: land or park the branch, but read a refusal in
+that state as possibly the branch's doing before blaming the desk.
+
 ## Evidence
 
 State directory: `$XDG_STATE_HOME/skillex` (default `~/.local/state/skillex`).
@@ -160,6 +169,14 @@ python3 ~/code/skillex/scripts/hermes-skillex-cutover.py --profile NAME --projec
   --renderer ~/code/33GOD/hermes-agent-template/scripts/hermes-profile-config.py
 # add --apply once the preview lists what you expect
 ```
+
+The cutover finds `skillex` exactly as the resync does (`$SKILLEX_BIN`, PATH,
+the mise shim, `mise which`) and never runs `<registry-root>/dist/cli.js`: that
+build belongs to whatever branch the checkout has out, and an old one (before
+link sources) failed infra-pm's sync with `E_SKILL_MISSING all-skills/heyma`
+(SKRILL-42). A config-drift refusal ("out-of-band config drift") is inspected
+with the renderer's `status` and `expected`; when the drift is only list order,
+`hermes-profile-config.py render --profile NAME` (it backs up first) clears it.
 
 Then preview and apply `skillex profile sync <name> --project <selection-project> --skillex-only` for the affected desk. Skill-operation mise tasks are retired (2026-10-10). Other statuses: `error`
 with "no recorded project" means the receipt is gone (sync that desk by hand

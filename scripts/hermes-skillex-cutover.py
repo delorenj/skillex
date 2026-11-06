@@ -255,8 +255,8 @@ def configure(profile, renderer, apply=False):
         return changed
 
 
-def cli(command):
-    result = subprocess.run(command, text=True, capture_output=True, timeout=90)
+def cli(command, env=None):
+    result = subprocess.run(command, text=True, capture_output=True, timeout=90, env=env, cwd="/")
     try:
         value = json.loads(result.stdout)
     except ValueError:
@@ -264,23 +264,30 @@ def cli(command):
     return value
 
 
+def _resync_module():
+    source = Path(__file__).resolve().with_name("hermes-skillex-resync.py")
+    spec = importlib.util.spec_from_file_location("hermes_skillex_resync", source)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 def skillex_command(registry_root, environ=os.environ):
-    """The Skillex CLI argv prefix: $SKILLEX_BIN when set (the same override
-    hermes-skillex-resync.py honours, for a host whose catalog checkout carries
-    no built dist/ or whose PATH `skillex` is another program), else the
-    checkout's own build, node <registry-root>/dist/cli.js."""
-    explicit = environ.get("SKILLEX_BIN", "").strip()
-    if explicit:
-        if (
-            not os.path.isabs(explicit)
-            or not os.access(explicit, os.X_OK)
-            or os.path.isdir(explicit)
-        ):
-            raise RuntimeError(
-                f"SKILLEX_BIN={explicit} is not an absolute path to an executable file"
-            )
-        return [explicit]
-    return ["node", str(Path(registry_root) / "dist/cli.js")]
+    """The Skillex CLI argv prefix and child environment, resolved exactly as
+    hermes-skillex-resync.py resolves it: $SKILLEX_BIN, a skillex on PATH, the
+    mise shim, `mise which skillex`, each probed for a new enough version.
+
+    It never falls back to <registry-root>/dist/cli.js. The registry root is a
+    working tree; whatever branch it has checked out (SKRILL-42: a wip branch
+    whose build predated link sources) must not decide which CLI cuts a desk
+    over, or the cutover and the resync judge the same desk differently.
+    """
+    resync = _resync_module()
+    try:
+        argv0, env, _version = resync.resolve_skillex(dict(environ), registry_root)
+    except resync.SkillexUnavailableError as error:
+        raise RuntimeError(str(error)) from None
+    return [argv0], env
 
 
 def owned_names(profile, data):
@@ -317,9 +324,12 @@ def main():
     ):
         raise RuntimeError("only explicit valid named PM profiles may be cut over")
     profile = args.fleet_home / "profiles" / args.profile
-    command = [*skillex_command(args.registry_root), "profile"]
+    executable, env = skillex_command(args.registry_root)
+    command = [*executable, "profile"]
     shared = ["--hermes-root", str(args.fleet_home), "--registry-root", str(args.registry_root)]
-    show = cli([*command, "show", args.profile, "--project", str(args.project), *shared, "--json"])
+    show = cli(
+        [*command, "show", args.profile, "--project", str(args.project), *shared, "--json"], env
+    )
     if show["exit"] not in (0, 3, 6):
         raise RuntimeError(f"selection refused: {show['findings']}")
     data = show.get("data")
@@ -334,15 +344,20 @@ def main():
     if plan["alias"]:
         validation = cli(
             [
-                "node",
-                "--input-type=module",
-                "-e",
-                "import {resolveSelection} from './dist/index.js'; const r=await resolveSelection({scope:'project',project:process.argv[1],registryRoot:process.argv[2]}); console.log(JSON.stringify(r));",
+                *executable,
+                "status",
+                "--scope",
+                "project",
+                "--project",
                 str(args.project),
+                "--registry-root",
                 str(args.registry_root),
-            ]
+                "--json",
+            ],
+            env,
         )
-        if validation["exit"] != 0:
+        # 6 is activation drift in the project root, not a selection problem.
+        if validation["exit"] not in (0, 6):
             raise RuntimeError(f"selection preflight refused: {validation['findings']}")
     summary = {
         "profile": args.profile,
@@ -370,7 +385,8 @@ def main():
                 *shared,
                 "--skillex-only",
                 "--json",
-            ]
+            ],
+            env,
         )
         summary.update(
             applied=result["exit"] == 0, exit=result["exit"], findings=result["findings"]
@@ -388,7 +404,8 @@ def main():
                 *shared,
                 "--dry-run",
                 "--json",
-            ]
+            ],
+            env,
         )
         if check["exit"] != 0 or check["data"]["changes"]:
             raise RuntimeError("post-cutover sync is not converged")

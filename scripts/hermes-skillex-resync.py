@@ -52,6 +52,7 @@ from typing import NamedTuple
 SCHEMA = 1
 MIN_SKILLEX = (0, 1, 3)  # first release that enforces the strict policy markers
 STRICT_MARKER = ".skillex-only"
+MAIN_BRANCHES = frozenset({"main", "master"})
 LOG_NAME = "hermes-resync.jsonl"
 LAST_NAME = "hermes-resync.last.json"
 LOCK_NAME = ".skillex-resync.lock"
@@ -429,6 +430,27 @@ def catalog_head(registry_root, env):
     return head if ran.rc == 0 and re.fullmatch(r"[0-9a-f]{40,64}", head) else None
 
 
+def registry_branch(registry_root, env):
+    """The branch the registry checkout has out: a name, "(detached)", or None if unknown.
+
+    Sets, packs and the link-source declarations are read from this working tree, so
+    feature work in it changes what every strict desk resolves (SKRILL-42: a wip
+    checkpoint deleted a project's derived set and refused its desk).
+    """
+    if not (registry_root / ".git").exists():
+        return None  # not a checkout of its own; never report an enclosing repo's branch
+    ran = run_capture(
+        ["git", "-C", str(registry_root), "symbolic-ref", "-q", "--short", "HEAD"], env, 15
+    )
+    if ran.rc == 0 and ran.out.strip():
+        return ran.out.strip()
+    return "(detached)" if ran.rc == 1 else None
+
+
+def off_main(branch):
+    return branch is not None and branch not in MAIN_BRANCHES
+
+
 def catalog_moved_at(registry_root, env):
     """When the catalog's HEAD last moved (its reflog), as an ISO UTC stamp; None if unknown."""
     argv = ["git", "-C", str(registry_root / "all-skills")]
@@ -515,7 +537,9 @@ def summary_line(run):
     text += f" ({', '.join(parts)})" if parts else ""
     passes = run["passes"]
     text += f", catalog {head}, {passes} pass{'es' if passes != 1 else ''}"
-    return text + f", {run['duration_ms'] / 1000:.1f}s"
+    text += f", {run['duration_ms'] / 1000:.1f}s"
+    branch = run.get("registry_branch")
+    return text + (f", REGISTRY ON {branch} (not main)" if off_main(branch) else "")
 
 
 def parse_args(argv):
@@ -581,6 +605,7 @@ def main(argv=None, environ=None):
         "dry_run": args.dry_run,
         "hermes_root": str(hermes_root),
         "registry_root": str(registry_root),
+        "registry_branch": None,
         "catalog_commit": None,
         "previous_catalog_commit": None,
         "catalog_moved_at": None,
@@ -617,6 +642,13 @@ def main(argv=None, environ=None):
             print(json.dumps(full, sort_keys=True), flush=True)
         else:
             print(run["message"], file=sys.stderr if loud else sys.stdout, flush=True)
+            if off_main(run.get("registry_branch")):
+                print(
+                    f"  WARNING registry {registry_root} is on {run['registry_branch']}, not main:"
+                    " desks resolve that branch's sets and packs",
+                    file=sys.stderr,
+                    flush=True,
+                )
             for desk in full["results"]:
                 if desk["status"] in ("refused", "error"):
                     why = desk.get("reason", "")
@@ -659,6 +691,7 @@ def main(argv=None, environ=None):
         except SkillexUnavailableError as error:
             return finish("error", EXIT_ENV, f"hermes-skillex-resync: ERROR - {error}")
         run["skillex"] = {"bin": argv0, "version": version}
+        run["registry_branch"] = registry_branch(registry_root, env)
         run["previous_catalog_commit"] = previous_catalog_commit(state_dir / LAST_NAME)
         skillex = Skillex(argv0, env, hermes_root, registry_root, args.timeout)
 
