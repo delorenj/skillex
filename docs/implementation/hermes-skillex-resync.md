@@ -143,8 +143,9 @@ jq '{status,finished_at,trigger,catalog_commit,counts,attention}' ~/.local/state
 ## Exit 3 (`refused`) and what to do
 
 Exit 3 means the desk's strict policy is violated, not that the catalog moved:
-an unowned entry in `skills/` (a local skill, a stray directory, a Hermes
-`.archive` or `.hub` that the curator created), a non-empty
+an unowned entry in `skills/` (a symlink Skillex does not own, a stray file, a
+Hermes `.archive`, a `.hub` with an install, or an agent-written skill named
+like a selected skill), a non-empty
 `skills.external_dirs`, or a policy marker that is not a regular file. The
 `reason` and `findings[].path` name the entry. The resync leaves it alone.
 

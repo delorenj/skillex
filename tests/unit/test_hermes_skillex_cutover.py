@@ -41,6 +41,7 @@ def test_real_root_and_owned_child_survive_preservation(tmp_path):
     (root / "owned").symlink_to(target)
     (root / "foreign").mkdir()
     (root / "foreign" / "SKILL.md").write_text("keep me")
+    (root / "foreign" / "upstream").symlink_to(target)  # a link inside: strict policy refuses it
     ino = root.stat().st_ino
     child = (root / "owned").lstat().st_ino
     module = helper()
@@ -98,6 +99,7 @@ def test_category_stubs_and_an_idle_hub_stay_but_seeded_payloads_are_preserved(t
     (root / "creative" / "ascii-art").mkdir(parents=True)
     (root / "creative" / "DESCRIPTION.md").write_text("---\n---\n")
     (root / "creative" / "ascii-art" / "SKILL.md").write_text("# seeded")
+    (root / "creative" / "ascii-art" / "upstream").symlink_to(tmp_path)  # a link: not kept
     (root / ".hub" / "index-cache").mkdir(parents=True)
     (root / ".hub" / "quarantine").mkdir()
     (root / ".hub" / "audit.log").write_text("")
@@ -115,19 +117,35 @@ def test_a_refused_desk_keeps_its_receipt_owned_links(tmp_path):
     (root / "alpha").symlink_to(tmp_path)
     (root / "learned").mkdir()
     (root / "learned" / "SKILL.md").write_text("# learned")
+    (root / "foreign").symlink_to(tmp_path)
     (root / ".usage.json").write_text("{}")
     data = {
         "managed": None,
-        "preserved": [{"name": "learned"}, {"name": ".usage.json"}],
+        "preserved": [{"name": "learned"}, {"name": "foreign"}, {"name": ".usage.json"}],
     }
     module = helper()
     owned = module.owned_names(profile, data)
     assert owned == {"alpha"}
-    assert sorted(module.plan_root(profile, owned)["children"]) == ["learned"]
+    assert sorted(module.plan_root(profile, owned)["children"]) == ["foreign"]
     with pytest.raises(RuntimeError):
         module.owned_names(profile, {"managed": None})
-    managed = {"managed": [{"name": "alpha", "state": "unchanged"}, {"name": "b", "state": "create"}]}
+    managed = {
+        "managed": [{"name": "alpha", "state": "unchanged"}, {"name": "b", "state": "create"}]
+    }
     assert module.owned_names(profile, managed) == {"alpha"}
+
+
+def test_agent_written_skills_stay_unless_named_like_a_selected_skill(tmp_path):
+    profile = tmp_path / "pm"
+    root = profile / "skills"
+    (root / "devops" / "ci-nightly-fix" / "references").mkdir(parents=True)
+    (root / "devops" / "ci-nightly-fix" / "SKILL.md").write_text("# learned")
+    (root / "devops" / "ci-nightly-fix" / "references" / "notes.md").write_text("notes")
+    (root / "review" / "alpha").mkdir(parents=True)
+    (root / "review" / "alpha" / "SKILL.md").write_text("# clash")
+    plan = helper().plan_root(profile, set(), frozenset({"alpha"}))
+    assert sorted(plan["children"]) == ["review"]
+    assert sorted(helper().plan_root(profile, set())["children"]) == []
 
 
 # The config gate asks THE canonical renderer for the expected config (base + delta + renderer pins).

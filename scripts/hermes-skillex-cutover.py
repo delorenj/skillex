@@ -76,15 +76,48 @@ def idle_hub(path):
     return True
 
 
+LEARNED_SCAN_LIMIT = 20_000
+
+
+def learned_skills(path):
+    """Skill directory names in an agent-written tree, or None if it holds a link or special file.
+
+    Mirrors learnedSkills in src/core/profile-policy.ts.
+    """
+    if path.name.startswith(".") or not _real_dir(path):
+        return None
+    skills, pending, seen = [], [path], 0
+    while pending:
+        directory = pending.pop()
+        for child in directory.iterdir():
+            seen += 1
+            if seen > LEARNED_SCAN_LIMIT or child.is_symlink():
+                return None
+            if child.is_dir():
+                pending.append(child)
+            elif not child.is_file():
+                return None
+            elif child.name == "SKILL.md":
+                skills.append(directory.name)
+    return skills
+
+
 def safe_metadata(path, desired=frozenset()):
-    """Mirrors hermesMetadata in src/core/profile-policy.ts."""
+    """What strict policy keeps in place: mirrors assertStrictProfile in profile-policy.ts.
+
+    Hermes bookkeeping, bundled category stubs, an idle hub, and skills the desk's own agent
+    wrote, unless one shares its name with a skill Skillex projects (`desired`).
+    """
     if path.is_symlink():
         return False
     if path.name in SAFE_METADATA:
         return path.is_file()
     if path.name in SAFE_METADATA_DIRS and path.is_dir():
         return True
-    return idle_hub(path) or (path.name not in desired and category_stub(path))
+    if idle_hub(path) or (path.name not in desired and category_stub(path)):
+        return True
+    learned = learned_skills(path)
+    return learned is not None and not desired.intersection([path.name, *learned])
 
 
 def fingerprint(path):
@@ -101,7 +134,7 @@ def fingerprint(path):
     return value
 
 
-def plan_root(profile, owned):
+def plan_root(profile, owned, desired=frozenset()):
     if profile.is_symlink() or not profile.is_dir():
         raise RuntimeError(f"real named profile required: {profile}")
     root = profile / "skills"
@@ -112,7 +145,7 @@ def plan_root(profile, owned):
     children = {
         p.name: fingerprint(p)
         for p in sorted(root.iterdir())
-        if p.name not in owned and not safe_metadata(p)
+        if p.name not in owned and not safe_metadata(p, desired)
     }
     info = root.lstat()
     return {"alias": False, "root": [info.st_dev, info.st_ino, info.st_mode], "children": children}
@@ -293,7 +326,8 @@ def main():
     if data is None or data.get("pending"):
         raise RuntimeError("unresolved profile or pending recovery requires inspection")
     owned = owned_names(profile, data)
-    plan = plan_root(profile, owned)
+    desired = frozenset(item["name"] for item in (data.get("managed") or []))
+    plan = plan_root(profile, owned, desired)
     renderer = load_renderer(args.renderer, args.fleet_home)
     config_change = configure(profile, renderer)
     # Validate selection independently for an alias before changing its root.

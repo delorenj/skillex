@@ -1,7 +1,7 @@
 import type { Dirent } from "node:fs";
 import { constants } from "node:fs";
 import { open, readdir, readFile, stat } from "node:fs/promises";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { parseDocument } from "yaml";
 import { entry } from "./activation-ownership.js";
 import { fail } from "./error.js";
@@ -13,6 +13,7 @@ import { ExitCode } from "./result.js";
 // org sync manifest, the bundled-skill sync manifest, the skill-mutation audit ledger,
 // the curator's pre-run tarball store, and the skill manager's per-skill lock files
 // (tools/skill_manager_tool.py).
+// Agent-written skills are tolerated separately (learnedSkills below).
 // .archive stays refused: curator archival moved content out. .hub is tolerated only while it
 // records no install (hermes_cli/skills_hub.py: an empty lock, an empty quarantine, browse
 // caches); any installed or quarantined payload is still refused.
@@ -124,15 +125,57 @@ export async function profileInheritsGlobal(profile: ProfileLocation): Promise<b
   return inherit !== false;
 }
 
+const learnedScanLimit = 20_000;
+
+/**
+ * Skills a desk's agent wrote for itself (Hermes skill_manage), or a category of them: a real,
+ * non-dot directory whose whole tree holds only real directories and regular files. Returns the
+ * names of every skill directory inside it (a directory holding SKILL.md), or null when the tree
+ * holds a link or special file, which could pull content in from outside the desk.
+ */
+async function learnedSkills(item: ProfileLocalEntry): Promise<string[] | null> {
+  if (item.kind !== "directory" || item.name.startsWith(".")) return null;
+  const skills: string[] = [];
+  const pending = [item.path];
+  let seen = 0;
+  while (pending.length) {
+    const directory = pending.pop() as string;
+    const entries = await children(directory);
+    if (!entries) return null;
+    for (const child of entries) {
+      if (++seen > learnedScanLimit) return null;
+      if (child.isDirectory()) pending.push(join(directory, child.name));
+      else if (!child.isFile()) return null;
+      else if (child.name === "SKILL.md") skills.push(basename(directory));
+    }
+  }
+  return skills;
+}
+
+/**
+ * Strict (Skillex-only) policy: Skillex owns every link it projects. Hermes bookkeeping and the
+ * skills a desk's own agent wrote may sit beside those links (operator decision 2026-11-06,
+ * SKRILL-35); a learned skill named like a selected one, a foreign link, a stray file, an
+ * archive or a hub install is still refused. `desired` names the skills Skillex will project.
+ */
 export async function assertStrictProfile(
   profile: ProfileLocation,
   options: ProfileOptions,
   local: readonly ProfileLocalEntry[],
+  desired: ReadonlySet<string> = new Set(),
 ): Promise<boolean> {
   if (!(await strictProfile(profile, options))) return false;
-  for (const item of local)
-    if (!(await hermesMetadata(item)))
-      refuse(item.path, `Skillex-only profile contains unowned entry ${item.name}.`);
+  for (const item of local) {
+    if (await hermesMetadata(item)) continue;
+    const learned = await learnedSkills(item);
+    if (!learned) refuse(item.path, `Skillex-only profile contains unowned entry ${item.name}.`);
+    const clash = [item.name, ...learned].find((name) => desired.has(name));
+    if (clash !== undefined)
+      refuse(
+        item.path,
+        `Agent-written skill ${clash} in ${item.name} shares its name with a selected skill.`,
+      );
+  }
   const path = join(profile.root, "config.yaml");
   const config = await entry(path);
   if (config) {

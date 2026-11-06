@@ -98,9 +98,21 @@ Hermes writes bookkeeping into the skills root that is never a skill: the
 curator's `.curator_state` appeared in 15 of the 25 strict desks within two
 hours of the cutover and made strict show/sync refuse them. 0.1.3 tolerates
 `.usage.json`, `.usage.json.lock`, `.curator_state`, `.curator_suppressed`,
-`.sync_state` (regular files) and `.curator_backups/` (directory). `.hub` and
-`.archive` stay refused; either one means content moved in or out of the
-projection. Note the curator treats Skillex links as agent-created skills and
+`.sync_state` (regular files) and `.curator_backups/` (directory). `.archive`
+stays refused; it means content moved out of the projection. Since 0.4.1 an
+idle `.hub` (only `audit.log`, `taps.json`, a `lock.json` with no installs, an
+empty `quarantine/`, an `index-cache/` of plain files) and a bundled category
+stub (a directory holding exactly one regular `DESCRIPTION.md`, seeded by Hermes
+before bf21d8d) are tolerated too; a `.hub` with an install is refused.
+
+Since 0.4.2 (SKRILL-35, operator decision 2026-11-06) strict desks also keep
+**agent-written skills**: a non-hidden directory tree of only directories and
+regular files that Hermes `skill_manage` wrote, such as `devops/ci-nightly-fix/`.
+Skillex never links into or removes it. It refuses only when a skill in that
+tree (or the top-level directory itself) shares its name with a selected skill,
+because Hermes would then list two skills under one name. A symlink, socket or
+other special file anywhere in the tree, or a stray top-level file, still makes
+the entry unowned. Note the curator treats Skillex links as agent-created skills and
 may archive an unused one after `curator.archive_after_days`; strict show then
 refuses with `.archive`, which is the intended alarm.
 

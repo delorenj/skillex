@@ -338,7 +338,12 @@ async function buildWork(
       );
   state = await readProfileState(profile, receiptOptions(profile, options, projection.scopes));
   const observed = await observations(profile, state);
-  await assertStrictProfile(profile, options, observed.local);
+  await assertStrictProfile(
+    profile,
+    options,
+    observed.local,
+    new Set(projection.desired.map((desired) => desired.name)),
+  );
   const links = { ...state.data.links };
   const changes: ProfileChange[] = [];
   if (!observed.root) changes.push({ action: "mkdir", path: profile.skillsRoot });
@@ -863,7 +868,12 @@ export async function runProfileSync(
         }
         await assertProfileIdentity(selected);
         if (
-          await assertStrictProfile(selected, options, (await observations(selected, state)).local)
+          await assertStrictProfile(
+            selected,
+            options,
+            (await observations(selected, state)).local,
+            new Set(work.projection.desired.map((desired) => desired.name)),
+          )
         )
           await publishStrictPolicy(selected);
         const currentProfile = await discoverProfile(name, options);
