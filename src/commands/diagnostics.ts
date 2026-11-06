@@ -56,7 +56,15 @@ function statusText(data: StatusResult): string {
 }
 
 function explanationText(data: ExplainResult): string {
-  const lines = [data.name, `Canonical: ${data.canonical ?? "unresolved"}`];
+  const lines = [
+    data.name,
+    `Canonical: ${data.canonical ?? "unresolved"}`,
+    ...(data.owner?.kind === "repo"
+      ? [`Owner: repo ${data.owner.source} at ${data.owner.checkout}`]
+      : data.owner
+        ? ["Owner: catalog (all-skills/)"]
+        : []),
+  ];
   for (const scope of data.scopes) {
     lines.push(
       `${scope.scope}: ${scope.state}`,
@@ -83,7 +91,7 @@ function doctorText(data: DoctorResult): string {
   for (const source of data.sources) {
     lines.push(
       `Registry: ${source.registry.root}`,
-      `  Sources: ${source.canonicalSkills} canonical skills; ${source.sets} sets; ${source.packs} packs`,
+      `  Sources: ${source.canonicalSkills} canonical skills; ${source.repoOwnedSkills} repo-owned skills; ${source.sets} sets; ${source.packs} packs`,
       `  Provenance: ${source.provenance} receipts; ${source.digestsChecked} digests checked`,
     );
   }

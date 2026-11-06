@@ -13,6 +13,7 @@ import { fail, SkillexError } from "./error.js";
 import { inspectPath, requireDirectory } from "./filesystem.js";
 import { isVersionComponent, parseManifest } from "./manifest.js";
 import { readSkillMetadata } from "./metadata.js";
+import { catalogOwner, ownedCheckout, ownedDeclarations, skillOwner } from "./owned-sources.js";
 import { type Diagnostic, ExitCode, makeResult, type ResultEnvelope } from "./result.js";
 import type { RegistryOptions } from "./selection.js";
 
@@ -213,7 +214,7 @@ export async function listSkills(
       if (entry.name.startsWith(".") || entry.name.startsWith("_")) continue;
       if (!entry.isDirectory() && !entry.isSymbolicLink()) continue;
       try {
-        const path = await canonicalSkill(registry.root, entry.name);
+        const path = await canonicalSkill(registry, entry.name);
         const metadata = await readSkillMetadata(path);
         validDefinitions += 1;
         if (
@@ -222,12 +223,41 @@ export async function listSkills(
           !(metadata.description?.toLowerCase().includes(query) ?? false)
         )
           continue;
-        skills.push({ name: entry.name, path, ...metadata, references: [] });
+        skills.push({ name: entry.name, path, owner: catalogOwner, ...metadata, references: [] });
       } catch (error) {
         validationExits.push(error instanceof SkillexError ? error.exit : ExitCode.FAILURE);
         report(error, join(catalog, entry.name), findings);
       }
     }
+    // Repo-owned definitions (ADR-0002). A name also present in all-skills/ was refused above.
+    const declarations = await ownedDeclarations(registry);
+    for (const [name, source] of [...declarations.owners].sort(([a], [b]) => compare(a, b))) {
+      if (await inspectPath(join(catalog, name))) continue;
+      try {
+        // An optional source without a checkout on this machine is simply not listed.
+        if (source.optional && !(await ownedCheckout(registry, source)).checkout.root) continue;
+        const path = await canonicalSkill(registry, name);
+        const metadata = await readSkillMetadata(path);
+        validDefinitions += 1;
+        if (
+          query &&
+          !name.toLowerCase().includes(query) &&
+          !(metadata.description?.toLowerCase().includes(query) ?? false)
+        )
+          continue;
+        skills.push({
+          name,
+          path,
+          owner: await skillOwner(registry, name, path),
+          ...metadata,
+          references: [],
+        });
+      } catch (error) {
+        validationExits.push(error instanceof SkillexError ? error.exit : ExitCode.FAILURE);
+        report(error, declarations.path, findings);
+      }
+    }
+    skills.sort((a, b) => compare(a.name, b.name));
     const references = await compositionReferences(registry.root, findings);
     // A completely invalid catalog has failed validation, rather than produced
     // a partial report. Count valid definitions before applying the search query.
@@ -261,13 +291,17 @@ export async function showSkill(
 ): Promise<ResultEnvelope<SkillShowData | null>> {
   try {
     const registry = await discoverRegistry(options);
-    const path = await canonicalSkill(registry.root, name);
+    const path = await canonicalSkill(registry, name);
     const metadata = await readSkillMetadata(path);
+    const owner = await skillOwner(registry, name, path);
     const findings: Diagnostic[] = [];
     const references = await compositionReferences(registry.root, findings);
     return makeResult(
       "skill show",
-      { registry, skill: { name, path, ...metadata, references: references.get(name) ?? [] } },
+      {
+        registry,
+        skill: { name, path, owner, ...metadata, references: references.get(name) ?? [] },
+      },
       { exit: findings.length ? ExitCode.PARTIAL : ExitCode.SUCCESS, findings },
     );
   } catch (error) {

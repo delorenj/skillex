@@ -1,6 +1,6 @@
 # ADR-0001: One Writable Skill Definition with Reference-Only Compositions
 
-- **Status:** Accepted; set/pack terminology amended by the user on 2026-10-10
+- **Status:** Accepted; set/pack terminology amended by the user on 2026-10-10; invariant 1 and the rejection of Option C superseded by [ADR-0002](./ADR-0002-repo-owned-hub-skills.md) on 2026-11-05
 - **Date:** 2026-08-26
 - **Deciders:** Jarad DeLorenzo
 

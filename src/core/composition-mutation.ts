@@ -86,6 +86,7 @@ export async function requestedSkills(
   registry: string,
   names: readonly string[],
   path: string,
+  composition: "set" | "pack" = "set",
 ): Promise<Map<string, string>> {
   if (!Array.isArray(names) || !names.every((name) => typeof name === "string")) {
     fail("E_SKILL_NAME", "Requested skills must be an array of canonical names.", {
@@ -95,7 +96,8 @@ export async function requestedSkills(
   }
   const selected = parseManifest({ skills: names }, path).skills;
   const targets = new Map<string, string>();
-  for (const { name } of selected) targets.set(name, await canonicalSkill(registry, name));
+  for (const { name } of selected)
+    targets.set(name, await canonicalSkill(registry, name, { composition }));
   return targets;
 }
 
@@ -295,7 +297,9 @@ async function apply(
     for (const change of plan.changes.filter((change) => change.action === "create-link")) {
       await parents(plan, change.path);
       if (await inspectPath(change.path)) conflict(change.path);
-      const target = await canonicalSkill(plan.registry.root, basename(change.path));
+      const target = await canonicalSkill(plan.registry.root, basename(change.path), {
+        composition: plan.composition.kind,
+      });
       if (target !== change.target)
         conflict(change.path, "The canonical source changed during the operation.");
       await symlink(relative(dirname(change.path), target), change.path);

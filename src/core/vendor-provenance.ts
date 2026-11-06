@@ -8,7 +8,7 @@ import { fail } from "./error.js";
 import { requireDirectory } from "./filesystem.js";
 import { parseProvenanceMetadata } from "./metadata.js";
 import { ExitCode } from "./result.js";
-import { readVendorText } from "./vendor-sources.js";
+import { readVendorText, vendorVersion } from "./vendor-sources.js";
 import type { VendorProvenance, VendorProvenanceInput } from "./vendor-types.js";
 
 const fields = [
@@ -100,7 +100,7 @@ export function serializeVendorProvenance(input: VendorProvenanceInput): string 
       type: "vendored",
       source: input.source.name,
       upstream: input.source.repo,
-      upstream_version: input.source.version,
+      upstream_version: vendorVersion(input.source),
       upstream_commit: input.commit,
       upstream_tree: input.tree,
       upstream_path: input.upstreamPath,

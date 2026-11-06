@@ -7,6 +7,7 @@ import { fail, SkillexError } from "./error.js";
 import { isSkillName } from "./manifest.js";
 import { parseProvenanceMetadata, parseSkillMetadata } from "./metadata.js";
 import { ExitCode } from "./result.js";
+import { vendorVersion } from "./vendor-sources.js";
 import type { VendorOptions, VendorSource } from "./vendor-types.js";
 
 const execute = promisify(execFile);
@@ -244,6 +245,7 @@ export async function resolveVendorPin(
   options: VendorOptions = {},
 ): Promise<VendorPin> {
   const root = await realpath(checkoutRoot);
+  const pinned = vendorVersion(source);
   const bare =
     text(await git(root, ["rev-parse", "--is-bare-repository"], options), root).trim() === "true";
   const declaredRoot = text(
@@ -264,7 +266,7 @@ export async function resolveVendorPin(
   const commit = text(
     await git(
       root,
-      ["rev-parse", "--verify", "--end-of-options", `${source.version}^{commit}`],
+      ["rev-parse", "--verify", "--end-of-options", `${pinned}^{commit}`],
       options,
       true,
     ),
@@ -276,7 +278,7 @@ export async function resolveVendorPin(
   const ref = text(
     await git(
       root,
-      ["rev-parse", "--symbolic-full-name", "--verify", "--end-of-options", source.version],
+      ["rev-parse", "--symbolic-full-name", "--verify", "--end-of-options", pinned],
       options,
       true,
     ),
@@ -300,7 +302,7 @@ export async function resolveVendorPin(
         ? "branch"
         : ref.startsWith("refs/tags/")
           ? "tag"
-          : /^[a-f0-9]{7,64}$/i.test(source.version)
+          : /^[a-f0-9]{7,64}$/i.test(pinned)
             ? "commit"
             : "unknown",
     committedAt,

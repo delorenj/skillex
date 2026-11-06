@@ -20,6 +20,7 @@ const version = /^[A-Za-z0-9][A-Za-z0-9._/+-]*$/;
 const sourceFields = new Set([
   "name",
   "repo",
+  "mode",
   "version",
   "checkout",
   "subdir",
@@ -82,10 +83,16 @@ function parseSource(value: unknown, path: string): VendorSource {
     /[\s\0]/.test(value.repo)
   )
     invalid(path, `Source ${value.name} needs a repository URL or SSH identity.`);
+  const mode = value.mode ?? "vendor";
+  if (mode !== "vendor" && mode !== "link")
+    invalid(path, `Source ${value.name} mode must be "vendor" or "link".`);
+  const link = mode === "link";
+  // Link mode exposes the checkout's working tree, so a version is optional and never used.
   if (
-    typeof value.version !== "string" ||
-    !version.test(value.version) ||
-    value.version.includes("..")
+    (!link || value.version !== undefined) &&
+    (typeof value.version !== "string" ||
+      !version.test(value.version) ||
+      value.version.includes(".."))
   )
     invalid(path, `Source ${value.name} needs a safe Git tag, branch, or commit.`);
   const checkout = value.checkout ?? value.name;
@@ -105,6 +112,11 @@ function parseSource(value: unknown, path: string): VendorSource {
       path,
       "Explicit source skills and discovery include/exclude selectors are mutually exclusive.",
     );
+  if (link && (value.skills === undefined || value.skills.length === 0))
+    invalid(
+      path,
+      `Link source ${value.name} must list its skills explicitly; link mode never discovers names.`,
+    );
   const skills: VendorSourceSkill[] = [];
   for (const item of (value.skills ?? []) as unknown[]) {
     const member = typeof item === "string" ? { name: item } : item;
@@ -120,6 +132,11 @@ function parseSource(value: unknown, path: string): VendorSource {
     const dir = member.dir ?? member.name;
     if (!safeComponent(dir))
       invalid(path, `Source skill ${member.name} dir must be one safe path component.`);
+    if (link && dir !== member.name)
+      invalid(
+        path,
+        `Link source skill ${member.name} must live in a directory of the same name; link mode never renames.`,
+      );
     if (skills.some((skill) => skill.name === member.name))
       invalid(path, `Duplicate source skill name: ${member.name}`);
     skills.push({ name: member.name, dir });
@@ -127,7 +144,8 @@ function parseSource(value: unknown, path: string): VendorSource {
   return {
     name: value.name,
     repo: value.repo,
-    version: value.version,
+    mode,
+    version: typeof value.version === "string" ? value.version : null,
     checkout,
     subdir,
     membership: value.skills !== undefined ? "explicit" : "discovery",
@@ -136,6 +154,21 @@ function parseSource(value: unknown, path: string): VendorSource {
     exclude,
     optional: value.optional ?? false,
   };
+}
+
+/** The pinned version of a vendor-mode source; link sources never reach vendoring. */
+export function vendorVersion(source: VendorSource): string {
+  if (source.mode === "link" || source.version === null)
+    fail(
+      "E_SOURCE_LINKED",
+      `Source ${source.name} is a link source and is never vendored.`,
+      {
+        name: source.name,
+        fix: "Link sources expose their checkout directly; use skill show or skill lint instead of vendoring.",
+      },
+      ExitCode.REFUSED,
+    );
+  return source.version;
 }
 
 export function checkVendorSignal(options: Pick<VendorOptions, "signal">): void {
@@ -192,6 +225,21 @@ export function parseVendorSourcesText(text: string, path: string): readonly Ven
   const sources = ((raw.source ?? []) as unknown[]).map((source) => parseSource(source, path));
   if (new Set(sources.map((source) => source.name)).size !== sources.length)
     invalid(path, "Source names must be unique.");
+  // A linked name has exactly one owner: no other source may declare or vendor it.
+  const owners = new Map<string, string>();
+  for (const source of sources)
+    for (const skill of source.skills) {
+      const owner = owners.get(skill.name);
+      if (
+        owner !== undefined &&
+        (source.mode === "link" || sources.find((s) => s.name === owner)?.mode === "link")
+      )
+        invalid(
+          path,
+          `Skill ${skill.name} is declared by both ${owner} and ${source.name}; a repo-owned name has one owner.`,
+        );
+      owners.set(skill.name, source.name);
+    }
   return sources;
 }
 

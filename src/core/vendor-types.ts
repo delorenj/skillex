@@ -24,7 +24,10 @@ export interface VendorSourceSkill {
 export interface VendorSource {
   readonly name: string;
   readonly repo: string;
-  readonly version: string;
+  /** "vendor" copies a pinned commit into all-skills/; "link" exposes the checkout's working tree (ADR-0002). */
+  readonly mode: "vendor" | "link";
+  /** Required for vendor mode; optional and unused in link mode. */
+  readonly version: string | null;
   readonly checkout: string;
   readonly subdir: string;
   readonly membership: "explicit" | "discovery";
@@ -88,7 +91,8 @@ export interface VendorSkillStatus {
     | "unknown"
     | "recorded"
     | "orphaned"
-    | "foreign";
+    | "foreign"
+    | "linked";
   readonly recordedCommit: string | null;
   readonly upstreamCommit: string | null;
   readonly recordedDigest: string | null;
@@ -116,6 +120,7 @@ export interface VendorStatusResult {
   readonly upstream: boolean;
   readonly sources: readonly {
     readonly name: string;
+    readonly mode: "vendor" | "link";
     readonly membership: "explicit" | "recorded";
     readonly checkout: VendorCheckout | null;
     readonly upstreamCommit: string | null;
@@ -125,6 +130,8 @@ export interface VendorStatusResult {
 
 export interface VendorSourceResolution {
   readonly name: string;
+  /** Link sources are never vendored: they are reported as skipped and linked. */
+  readonly linked?: true;
   readonly checkout: string | null;
   readonly commit: string | null;
   readonly refKind: "branch" | "tag" | "commit" | "unknown" | null;

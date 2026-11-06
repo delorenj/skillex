@@ -9,7 +9,7 @@
     "skillName": {
       "type": "string",
       "pattern": "^[a-z0-9]([a-z0-9._-]*[a-z0-9])?(?![\\s\\S])",
-      "description": "One canonical all-skills/ name: lowercase letters, digits, dot, dash, or underscore, beginning and ending with a letter or digit."
+      "description": "One canonical skill name, defined exactly once: in all-skills/ (wild and vendored skills) or by a repo-owned link source (ADR-0002). Lowercase letters, digits, dot, dash, or underscore, beginning and ending with a letter or digit."
     },
     "compositionName": {
       "type": "string",

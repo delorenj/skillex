@@ -10,6 +10,7 @@ import { fail, SkillexError } from "./error.js";
 import { inspectPath, requireDirectory } from "./filesystem.js";
 import { isSkillName } from "./manifest.js";
 import { readSkillMetadata } from "./metadata.js";
+import { ownedSource } from "./owned-sources.js";
 import { ExitCode, makeResult, type ResultEnvelope } from "./result.js";
 import type { RegistryOptions, RegistrySelection } from "./selection.js";
 
@@ -77,6 +78,18 @@ async function target(name: string, options: RegistryOptions) {
   const catalog = await requireDirectory(join(registry.root, "all-skills"), "E_NO_REGISTRY");
   const path = join(catalog, name);
   if (await inspectPath(path)) collision(path);
+  const owner = await ownedSource(registry, name);
+  if (owner)
+    fail(
+      "E_DIVERGENT_CANONICAL_NAME",
+      `Skill ${name} is owned by link source ${owner.name}; all-skills/ cannot define it too.`,
+      {
+        name,
+        path,
+        fix: `Edit the hub in its owning repository (${owner.repo}), or choose another name.`,
+      },
+      ExitCode.REFUSED,
+    );
   return { registry, catalog, path, catalogIdentity: await lstat(catalog) };
 }
 

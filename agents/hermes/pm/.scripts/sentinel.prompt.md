@@ -1,7 +1,7 @@
 # Skillex PM — continuous ticket sentinel pass
 
 Run one continuous ticket orchestration pass for the **skillex** repo.
-A cheap systemd heartbeat already decided this full pass is needed.
+The heartbeat runner (`.scripts/heartbeat.sh`) already decided this full pass is needed.
 
 Working repo: the git root containing this role at `agents/hermes/pm/`.
 Ticket provider: **plane** (reached only through the adapter — see below).
@@ -13,8 +13,8 @@ pass. Act autonomously, but stay inside the project contracts. Read
 `continuous-ticket-orchestration.md`, `autonomous-delegated-review.md`,
 `bloodbank-events.md`. When the project carries
 `agents/hermes/pm/IMPLEMENTATION-LANES.md`, read it too: it is this
-project's implementation-lane claim policy for a WIP limit above one
-(`.project.json` `automation.implementation.wip_limit`).
+project's extra claim policy. Parallel workers are the default; no such file is
+needed to run more than one.
 
 ## Ticket access — adapter only
 
@@ -36,10 +36,41 @@ tp create_issue "<title>" "<desc>"    # file a NEW ticket; --if-absent to dedupe
 Reason in **normalized states**, not provider terms. This pass works identically
 on Linear, Plane, or Trello.
 
+## Board-driver lease — yours if the launcher holds it
+
+The board-driver lease (`.scripts/momo-wip-lock.py`, `runtime/wip-driver.lock`) is
+a short board-write serializer, **not** a WIP limit. It exists so you, the
+human-drivable Momo and any other driver never write the board in the same
+instant. One rule decides everything: **the lease is yours only under the exact
+owner string you were handed or acquired with; any other fresh owner means back
+off.**
+
+- **The launcher already holds it for you** when this prompt ends with a
+  "Board-driver lease for THIS pass" section. That section names your owner
+  (`hermes:skillex-pm:pass-...`). It is yours: check it with
+  `momo-wip-lock.py held <path> <owner>`, `refresh` it during a long pass,
+  `release` it before waiting on workers, and re-acquire it after an early release,
+  always with **that exact owner written out literally** (your terminal does not
+  see the launcher's environment). **Never acquire it under any other name**
+  (`hermes:skillex-pm`, a new stamp, a session id): your own lease would refuse
+  you, and backing off from your own lease dispatches nothing.
+- **No launcher** (a Bloodbank, Momo-crank or manual turn)? Pick ONE owner for this
+  turn, `hermes:skillex-pm:<turn tag>` (the invocation or session id, or a UTC
+  stamp), write it out literally and reuse that exact string for every
+  `acquire`/`held`/`refresh`/`release` in the turn, so your own re-acquire is
+  reentrant. Never regenerate it (no `$(date)` in the command). Use the default
+  ttl (300s) and `refresh` while you drive: a turn has no exit trap, so a long ttl
+  would block every other driver for that long if the turn is cut off.
+- **Back off** (no board writes, no dispatch; leave it for the next pass) when
+  the lease is held fresh by any owner that is not your exact string: `momo`, a
+  job (`claude:...`), another agent, or another pass or turn of your own desk
+  (`hermes:skillex-pm` with a different tag is a real sibling driver). Momo
+  must always be able to make you stand down.
+
 ## Pass
 
 **Trigger.** This pass runs both as a scheduled reconcile (`.scripts/heartbeat.sh`;
-the per-agent heartbeat timer is retired, so scheduling comes from Bloodbank) AND
+the per-agent heartbeat timer is retired; any recurring schedule is a Candybar manifest, never a timer or cron) AND
 on a live **Plane board event** — a `bloodbank.evt.repo.task.*` fact (repo identity
 lives in `data.repo`, never in the subject; the Plane name survives only as
 `data.provider_event_type`, e.g. `plane.ticket.created`). The single normalizer
@@ -53,10 +84,11 @@ comment / transition per the lifecycle) before the general reconcile below.
 2. Reconcile: active milestone (`tp active_milestone`), issues (`tp list_issues`),
    local evidence under `_bmad-output/implementation-artifacts/issue-evidence/`,
    and live worker state (zellij sessions, worktrees, git).
-3. If one worker ticket is `started` and healthy, monitor it and record state.
-4. If no worker is active and a ready unblocked issue exists, delegate exactly
-   one worker (see the orchestration doc), move the issue to `started`, and
-   create/refresh its evidence file. Do not self-accept review here.
+3. Monitor every `started` ticket whose worker is healthy and record state.
+4. For EVERY ready unblocked issue with no active worker, delegate one worker
+   per ticket (see the orchestration doc), in parallel; move each issue to
+   `started` and create/refresh its evidence file. A running worker on another
+   ticket is not a reason to wait. Do not self-accept review here.
 5. **Independent adversarial review — a NORMAL per-pass action.** For any
    `in_review` ticket whose evidence is complete and for which an independent
    reviewer exists (a reviewer agent id NOT equal to the implementer recorded in
@@ -106,7 +138,7 @@ comment / transition per the lifecycle) before the general reconcile below.
 **Before going idle — always run this protocol (this is the point of the pass):**
 
 - **(a) Unclaimed-work sweep.** If ANY ticket is claimable (`ready`/`unstarted`
-  in the active milestone, no active worker) and WIP allows, run the delegation
+  in the active milestone, no active worker), run the delegation
   cycle (step 4) now — never go idle with claimable work sitting on the board.
 - **(b) In-progress status sweep.** For EVERY `started` / `in_review` ticket:
   request a status update — verify the worker is alive (its zellij session /

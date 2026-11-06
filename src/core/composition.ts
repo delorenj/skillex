@@ -5,18 +5,66 @@ import { parse as parseToml } from "smol-toml";
 import { fail } from "./error.js";
 import { assertReferenceOnly, inspectPath, requireDirectory } from "./filesystem.js";
 import { isSkillName, isVersionComponent } from "./manifest.js";
+import { ownedSkill, ownedSource } from "./owned-sources.js";
+import { type RegistryRef, registryRoot } from "./registry-context.js";
 import { ExitCode } from "./result.js";
 import type { PackSelection, ResolvedPack } from "./selection.js";
 
-export async function canonicalSkill(registry: string, name: string): Promise<string> {
+export interface CanonicalOptions {
+  /** Resolving a set or pack member: repo-owned names are refused in phase 1 (ADR-0002 §4). */
+  readonly composition?: "set" | "pack";
+}
+
+/** Phase 1: committed set and pack link farms cannot reference a machine-local checkout. */
+export function refuseOwnedMember(name: string, kind: "set" | "pack", path?: string): never {
+  fail(
+    "E_OWNED_SKILL_IN_COMPOSITION",
+    `Repo-owned skill ${name} cannot be a ${kind} member.`,
+    {
+      name,
+      ...(path === undefined ? {} : { path }),
+      fix: `Select ${name} through a manifest's skills list; sets and packs reference all-skills/ definitions only until ADR-0002 phase 2.`,
+    },
+    ExitCode.REFUSED,
+  );
+}
+
+/**
+ * One name, one directory: all-skills/<name>, or the working tree of the link source that declares
+ * it. A name in both is refused (E_DIVERGENT_CANONICAL_NAME); neither ever shadows the other.
+ */
+export async function canonicalSkill(
+  registry: RegistryRef,
+  name: string,
+  options: CanonicalOptions = {},
+): Promise<string> {
   if (!isSkillName(name)) {
     fail("E_SKILL_NAME", `Invalid canonical skill name: ${name}`, {
       name,
-      fix: "Use a lowercase single-component name from all-skills.",
+      fix: "Use a lowercase single-component name from all-skills/ or a repo-owned source.",
     });
   }
-  await requireDirectory(join(registry, "all-skills"), "E_NO_REGISTRY");
-  const path = await requireDirectory(join(registry, "all-skills", name), "E_SKILL_MISSING");
+  const root = registryRoot(registry);
+  await requireDirectory(join(root, "all-skills"), "E_NO_REGISTRY");
+  const owner = await ownedSource(registry, name);
+  if (owner) {
+    if (options.composition) refuseOwnedMember(name, options.composition);
+    if (await inspectPath(join(root, "all-skills", name)))
+      fail(
+        "E_DIVERGENT_CANONICAL_NAME",
+        `Skill ${name} is defined in all-skills/ and owned by link source ${owner.name}.`,
+        {
+          name,
+          path: join(root, "all-skills", name),
+          detail: [`catalog ${join(root, "all-skills", name)}`, `repo ${owner.repo}`],
+          fix: "Keep one definition: replace the catalog copy with a differently named redirect stub, or drop the link declaration.",
+        },
+        ExitCode.REFUSED,
+      );
+    const owned = await ownedSkill(registry, name);
+    if (owned) return owned.path;
+  }
+  const path = await requireDirectory(join(root, "all-skills", name), "E_SKILL_MISSING");
   const definition = join(path, "SKILL.md");
   const info = await inspectPath(definition);
   if (!info) {
@@ -57,11 +105,11 @@ export async function setMembers(
 }
 
 export async function setMemberTarget(
-  registry: string,
+  registry: RegistryRef,
   setPath: string,
   name: string,
 ): Promise<string> {
-  const expected = await canonicalSkill(registry, name);
+  const expected = await canonicalSkill(registry, name, { composition: "set" });
   const path = join(setPath, name);
   const info = await inspectPath(path);
   if (!info) {
@@ -122,9 +170,10 @@ export interface PackInventory extends ResolvedPack {
 
 /** pack.toml owns membership; its generated skills/ links are checked by verify. */
 export async function packInventory(
-  registry: string,
+  registryRef: RegistryRef,
   selection: PackSelection,
 ): Promise<PackInventory> {
+  const registry = registryRoot(registryRef);
   await requireDirectory(join(registry, "packs"), "E_PACK_MISSING");
   const family = await requireDirectory(join(registry, "packs", selection.name), "E_PACK_MISSING");
   let path = family;
@@ -244,6 +293,8 @@ export async function packInventory(
       });
     }
   }
+  for (const member of membership.skills)
+    if (await ownedSource(registryRef, member)) refuseOwnedMember(member, "pack", manifestPath);
   await assertReferenceOnly(path);
   return {
     name: selection.name,

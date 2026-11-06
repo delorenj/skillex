@@ -122,7 +122,8 @@ export async function desiredDerivedMembers(
     const inventory = await packInventory(registry, { ...selected, optional: false });
     for (const name of inventory.names) await add(name, await canonicalSkill(registry, name));
   }
-  for (const name of inputs.skills) await add(name, await canonicalSkill(registry, name));
+  for (const name of inputs.skills)
+    await add(name, await canonicalSkill(registry, name, { composition: "set" }));
   for (const name of inputs.removed) members.delete(name);
   return members;
 }

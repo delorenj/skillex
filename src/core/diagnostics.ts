@@ -5,6 +5,7 @@ import { type Entry, entry, matches, validateData } from "./activation-ownership
 import { readActivationReceipt } from "./activation-state.js";
 import type { ActivationData, EntryIdentity } from "./activation-types.js";
 import { aliasPaths } from "./aliases.js";
+import type { SkillOwner } from "./catalog-types.js";
 import { canonicalSkill } from "./composition.js";
 import type {
   AliasObservation,
@@ -20,6 +21,7 @@ import type {
 import { discoverRegistry, discoverScopes } from "./discovery.js";
 import { fail, SkillexError } from "./error.js";
 import { parseManifest, readManifest } from "./manifest.js";
+import { catalogOwner, skillOwner } from "./owned-sources.js";
 import { planSync } from "./reconciliation.js";
 import { resolveSelection } from "./resolution.js";
 import { type Diagnostic, ExitCode, makeResult, type ResultEnvelope } from "./result.js";
@@ -690,10 +692,7 @@ export async function explainSkill(
       }
       if (!context.registry) continue;
       try {
-        canonicalByRoot.set(
-          context.location.root,
-          await canonicalSkill(context.registry.root, name),
-        );
+        canonicalByRoot.set(context.location.root, await canonicalSkill(context.registry, name));
       } catch (error) {
         if (
           error instanceof SkillexError &&
@@ -738,6 +737,22 @@ export async function explainSkill(
         (finding.name === undefined || finding.name === name),
     );
     const canonical = targets.length === 1 && !divergent ? (targets[0] ?? null) : null;
+    let owner: SkillOwner | null = null;
+    if (canonical !== null) {
+      owner = catalogOwner;
+      for (const context of inspection.contexts) {
+        if (!context.registry) continue;
+        try {
+          const found = await skillOwner(context.registry, name, canonical);
+          if (found.kind === "repo") {
+            owner = found;
+            break;
+          }
+        } catch {
+          /* Resolution failures are already reported for this scope. */
+        }
+      }
+    }
     const scopes: SkillExplanation[] = [];
     for (const context of inspection.contexts) {
       cancelled(options);
@@ -800,7 +815,7 @@ export async function explainSkill(
     }
     return makeResult(
       "explain",
-      { name, canonical, scopes },
+      { name, canonical, owner, scopes },
       {
         exit: diagnosticExit(report.exits, drift(inspection.data)),
         findings: uniqueFindings(report.findings),

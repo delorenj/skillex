@@ -105,7 +105,10 @@ it("strict preview is immutable and strict ownership persists across ordinary sy
   ok(await syncProfile("work", { ...f.options, skillexOnly: true }));
   assert(existsSync(join(f.profile, ".skillex-only")));
   assert(existsSync(join(f.profile, ".no-bundled-skills")));
-  f.file(join(f.skills, "foreign", "SKILL.md"), "# foreign");
+  // An agent-written skill may sit beside the projection; a foreign link may not.
+  f.file(join(f.skills, "learned", "SKILL.md"), "# learned");
+  ok(await syncProfile("work", f.options));
+  symlinkSync(f.root, join(f.skills, "foreign"));
   const dirty = snapshot(f.root);
   const refused = await syncProfile("work", f.options);
   assert.equal(refused.exit, 3);
@@ -137,6 +140,79 @@ it("strict ownership tolerates Hermes bookkeeping but still refuses archives and
   }
   f.file(join(f.skills, ".curator_backups_elsewhere"), "not a store");
   assert.equal((await showProfile("work", f.options)).exit, 3);
+});
+
+it("strict ownership tolerates bundled category stubs and an idle skills hub only", async (t) => {
+  const f = fixture(t);
+  ok(await syncProfile("work", { ...f.options, skillexOnly: true }));
+  // Hermes before bf21d8d seeded essential categories' DESCRIPTION.md into strict profiles.
+  f.file(join(f.skills, "autonomous-ai-agents", "DESCRIPTION.md"), "---\ndescription: x\n---\n");
+  // Browsing the skills hub leaves bookkeeping behind without installing anything.
+  f.file(join(f.skills, ".hub", "audit.log"), "");
+  f.file(join(f.skills, ".hub", "taps.json"), "[]");
+  f.file(join(f.skills, ".hub", "lock.json"), '{"version": 1, "installed": {}}');
+  f.file(join(f.skills, ".hub", "index-cache", "index.json"), "{}");
+  f.directory(join(f.skills, ".hub", "quarantine"));
+  assert.equal((await showProfile("work", f.options)).exit, 0);
+  ok(await syncProfile("work", f.options));
+  const refusedWith = async (mutate, undo) => {
+    mutate();
+    const before = snapshot(f.root);
+    const refused = await syncProfile("work", f.options);
+    assert.equal(refused.exit, 3, JSON.stringify(refused.findings));
+    assert(refused.findings.some((item) => item.code === "E_PROFILE_SKILLEX_ONLY"));
+    assert.deepEqual(snapshot(f.root), before);
+    undo();
+    assert.equal((await showProfile("work", f.options)).exit, 0);
+  };
+  const stub = join(f.skills, "autonomous-ai-agents");
+  // A category that carries a skill is a seeded payload, not a stub.
+  // A link anywhere in a local tree could pull content in from outside the desk.
+  await refusedWith(
+    () => symlinkSync(f.root, join(stub, "elsewhere")),
+    () => unlinkSync(join(stub, "elsewhere")),
+  );
+  await refusedWith(
+    () => f.file(join(f.skills, "notes.txt"), "x"),
+    () => rmSync(join(f.skills, "notes.txt")),
+  );
+  const lock = join(f.skills, ".hub", "lock.json");
+  await refusedWith(
+    () => writeFileSync(lock, '{"version": 1, "installed": {"x": {}}}'),
+    () => writeFileSync(lock, '{"version": 1, "installed": {}}'),
+  );
+  await refusedWith(
+    () => f.file(join(f.skills, ".hub", "quarantine", "x", "SKILL.md"), "# held"),
+    () => rmSync(join(f.skills, ".hub", "quarantine", "x"), { recursive: true }),
+  );
+});
+
+it("strict desks keep agent-written skills unless one shares a selected skill's name", async (t) => {
+  const f = fixture(t);
+  const synced = ok(await syncProfile("work", { ...f.options, skillexOnly: true }));
+  const selected = synced.managed.map(({ name }) => name);
+  assert(selected.length);
+  f.file(join(f.skills, "devops", "ci-nightly-fix", "SKILL.md"), "# learned");
+  f.file(join(f.skills, "devops", "ci-nightly-fix", "references", "notes.md"), "notes");
+  f.file(join(f.skills, "ticket-pickup", "SKILL.md"), "# learned");
+  f.file(join(f.skills, "ticket-pickup", "scripts", "run.sh"), "#!/bin/sh\n");
+  assert.equal((await showProfile("work", f.options)).exit, 0);
+  ok(await syncProfile("work", f.options));
+  assert(existsSync(join(f.skills, "devops", "ci-nightly-fix", "SKILL.md")));
+  // A learned skill named like a selected one is refused, in whichever category it sits.
+  for (const clash of [
+    join(f.skills, "devops", selected[0]),
+    join(f.skills, "review", selected[0]),
+  ]) {
+    f.file(join(clash, "SKILL.md"), "# clash");
+    const before = snapshot(f.root);
+    const refused = await syncProfile("work", f.options);
+    assert.equal(refused.exit, 3, JSON.stringify(refused.findings));
+    assert(refused.findings.some((item) => item.code === "E_PROFILE_SKILLEX_ONLY"));
+    assert.deepEqual(snapshot(f.root), before);
+    rmSync(clash, { recursive: true });
+  }
+  assert.equal((await showProfile("work", f.options)).exit, 0);
 });
 
 it("strict sync refuses external discovery without mutating local overrides", async (t) => {

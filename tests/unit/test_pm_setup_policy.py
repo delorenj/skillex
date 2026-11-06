@@ -34,6 +34,10 @@ ROLE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ROLE_YAML="$ROLE_DIR/role.yaml"
 PROFILE_NAME=fixture-pm
 AGENT_ID=fixture-pm
+HERMES_CODE_ROOT="$HOME/code"
+HERMES_TEMPLATE_REPO="${HERMES_TEMPLATE_REPO:-$HERMES_CODE_ROOT/33GOD/hermes-agent-template}"
+HERMES_SKILLEX_REPO="${HERMES_SKILLEX_REPO:-$HERMES_CODE_ROOT/skillex}"
+HERMES_TEMPLATE_CONFIG="$HOME/.config/hermes-agent-template/config.toml"
 REGISTRY_FILE="$HOME/no-registry"
 load_role_env() { :; }
 project_repo_path() { printf '%s' "$TEST_PROJECT"; }
@@ -123,11 +127,18 @@ def test_new_profile_gets_strict_policy_and_repeated_setup_preserves_state(tmp_r
 def test_existing_foreign_skill_refuses_without_resetting_live_state(tmp_root):
     profile, scripts, env = fixture(tmp_root)
     assert run(scripts, env).returncode == 0
+    learned = profile / "skills/devops/learned"
+    learned.mkdir(parents=True)
+    (learned / "SKILL.md").write_text("agent-written")
+    assert run(scripts, env).returncode == 0, "agent-written skills stay (SKRILL-35)"
+    assert (learned / "SKILL.md").read_text() == "agent-written"
+    outside = tmp_root / "outside-skill"
+    outside.mkdir()
+    (outside / "SKILL.md").write_text("preserve")
     foreign = profile / "skills/foreign"
-    foreign.mkdir()
-    (foreign / "SKILL.md").write_text("preserve")
+    foreign.symlink_to(outside, target_is_directory=True)
     (profile / "state.db").write_bytes(b"runtime")
     result = run(scripts, env)
     assert result.returncode != 0
-    assert (foreign / "SKILL.md").read_text() == "preserve"
+    assert foreign.is_symlink() and (foreign / "SKILL.md").read_text() == "preserve"
     assert (profile / "state.db").read_bytes() == b"runtime"

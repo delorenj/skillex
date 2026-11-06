@@ -5,6 +5,7 @@ import { diagnosticExit } from "./diagnostics.js";
 import { SkillexError } from "./error.js";
 import { inspectPath } from "./filesystem.js";
 import { isSkillName } from "./manifest.js";
+import { ownedSkill } from "./owned-sources.js";
 import { type Diagnostic, ExitCode, makeResult, type ResultEnvelope } from "./result.js";
 import { resolveVendorPin } from "./vendor-git.js";
 import { digestVendorTree, readVendorProvenance } from "./vendor-provenance.js";
@@ -241,7 +242,7 @@ async function inspectSkill(
   const declarationChanges: string[] = [];
   if (receipt.upstreamVersion && receipt.upstreamVersion !== source.version)
     declarationChanges.push(
-      `recorded version ${receipt.upstreamVersion}; declared ${source.version}`,
+      `recorded version ${receipt.upstreamVersion}; declared ${source.version ?? "none"}`,
     );
   if (expectedPath !== null && receipt.upstreamPath && receipt.upstreamPath !== expectedPath)
     declarationChanges.push(`recorded path ${receipt.upstreamPath}; declared ${expectedPath}`);
@@ -353,6 +354,47 @@ async function inspectSkill(
   return { ...row, state };
 }
 
+/**
+ * Link sources are never vendored: their skills are reported as linked, with no digest or pin
+ * check. Offline observation only locates the checkout; verify additionally resolves each skill.
+ */
+async function linkedSkills(
+  source: VendorSource,
+  manifest: VendorSourcesManifest,
+  options: VendorOptions,
+  verify: boolean,
+  observation: Observation,
+): Promise<{ checkout: VendorCheckout; skills: VendorSkillStatus[] }> {
+  const checkout = await resolveVendorCheckout(source, options);
+  const skills: VendorSkillStatus[] = [];
+  for (const { name } of source.skills) {
+    checkVendorSignal(options);
+    let path = join(
+      checkout.root ?? checkout.searched.at(-1) ?? source.checkout,
+      source.subdir,
+      name,
+    );
+    if (verify) {
+      try {
+        path = (await ownedSkill(manifest.registry, name))?.path ?? path;
+      } catch (error) {
+        observation.capture(error, path);
+      }
+    }
+    skills.push({
+      name,
+      source: source.name,
+      path,
+      state: "linked",
+      recordedCommit: null,
+      upstreamCommit: null,
+      recordedDigest: null,
+      digest: null,
+    });
+  }
+  return { checkout, skills };
+}
+
 export async function listVendorSources(
   options: VendorOptions = {},
 ): Promise<ResultEnvelope<VendorSourceListResult | null>> {
@@ -385,6 +427,17 @@ export async function showVendorSource(
     selectVendorSources(manifest, options.sources);
     const source = selectVendorSources(manifest, [name])[0];
     if (!source) throw new Error("Selected vendor source is missing.");
+    if (source.mode === "link") {
+      const linked = await linkedSkills(source, manifest, options, false, observation);
+      return observation.result("vendor show", {
+        registry: manifest.registry,
+        manifest: manifest.path,
+        source,
+        checkout: linked.checkout,
+        membership: "explicit",
+        skills: linked.skills,
+      });
+    }
     const checkout = await resolveVendorCheckout(source, options);
     const inventory = await recordedInventory(manifest, observation, options);
     const skills: VendorSkillStatus[] = [];
@@ -434,6 +487,7 @@ export async function inspectVendorStatus(
     const inventory = await recordedInventory(manifest, observation, options);
     const sources: {
       name: string;
+      mode: "vendor" | "link";
       membership: "explicit" | "recorded";
       checkout: VendorCheckout | null;
       upstreamCommit: string | null;
@@ -441,6 +495,28 @@ export async function inspectVendorStatus(
     const skills: VendorSkillStatus[] = [];
     for (const source of selected) {
       checkVendorSignal(options);
+      if (source.mode === "link") {
+        try {
+          const linked = await linkedSkills(
+            source,
+            manifest,
+            options,
+            options.upstream === true,
+            observation,
+          );
+          sources.push({
+            name: source.name,
+            mode: "link",
+            membership: "explicit",
+            checkout: options.upstream ? linked.checkout : null,
+            upstreamCommit: null,
+          });
+          skills.push(...linked.skills);
+        } catch (error) {
+          observation.capture(error);
+        }
+        continue;
+      }
       let checkout: VendorCheckout | null = null;
       let upstreamCommit: string | null = null;
       if (options.upstream) {
@@ -483,6 +559,7 @@ export async function inspectVendorStatus(
       }
       sources.push({
         name: source.name,
+        mode: "vendor",
         membership: source.membership === "explicit" ? "explicit" : "recorded",
         checkout,
         upstreamCommit,

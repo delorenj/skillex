@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { constants } from "node:fs";
 import { mkdir, open, readdir, realpath, rename, symlink, unlink } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import {
   type Entry,
@@ -48,14 +48,16 @@ import type {
   ProfileSyncOptions,
   ProfileSyncResult,
 } from "./profile-types.js";
-import { sourceRevision } from "./reconciliation.js";
+import { settledRevisions, sourceRevision } from "./reconciliation.js";
 import { type Diagnostic, ExitCode, makeResult, type ResultEnvelope } from "./result.js";
-import type { ResolvedScope, SkillOrigin } from "./selection.js";
+import type { RegistrySelection, ResolvedScope, SkillOrigin } from "./selection.js";
 
 interface Desired {
   readonly name: string;
   readonly target: string;
   readonly registry: string;
+  /** The selection that resolved this binding; repo-owned skills re-resolve through it. */
+  readonly selection: RegistrySelection;
   readonly origins: readonly SkillOrigin[];
   readonly winner: "global" | "project";
 }
@@ -138,18 +140,34 @@ async function resolveProjection(
   if (!effective.ok || !effective.data) throw new SkillexError(effective.exit, effective.findings);
   const { scopes } = effective.data;
   const findings = [...effective.findings];
-  const desired = effective.data.bindings.map(
-    (binding): Desired => ({
+  // The selection that resolved each binding's source registry: repo-owned (link-source)
+  // skills re-resolve through it at publication (ADR-0002).
+  const selections = new Map(scopes.map((scope) => [scope.registry.root, scope.registry]));
+  const desired = effective.data.bindings.map((binding): Desired => {
+    const selection = selections.get(binding.registry);
+    if (!selection)
+      refused(
+        "E_PROFILE_RESOLUTION",
+        `Canonical skill ${binding.name} came from a registry no resolved scope selected.`,
+        binding.path,
+        "Correct the global and explicit project manifests before syncing the profile.",
+      );
+    return {
       name: binding.name,
       target: binding.path,
       registry: binding.registry,
+      selection,
       origins: binding.origins,
       winner: binding.winner,
-    }),
-  );
+    };
+  });
   const locations = new Map<string, SourceRevision["kind"]>();
   for (const scope of scopes) {
     locations.set(join(scope.registry.root, "all-skills"), "catalog");
+    // A repo-owned binding's revision is its owning repository's HEAD (ADR-0002).
+    for (const binding of scope.bindings)
+      if (dirname(binding.path) !== join(scope.registry.root, "all-skills"))
+        locations.set(dirname(binding.path), "catalog");
     if (scope.set) locations.set(scope.set.path, "set");
     // Additive packs own manifest-authoritative membership; pin each one as a
     // revision source so receipts record which pack content projected.
@@ -288,7 +306,12 @@ async function buildWork(
       );
   state = await readProfileState(profile, receiptOptions(profile, options, projection.scopes));
   const observed = await observations(profile, state);
-  await assertStrictProfile(profile, options, observed.local);
+  await assertStrictProfile(
+    profile,
+    options,
+    observed.local,
+    new Set(projection.desired.map((desired) => desired.name)),
+  );
   const links = { ...state.data.links };
   const changes: ProfileChange[] = [];
   if (!observed.root) changes.push({ action: "mkdir", path: profile.skillsRoot });
@@ -331,7 +354,14 @@ async function buildWork(
     sources: projection.sources,
     links,
   };
-  if (changes.length || !isDeepStrictEqual(next, state.data))
+  const catalogRoots = new Set(
+    projection.scopes.map((scope) => join(scope.registry.root, "all-skills")),
+  );
+  const comparable = {
+    ...next,
+    sources: settledRevisions(next.sources, state.data.sources, catalogRoots),
+  };
+  if (changes.length || !isDeepStrictEqual(comparable, state.data))
     changes.push({ action: "write-receipt", path: state.snapshot.path });
   const result: ProfileShowResult = {
     profile,
@@ -628,7 +658,7 @@ async function apply(
       let next: EntryIdentity | undefined;
       if (change.target) {
         const desired = work.projection.desired.find((item) => item.name === name);
-        if (!desired || (await canonicalSkill(desired.registry, name)) !== change.target)
+        if (!desired || (await canonicalSkill(desired.selection, name)) !== change.target)
           refused(
             "E_PROFILE_SOURCE_CHANGED",
             "A canonical definition changed before profile publication.",
@@ -666,7 +696,7 @@ async function apply(
       }
       if (next) {
         const desired = work.projection.desired.find((item) => item.name === name) as Desired;
-        if ((await canonicalSkill(desired.registry, name)) !== change.target)
+        if ((await canonicalSkill(desired.selection, name)) !== change.target)
           refused(
             "E_PROFILE_SOURCE_CHANGED",
             "The canonical skill is no longer valid at publication.",
@@ -806,7 +836,12 @@ export async function runProfileSync(
         }
         await assertProfileIdentity(selected);
         if (
-          await assertStrictProfile(selected, options, (await observations(selected, state)).local)
+          await assertStrictProfile(
+            selected,
+            options,
+            (await observations(selected, state)).local,
+            new Set(work.projection.desired.map((desired) => desired.name)),
+          )
         )
           await publishStrictPolicy(selected);
         const currentProfile = await discoverProfile(name, options);
