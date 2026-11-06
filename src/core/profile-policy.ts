@@ -1,5 +1,6 @@
+import type { Dirent } from "node:fs";
 import { constants } from "node:fs";
-import { open, readFile, stat } from "node:fs/promises";
+import { open, readdir, readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { parseDocument } from "yaml";
 import { entry } from "./activation-ownership.js";
@@ -12,8 +13,9 @@ import { ExitCode } from "./result.js";
 // org sync manifest, the bundled-skill sync manifest, the skill-mutation audit ledger,
 // the curator's pre-run tarball store, and the skill manager's per-skill lock files
 // (tools/skill_manager_tool.py).
-// .hub and .archive stay refused: they mean hub installs or curator archival moved
-// content in or out.
+// .archive stays refused: curator archival moved content out. .hub is tolerated only while it
+// records no install (hermes_cli/skills_hub.py: an empty lock, an empty quarantine, browse
+// caches); any installed or quarantined payload is still refused.
 const metadataFiles = new Set([
   ".usage.json",
   ".usage.json.lock",
@@ -24,10 +26,60 @@ const metadataFiles = new Set([
   ".curator_ledger.jsonl",
 ]);
 const metadataDirectories = new Set([".curator_backups", ".locks"]);
+const hubFiles = new Set(["audit.log", "taps.json", "lock.json"]);
 
-function hermesMetadata(item: ProfileLocalEntry): boolean {
+async function children(path: string): Promise<Dirent[] | null> {
+  try {
+    return await readdir(path, { withFileTypes: true });
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * A bundled category stub: a directory holding exactly one regular DESCRIPTION.md and nothing
+ * else. Hermes before bf21d8d seeded these into strict profiles; with no SKILL.md in or below it,
+ * Hermes discovery never lists it as a skill (hermes_cli/profile_distribution.py treats it as a
+ * category).
+ */
+async function categoryStub(item: ProfileLocalEntry): Promise<boolean> {
+  if (item.kind !== "directory" || item.shadows) return false;
+  const entries = await children(item.path);
+  return entries?.length === 1 && entries[0]?.name === "DESCRIPTION.md" && entries[0].isFile();
+}
+
+async function idleHub(item: ProfileLocalEntry): Promise<boolean> {
+  if (item.kind !== "directory" || item.name !== ".hub") return false;
+  const entries = await children(item.path);
+  if (!entries) return false;
+  for (const child of entries) {
+    const path = join(item.path, child.name);
+    if (child.isFile() && hubFiles.has(child.name)) {
+      if (child.name !== "lock.json") continue;
+      try {
+        const lock: unknown = JSON.parse(await readFile(path, "utf8"));
+        const installed = (lock as { installed?: unknown } | null)?.installed;
+        if (!installed || typeof installed !== "object" || Object.keys(installed).length)
+          return false;
+      } catch {
+        return false;
+      }
+    } else if (child.isDirectory() && child.name === "quarantine") {
+      if ((await children(path))?.length !== 0) return false;
+    } else if (child.isDirectory() && child.name === "index-cache") {
+      const cached = await children(path);
+      if (!cached || cached.some((entry) => !entry.isFile())) return false;
+    } else return false;
+  }
+  return true;
+}
+
+async function hermesMetadata(item: ProfileLocalEntry): Promise<boolean> {
   if (item.kind === "file") return metadataFiles.has(item.name);
-  if (item.kind === "directory") return metadataDirectories.has(item.name);
+  if (item.kind === "directory")
+    return (
+      metadataDirectories.has(item.name) || (await idleHub(item)) || (await categoryStub(item))
+    );
   return false;
 }
 
@@ -79,7 +131,7 @@ export async function assertStrictProfile(
 ): Promise<boolean> {
   if (!(await strictProfile(profile, options))) return false;
   for (const item of local)
-    if (!hermesMetadata(item))
+    if (!(await hermesMetadata(item)))
       refuse(item.path, `Skillex-only profile contains unowned entry ${item.name}.`);
   const path = join(profile.root, "config.yaml");
   const config = await entry(path);

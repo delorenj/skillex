@@ -81,12 +81,53 @@ def test_hermes_bookkeeping_is_not_quarantined_but_archives_are(tmp_path):
         (root / name).write_text("{}")
     (root / ".archive" / "old").mkdir(parents=True)
     (root / ".hub").mkdir()
+    (root / ".hub" / "lock.json").write_text('{"version": 1, "installed": {"x": {}}}')
     real = tmp_path / "real-state"
     real.write_text("{}")
     (root / ".sync_state").unlink()
     (root / ".sync_state").symlink_to(real)
     plan = helper().plan_root(profile, set())
     assert sorted(plan["children"]) == [".archive", ".hub", ".sync_state"]
+
+
+def test_category_stubs_and_an_idle_hub_stay_but_seeded_payloads_are_preserved(tmp_path):
+    profile = tmp_path / "pm"
+    root = profile / "skills"
+    (root / "autonomous-ai-agents").mkdir(parents=True)
+    (root / "autonomous-ai-agents" / "DESCRIPTION.md").write_text("---\n---\n")
+    (root / "creative" / "ascii-art").mkdir(parents=True)
+    (root / "creative" / "DESCRIPTION.md").write_text("---\n---\n")
+    (root / "creative" / "ascii-art" / "SKILL.md").write_text("# seeded")
+    (root / ".hub" / "index-cache").mkdir(parents=True)
+    (root / ".hub" / "quarantine").mkdir()
+    (root / ".hub" / "audit.log").write_text("")
+    (root / ".hub" / "taps.json").write_text("[]")
+    (root / ".hub" / "lock.json").write_text('{"version": 1, "installed": {}}')
+    plan = helper().plan_root(profile, set())
+    assert sorted(plan["children"]) == ["creative"]
+
+
+def test_a_refused_desk_keeps_its_receipt_owned_links(tmp_path):
+    """profile show on a refused strict desk: managed is null, preserved names the foreign."""
+    profile = tmp_path / "pm"
+    root = profile / "skills"
+    root.mkdir(parents=True)
+    (root / "alpha").symlink_to(tmp_path)
+    (root / "learned").mkdir()
+    (root / "learned" / "SKILL.md").write_text("# learned")
+    (root / ".usage.json").write_text("{}")
+    data = {
+        "managed": None,
+        "preserved": [{"name": "learned"}, {"name": ".usage.json"}],
+    }
+    module = helper()
+    owned = module.owned_names(profile, data)
+    assert owned == {"alpha"}
+    assert sorted(module.plan_root(profile, owned)["children"]) == ["learned"]
+    with pytest.raises(RuntimeError):
+        module.owned_names(profile, {"managed": None})
+    managed = {"managed": [{"name": "alpha", "state": "unchanged"}, {"name": "b", "state": "create"}]}
+    assert module.owned_names(profile, managed) == {"alpha"}
 
 
 # The config gate asks THE canonical renderer for the expected config (base + delta + renderer pins).

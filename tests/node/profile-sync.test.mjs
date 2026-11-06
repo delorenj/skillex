@@ -136,6 +136,50 @@ it("strict ownership tolerates Hermes bookkeeping but still refuses archives and
   assert.equal((await showProfile("work", f.options)).exit, 3);
 });
 
+it("strict ownership tolerates bundled category stubs and an idle skills hub only", async (t) => {
+  const f = fixture(t);
+  ok(await syncProfile("work", { ...f.options, skillexOnly: true }));
+  // Hermes before bf21d8d seeded essential categories' DESCRIPTION.md into strict profiles.
+  f.file(join(f.skills, "autonomous-ai-agents", "DESCRIPTION.md"), "---\ndescription: x\n---\n");
+  // Browsing the skills hub leaves bookkeeping behind without installing anything.
+  f.file(join(f.skills, ".hub", "audit.log"), "");
+  f.file(join(f.skills, ".hub", "taps.json"), "[]");
+  f.file(join(f.skills, ".hub", "lock.json"), '{"version": 1, "installed": {}}');
+  f.file(join(f.skills, ".hub", "index-cache", "index.json"), "{}");
+  f.directory(join(f.skills, ".hub", "quarantine"));
+  assert.equal((await showProfile("work", f.options)).exit, 0);
+  ok(await syncProfile("work", f.options));
+  const refusedWith = async (mutate, undo) => {
+    mutate();
+    const before = snapshot(f.root);
+    const refused = await syncProfile("work", f.options);
+    assert.equal(refused.exit, 3, JSON.stringify(refused.findings));
+    assert(refused.findings.some((item) => item.code === "E_PROFILE_SKILLEX_ONLY"));
+    assert.deepEqual(snapshot(f.root), before);
+    undo();
+    assert.equal((await showProfile("work", f.options)).exit, 0);
+  };
+  const stub = join(f.skills, "autonomous-ai-agents");
+  // A category that carries a skill is a seeded payload, not a stub.
+  await refusedWith(
+    () => f.file(join(stub, "hermes-agent", "SKILL.md"), "# seeded"),
+    () => rmSync(join(stub, "hermes-agent"), { recursive: true }),
+  );
+  await refusedWith(
+    () => f.file(join(stub, "notes.txt"), "x"),
+    () => rmSync(join(stub, "notes.txt")),
+  );
+  const lock = join(f.skills, ".hub", "lock.json");
+  await refusedWith(
+    () => writeFileSync(lock, '{"version": 1, "installed": {"x": {}}}'),
+    () => writeFileSync(lock, '{"version": 1, "installed": {}}'),
+  );
+  await refusedWith(
+    () => f.file(join(f.skills, ".hub", "quarantine", "x", "SKILL.md"), "# held"),
+    () => rmSync(join(f.skills, ".hub", "quarantine", "x"), { recursive: true }),
+  );
+});
+
 it("strict sync refuses external discovery without mutating local overrides", async (t) => {
   const f = fixture(t);
   f.file(join(f.profile, "config.yaml"), "skills:\n  external_dirs: [~/foreign]\n");

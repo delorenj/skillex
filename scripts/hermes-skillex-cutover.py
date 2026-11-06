@@ -30,12 +30,61 @@ SAFE_METADATA = {
 SAFE_METADATA_DIRS = {".curator_backups", ".locks"}
 
 
-def safe_metadata(path):
+HUB_FILES = {"audit.log", "taps.json", "lock.json"}
+
+
+def _real_dir(path):
+    return path.is_dir() and not path.is_symlink()
+
+
+def category_stub(path):
+    """A bundled category holding only DESCRIPTION.md (pre-bf21d8d Hermes seeding)."""
+    if not _real_dir(path):
+        return False
+    entries = list(path.iterdir())
+    return (
+        len(entries) == 1
+        and entries[0].name == "DESCRIPTION.md"
+        and entries[0].is_file()
+        and not entries[0].is_symlink()
+    )
+
+
+def idle_hub(path):
+    """A skills-hub directory that records no install: empty lock and quarantine, caches only."""
+    if path.name != ".hub" or not _real_dir(path):
+        return False
+    for child in path.iterdir():
+        if child.is_symlink():
+            return False
+        if child.is_file() and child.name in HUB_FILES:
+            if child.name == "lock.json":
+                try:
+                    installed = json.loads(child.read_text()).get("installed")
+                except (ValueError, AttributeError):
+                    return False
+                if not isinstance(installed, dict) or installed:
+                    return False
+        elif child.is_dir() and child.name == "quarantine":
+            if any(child.iterdir()):
+                return False
+        elif child.is_dir() and child.name == "index-cache":
+            if any(not entry.is_file() or entry.is_symlink() for entry in child.iterdir()):
+                return False
+        else:
+            return False
+    return True
+
+
+def safe_metadata(path, desired=frozenset()):
+    """Mirrors hermesMetadata in src/core/profile-policy.ts."""
     if path.is_symlink():
         return False
     if path.name in SAFE_METADATA:
         return path.is_file()
-    return path.name in SAFE_METADATA_DIRS and path.is_dir()
+    if path.name in SAFE_METADATA_DIRS and path.is_dir():
+        return True
+    return idle_hub(path) or (path.name not in desired and category_stub(path))
 
 
 def fingerprint(path):
@@ -201,6 +250,26 @@ def skillex_command(registry_root, environ=os.environ):
     return ["node", str(Path(registry_root) / "dist/cli.js")]
 
 
+def owned_names(profile, data):
+    """Entry names Skillex owns in the desk's skills root, from one `profile show`.
+
+    A desk that strict policy refuses reports `managed: null`, but still lists every local entry
+    it does not own under `preserved` (receipt identities decide ownership). Reading `managed`
+    alone there counted zero owned links and planned to quarantine every receipt-owned link.
+    """
+    managed = data.get("managed")
+    if managed is not None:
+        return {item["name"] for item in managed if item["state"] in ("unchanged", "update")}
+    preserved = data.get("preserved")
+    if preserved is None:
+        raise RuntimeError("profile show reported neither managed nor preserved entries")
+    root = profile / "skills"
+    if root.is_symlink() or not root.is_dir():
+        return set()
+    foreign = {item["name"] for item in preserved}
+    return {child.name for child in root.iterdir()} - foreign
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--profile", required=True)
@@ -223,11 +292,7 @@ def main():
     data = show.get("data")
     if data is None or data.get("pending"):
         raise RuntimeError("unresolved profile or pending recovery requires inspection")
-    owned = {
-        item["name"]
-        for item in (data.get("managed") or [])
-        if item["state"] in ("unchanged", "update")
-    }
+    owned = owned_names(profile, data)
     plan = plan_root(profile, owned)
     renderer = load_renderer(args.renderer, args.fleet_home)
     config_change = configure(profile, renderer)
