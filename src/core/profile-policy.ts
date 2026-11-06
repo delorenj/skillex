@@ -1,7 +1,8 @@
 import type { Dirent } from "node:fs";
 import { constants } from "node:fs";
-import { open, readdir, readFile, stat } from "node:fs/promises";
-import { basename, join } from "node:path";
+import { open, readdir, readFile, realpath, stat } from "node:fs/promises";
+import { homedir } from "node:os";
+import { basename, isAbsolute, join, relative, resolve } from "node:path";
 import { parseDocument } from "yaml";
 import { entry } from "./activation-ownership.js";
 import { fail } from "./error.js";
@@ -90,7 +91,7 @@ function refuse(path: string, message: string): never {
     message,
     {
       path,
-      fix: "Preserve foreign content outside discovery roots; clear skills.external_dirs through the locked config renderer, then preview skillex profile sync NAME --project PATH --skillex-only. Never delete or adopt local payloads implicitly.",
+      fix: "Preserve foreign content outside discovery roots; clear skills.external_dirs (and point skills.create_dir inside the profile or unset it) through the locked config renderer, then preview skillex profile sync NAME --project PATH --skillex-only. Never delete or adopt local payloads implicitly.",
     },
     ExitCode.REFUSED,
   );
@@ -153,6 +154,42 @@ async function learnedSkills(item: ProfileLocalEntry): Promise<string[] | null> 
 }
 
 /**
+ * Hermes writes agent-made skills to skills.create_dir, a discovery tier below the
+ * profile's own skills/ (agent/skill_utils.py get_skill_create_dir: relative values are
+ * HERMES_HOME-relative; one equal to the skills dir counts as unset). A desk-private
+ * create_dir such as `learned-skills` keeps agent-written skills out of the projection and
+ * cannot shadow a selected link, so it is tolerated (operator decision 2026-11-06,
+ * SKRILL-35). One that resolves outside the profile is a second, shared discovery route,
+ * as nonempty external_dirs are, and stays refused.
+ */
+async function privateCreateDir(
+  value: unknown,
+  profile: ProfileLocation,
+  options: ProfileOptions,
+): Promise<boolean> {
+  if (value === undefined || value === null || value === "") return true;
+  if (typeof value !== "string" || !value.trim() || value.includes("$")) return false;
+  const home = options.home ?? homedir();
+  const raw = value.trim();
+  const expanded = raw === "~" ? home : raw.replace(/^~(?=\/)/, home);
+  const lexical = resolve(profile.root, expanded);
+  // Resolve through the deepest existing ancestor, so a create_dir Hermes has not made yet
+  // still cannot reach outside the profile through a symlinked parent.
+  const real = async (path: string): Promise<string> => {
+    const parent = resolve(path, "..");
+    try {
+      return await realpath(path);
+    } catch {
+      return parent === path ? path : join(await real(parent), basename(path));
+    }
+  };
+  const root = await real(profile.root);
+  const target = await real(lexical);
+  const inside = relative(root, target);
+  return inside !== "" && !inside.startsWith("..") && !isAbsolute(inside);
+}
+
+/**
  * Strict (Skillex-only) policy: Skillex owns every link it projects. Hermes bookkeeping and the
  * skills a desk's own agent wrote may sit beside those links (operator decision 2026-11-06,
  * SKRILL-35); a learned skill named like a selected one, a foreign link, a stray file, an
@@ -187,8 +224,11 @@ export async function assertStrictProfile(
     const create: unknown = document.toJS()?.skills?.create_dir;
     if (dirs !== undefined && (!Array.isArray(dirs) || dirs.length))
       refuse(path, "Skillex-only profiles require skills.external_dirs: [].");
-    if (create !== undefined && create !== null && create !== "")
-      refuse(path, "Skillex-only profiles require skills.create_dir to be unset.");
+    if (!(await privateCreateDir(create, profile, options)))
+      refuse(
+        path,
+        "Skillex-only profiles require skills.create_dir to be unset or inside the profile.",
+      );
   }
   const optOut = await entry(join(profile.root, ".no-bundled-skills"));
   if (optOut && !optOut.info.isFile())

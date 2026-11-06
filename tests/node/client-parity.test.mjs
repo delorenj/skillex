@@ -171,6 +171,35 @@ test("strict create_dir is an additional discovery route, not permission to bypa
   assert.equal(existsSync(f.options.stateHome), false);
 });
 
+test("a profile-private create_dir is tolerated; one that escapes the profile is refused", async (t) => {
+  // Hermes writes agent-made skills to create_dir, a tier below the profile's skills/
+  // (operator decision 2026-11-06, SKRILL-35: strict desks keep agent-written skills).
+  const f = fixture(t);
+  await f.activate();
+  const config = join(f.profile, "config.yaml");
+  const strict = { ...f.options, skillexOnly: true };
+  for (const create of ["learned-skills", "./nested/learned", `${f.profile}/learned-skills`]) {
+    f.file(
+      config,
+      `skills:\n  external_dirs: []\n  inherit_global: false\n  create_dir: ${create}\n`,
+    );
+    f.file(join(f.profile, "learned-skills", "devops", "fix", "SKILL.md"), "agent-written");
+    const shown = await showProfile("pilot", strict);
+    assert.equal(shown.exit, 0, `${create}: ${JSON.stringify(shown.findings)}`);
+  }
+  const outside = f.dir(join(f.root, "outside"));
+  symlinkSync(outside, join(f.profile, "escape"));
+  for (const create of ["../foreign", "escape/learned", "~/learned", "$HOME/learned", "[a]"]) {
+    f.file(
+      config,
+      `skills:\n  external_dirs: []\n  inherit_global: false\n  create_dir: ${create}\n`,
+    );
+    const shown = await showProfile("pilot", strict);
+    assert.equal(shown.exit, 3, `${create} must be refused`);
+    assert(shown.findings.some(({ code }) => code === "E_PROFILE_SKILLEX_ONLY"));
+  }
+});
+
 test("foreign containers and trusted project shadows are reported and preserved", async (t) => {
   const f = fixture(t);
   await f.activate();
@@ -236,6 +265,23 @@ test("invalid metadata and dangling links cannot pass the filesystem check", asy
   assert(kimi.metadataIssues.some(({ path }) => path.endsWith("/role")));
   assert(kimi.missing.includes("role"));
   assert(kimi.unreachable.includes(dead));
+});
+
+test("an unreadable root or SKILL.md is recorded as unreachable, not an E_IO abort", async (t) => {
+  const f = fixture(t);
+  await f.activate();
+  const claude = join(f.home, ".claude", "skills");
+  rmSync(claude, { recursive: true, force: true });
+  mkdirSync(dirname(claude), { recursive: true });
+  symlinkSync(claude, claude); // a self-loop: readdir fails with ELOOP
+  const directory = f.dir(join(f.home, ".agents", "skills", "odd"));
+  mkdirSync(join(directory, "SKILL.md")); // readFile fails with EISDIR
+  const result = await inspectClientParity(f.options);
+  assert.notEqual(result.exit, 1, JSON.stringify(result.findings));
+  const consumer = result.data.consumers.find(({ client }) => client === "claude");
+  assert(consumer.unreachable.includes(claude));
+  const kimi = result.data.consumers.find(({ client }) => client === "kimi");
+  assert(kimi.unreachable.includes(join(directory, "SKILL.md")));
 });
 
 test("divergent canonical names refuse even when project opts out of inheritance", async (t) => {

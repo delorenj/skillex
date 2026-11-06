@@ -94,6 +94,8 @@ async function isDirectory(path: string): Promise<boolean> {
   }
 }
 
+const UNREADABLE = new Set(["ELOOP", "ENOTDIR", "EACCES", "EPERM"]);
+
 /** Read only direct directory-form definitions. This is not a native recursive resolver. */
 async function scanRoot(
   root: string,
@@ -113,7 +115,13 @@ async function scanRoot(
   try {
     entries = await readdir(root);
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return scan;
+    const code = (error as NodeJS.ErrnoException).code ?? "";
+    if (code === "ENOENT") return scan;
+    // An audit records what it cannot read; it does not abort with E_IO.
+    if (UNREADABLE.has(code)) {
+      scan.unreachable.push(root);
+      return scan;
+    }
     throw error;
   }
   for (const directoryName of entries.sort()) {
@@ -123,7 +131,8 @@ async function scanRoot(
     try {
       target = await realpath(path);
     } catch (error) {
-      if (["ENOENT", "ELOOP", "ENOTDIR"].includes((error as NodeJS.ErrnoException).code ?? "")) {
+      const code = (error as NodeJS.ErrnoException).code ?? "";
+      if (code === "ENOENT" || UNREADABLE.has(code)) {
         scan.unreachable.push(path);
         continue;
       }
@@ -137,8 +146,14 @@ async function scanRoot(
     try {
       text = await readFile(join(target, "SKILL.md"), "utf8");
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      const code = (error as NodeJS.ErrnoException).code ?? "";
+      if (code === "ENOENT") {
         scan.foreign.push({ name: directoryName, path });
+        continue;
+      }
+      if (UNREADABLE.has(code) || code === "EISDIR") {
+        scan.unreachable.push(join(target, "SKILL.md"));
+        scan.metadataIssues.push({ path, reason: `SKILL.md is unreadable (${code}).` });
         continue;
       }
       throw error;
