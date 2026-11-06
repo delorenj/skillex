@@ -30,12 +30,94 @@ SAFE_METADATA = {
 SAFE_METADATA_DIRS = {".curator_backups", ".locks"}
 
 
-def safe_metadata(path):
+HUB_FILES = {"audit.log", "taps.json", "lock.json"}
+
+
+def _real_dir(path):
+    return path.is_dir() and not path.is_symlink()
+
+
+def category_stub(path):
+    """A bundled category holding only DESCRIPTION.md (pre-bf21d8d Hermes seeding)."""
+    if not _real_dir(path):
+        return False
+    entries = list(path.iterdir())
+    return (
+        len(entries) == 1
+        and entries[0].name == "DESCRIPTION.md"
+        and entries[0].is_file()
+        and not entries[0].is_symlink()
+    )
+
+
+def idle_hub(path):
+    """A skills-hub directory that records no install: empty lock and quarantine, caches only."""
+    if path.name != ".hub" or not _real_dir(path):
+        return False
+    for child in path.iterdir():
+        if child.is_symlink():
+            return False
+        if child.is_file() and child.name in HUB_FILES:
+            if child.name == "lock.json":
+                try:
+                    installed = json.loads(child.read_text()).get("installed")
+                except (ValueError, AttributeError):
+                    return False
+                if not isinstance(installed, dict) or installed:
+                    return False
+        elif child.is_dir() and child.name == "quarantine":
+            if any(child.iterdir()):
+                return False
+        elif child.is_dir() and child.name == "index-cache":
+            if any(not entry.is_file() or entry.is_symlink() for entry in child.iterdir()):
+                return False
+        else:
+            return False
+    return True
+
+
+LEARNED_SCAN_LIMIT = 20_000
+
+
+def learned_skills(path):
+    """Skill directory names in an agent-written tree, or None if it holds a link or special file.
+
+    Mirrors learnedSkills in src/core/profile-policy.ts.
+    """
+    if path.name.startswith(".") or not _real_dir(path):
+        return None
+    skills, pending, seen = [], [path], 0
+    while pending:
+        directory = pending.pop()
+        for child in directory.iterdir():
+            seen += 1
+            if seen > LEARNED_SCAN_LIMIT or child.is_symlink():
+                return None
+            if child.is_dir():
+                pending.append(child)
+            elif not child.is_file():
+                return None
+            elif child.name == "SKILL.md":
+                skills.append(directory.name)
+    return skills
+
+
+def safe_metadata(path, desired=frozenset()):
+    """What strict policy keeps in place: mirrors assertStrictProfile in profile-policy.ts.
+
+    Hermes bookkeeping, bundled category stubs, an idle hub, and skills the desk's own agent
+    wrote, unless one shares its name with a skill Skillex projects (`desired`).
+    """
     if path.is_symlink():
         return False
     if path.name in SAFE_METADATA:
         return path.is_file()
-    return path.name in SAFE_METADATA_DIRS and path.is_dir()
+    if path.name in SAFE_METADATA_DIRS and path.is_dir():
+        return True
+    if idle_hub(path) or (path.name not in desired and category_stub(path)):
+        return True
+    learned = learned_skills(path)
+    return learned is not None and not desired.intersection([path.name, *learned])
 
 
 def fingerprint(path):
@@ -52,7 +134,7 @@ def fingerprint(path):
     return value
 
 
-def plan_root(profile, owned):
+def plan_root(profile, owned, desired=frozenset()):
     if profile.is_symlink() or not profile.is_dir():
         raise RuntimeError(f"real named profile required: {profile}")
     root = profile / "skills"
@@ -63,7 +145,7 @@ def plan_root(profile, owned):
     children = {
         p.name: fingerprint(p)
         for p in sorted(root.iterdir())
-        if p.name not in owned and not safe_metadata(p)
+        if p.name not in owned and not safe_metadata(p, desired)
     }
     info = root.lstat()
     return {"alias": False, "root": [info.st_dev, info.st_ino, info.st_mode], "children": children}
@@ -173,8 +255,8 @@ def configure(profile, renderer, apply=False):
         return changed
 
 
-def cli(command):
-    result = subprocess.run(command, text=True, capture_output=True, timeout=90)
+def cli(command, env=None):
+    result = subprocess.run(command, text=True, capture_output=True, timeout=90, env=env, cwd="/")
     try:
         value = json.loads(result.stdout)
     except ValueError:
@@ -182,23 +264,50 @@ def cli(command):
     return value
 
 
+def _resync_module():
+    source = Path(__file__).resolve().with_name("hermes-skillex-resync.py")
+    spec = importlib.util.spec_from_file_location("hermes_skillex_resync", source)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 def skillex_command(registry_root, environ=os.environ):
-    """The Skillex CLI argv prefix: $SKILLEX_BIN when set (the same override
-    hermes-skillex-resync.py honours, for a host whose catalog checkout carries
-    no built dist/ or whose PATH `skillex` is another program), else the
-    checkout's own build, node <registry-root>/dist/cli.js."""
-    explicit = environ.get("SKILLEX_BIN", "").strip()
-    if explicit:
-        if (
-            not os.path.isabs(explicit)
-            or not os.access(explicit, os.X_OK)
-            or os.path.isdir(explicit)
-        ):
-            raise RuntimeError(
-                f"SKILLEX_BIN={explicit} is not an absolute path to an executable file"
-            )
-        return [explicit]
-    return ["node", str(Path(registry_root) / "dist/cli.js")]
+    """The Skillex CLI argv prefix and child environment, resolved exactly as
+    hermes-skillex-resync.py resolves it: $SKILLEX_BIN, a skillex on PATH, the
+    mise shim, `mise which skillex`, each probed for a new enough version.
+
+    It never falls back to <registry-root>/dist/cli.js. The registry root is a
+    working tree; whatever branch it has checked out (SKRILL-42: a wip branch
+    whose build predated link sources) must not decide which CLI cuts a desk
+    over, or the cutover and the resync judge the same desk differently.
+    """
+    resync = _resync_module()
+    try:
+        argv0, env, _version = resync.resolve_skillex(dict(environ), registry_root)
+    except resync.SkillexUnavailableError as error:
+        raise RuntimeError(str(error)) from None
+    return [argv0], env
+
+
+def owned_names(profile, data):
+    """Entry names Skillex owns in the desk's skills root, from one `profile show`.
+
+    A desk that strict policy refuses reports `managed: null`, but still lists every local entry
+    it does not own under `preserved` (receipt identities decide ownership). Reading `managed`
+    alone there counted zero owned links and planned to quarantine every receipt-owned link.
+    """
+    managed = data.get("managed")
+    if managed is not None:
+        return {item["name"] for item in managed if item["state"] in ("unchanged", "update")}
+    preserved = data.get("preserved")
+    if preserved is None:
+        raise RuntimeError("profile show reported neither managed nor preserved entries")
+    root = profile / "skills"
+    if root.is_symlink() or not root.is_dir():
+        return set()
+    foreign = {item["name"] for item in preserved}
+    return {child.name for child in root.iterdir()} - foreign
 
 
 def main():
@@ -215,35 +324,40 @@ def main():
     ):
         raise RuntimeError("only explicit valid named PM profiles may be cut over")
     profile = args.fleet_home / "profiles" / args.profile
-    command = [*skillex_command(args.registry_root), "profile"]
+    executable, env = skillex_command(args.registry_root)
+    command = [*executable, "profile"]
     shared = ["--hermes-root", str(args.fleet_home), "--registry-root", str(args.registry_root)]
-    show = cli([*command, "show", args.profile, "--project", str(args.project), *shared, "--json"])
+    show = cli(
+        [*command, "show", args.profile, "--project", str(args.project), *shared, "--json"], env
+    )
     if show["exit"] not in (0, 3, 6):
         raise RuntimeError(f"selection refused: {show['findings']}")
     data = show.get("data")
     if data is None or data.get("pending"):
         raise RuntimeError("unresolved profile or pending recovery requires inspection")
-    owned = {
-        item["name"]
-        for item in (data.get("managed") or [])
-        if item["state"] in ("unchanged", "update")
-    }
-    plan = plan_root(profile, owned)
+    owned = owned_names(profile, data)
+    desired = frozenset(item["name"] for item in (data.get("managed") or []))
+    plan = plan_root(profile, owned, desired)
     renderer = load_renderer(args.renderer, args.fleet_home)
     config_change = configure(profile, renderer)
     # Validate selection independently for an alias before changing its root.
     if plan["alias"]:
         validation = cli(
             [
-                "node",
-                "--input-type=module",
-                "-e",
-                "import {resolveSelection} from './dist/index.js'; const r=await resolveSelection({scope:'project',project:process.argv[1],registryRoot:process.argv[2]}); console.log(JSON.stringify(r));",
+                *executable,
+                "status",
+                "--scope",
+                "project",
+                "--project",
                 str(args.project),
+                "--registry-root",
                 str(args.registry_root),
-            ]
+                "--json",
+            ],
+            env,
         )
-        if validation["exit"] != 0:
+        # 6 is activation drift in the project root, not a selection problem.
+        if validation["exit"] not in (0, 6):
             raise RuntimeError(f"selection preflight refused: {validation['findings']}")
     summary = {
         "profile": args.profile,
@@ -271,7 +385,8 @@ def main():
                 *shared,
                 "--skillex-only",
                 "--json",
-            ]
+            ],
+            env,
         )
         summary.update(
             applied=result["exit"] == 0, exit=result["exit"], findings=result["findings"]
@@ -289,7 +404,8 @@ def main():
                 *shared,
                 "--dry-run",
                 "--json",
-            ]
+            ],
+            env,
         )
         if check["exit"] != 0 or check["data"]["changes"]:
             raise RuntimeError("post-cutover sync is not converged")

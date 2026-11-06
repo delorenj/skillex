@@ -41,6 +41,7 @@ def test_real_root_and_owned_child_survive_preservation(tmp_path):
     (root / "owned").symlink_to(target)
     (root / "foreign").mkdir()
     (root / "foreign" / "SKILL.md").write_text("keep me")
+    (root / "foreign" / "upstream").symlink_to(target)  # a link inside: strict policy refuses it
     ino = root.stat().st_ino
     child = (root / "owned").lstat().st_ino
     module = helper()
@@ -81,12 +82,70 @@ def test_hermes_bookkeeping_is_not_quarantined_but_archives_are(tmp_path):
         (root / name).write_text("{}")
     (root / ".archive" / "old").mkdir(parents=True)
     (root / ".hub").mkdir()
+    (root / ".hub" / "lock.json").write_text('{"version": 1, "installed": {"x": {}}}')
     real = tmp_path / "real-state"
     real.write_text("{}")
     (root / ".sync_state").unlink()
     (root / ".sync_state").symlink_to(real)
     plan = helper().plan_root(profile, set())
     assert sorted(plan["children"]) == [".archive", ".hub", ".sync_state"]
+
+
+def test_category_stubs_and_an_idle_hub_stay_but_seeded_payloads_are_preserved(tmp_path):
+    profile = tmp_path / "pm"
+    root = profile / "skills"
+    (root / "autonomous-ai-agents").mkdir(parents=True)
+    (root / "autonomous-ai-agents" / "DESCRIPTION.md").write_text("---\n---\n")
+    (root / "creative" / "ascii-art").mkdir(parents=True)
+    (root / "creative" / "DESCRIPTION.md").write_text("---\n---\n")
+    (root / "creative" / "ascii-art" / "SKILL.md").write_text("# seeded")
+    (root / "creative" / "ascii-art" / "upstream").symlink_to(tmp_path)  # a link: not kept
+    (root / ".hub" / "index-cache").mkdir(parents=True)
+    (root / ".hub" / "quarantine").mkdir()
+    (root / ".hub" / "audit.log").write_text("")
+    (root / ".hub" / "taps.json").write_text("[]")
+    (root / ".hub" / "lock.json").write_text('{"version": 1, "installed": {}}')
+    plan = helper().plan_root(profile, set())
+    assert sorted(plan["children"]) == ["creative"]
+
+
+def test_a_refused_desk_keeps_its_receipt_owned_links(tmp_path):
+    """profile show on a refused strict desk: managed is null, preserved names the foreign."""
+    profile = tmp_path / "pm"
+    root = profile / "skills"
+    root.mkdir(parents=True)
+    (root / "alpha").symlink_to(tmp_path)
+    (root / "learned").mkdir()
+    (root / "learned" / "SKILL.md").write_text("# learned")
+    (root / "foreign").symlink_to(tmp_path)
+    (root / ".usage.json").write_text("{}")
+    data = {
+        "managed": None,
+        "preserved": [{"name": "learned"}, {"name": "foreign"}, {"name": ".usage.json"}],
+    }
+    module = helper()
+    owned = module.owned_names(profile, data)
+    assert owned == {"alpha"}
+    assert sorted(module.plan_root(profile, owned)["children"]) == ["foreign"]
+    with pytest.raises(RuntimeError):
+        module.owned_names(profile, {"managed": None})
+    managed = {
+        "managed": [{"name": "alpha", "state": "unchanged"}, {"name": "b", "state": "create"}]
+    }
+    assert module.owned_names(profile, managed) == {"alpha"}
+
+
+def test_agent_written_skills_stay_unless_named_like_a_selected_skill(tmp_path):
+    profile = tmp_path / "pm"
+    root = profile / "skills"
+    (root / "devops" / "ci-nightly-fix" / "references").mkdir(parents=True)
+    (root / "devops" / "ci-nightly-fix" / "SKILL.md").write_text("# learned")
+    (root / "devops" / "ci-nightly-fix" / "references" / "notes.md").write_text("notes")
+    (root / "review" / "alpha").mkdir(parents=True)
+    (root / "review" / "alpha" / "SKILL.md").write_text("# clash")
+    plan = helper().plan_root(profile, set(), frozenset({"alpha"}))
+    assert sorted(plan["children"]) == ["review"]
+    assert sorted(helper().plan_root(profile, set())["children"]) == []
 
 
 # The config gate asks THE canonical renderer for the expected config (base + delta + renderer pins).
@@ -151,17 +210,36 @@ def test_configure_expects_and_preserves_renderer_pins(tmp_path, monkeypatch):
     assert cfg.read_bytes() == before
 
 
-def test_skillex_bin_overrides_the_checkout_build(tmp_path):
+def _fake_skillex(path, version="0.4.2"):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(f'#!/bin/sh\necho "{version}"\n')
+    path.chmod(0o755)
+    return path
+
+
+def test_cli_resolves_like_the_resync_never_from_the_registry_checkout(tmp_path):
+    """SKRILL-42: the registry root's dist/ came from a wip branch that predated link
+    sources, so the cutover's sync refused a desk the installed CLI would accept."""
     module = helper()
-    assert module.skillex_command(tmp_path, {}) == ["node", str(tmp_path / "dist/cli.js")]
-    npm = tmp_path / "skillex-npm"
-    npm.write_text("#!/bin/sh\n")
-    npm.chmod(0o755)
-    assert module.skillex_command(tmp_path, {"SKILLEX_BIN": str(npm)}) == [str(npm)]
-    for bad in ("skillex", str(tmp_path / "missing"), str(tmp_path)):
-        try:
-            module.skillex_command(tmp_path, {"SKILLEX_BIN": bad})
-        except RuntimeError as error:
-            assert "SKILLEX_BIN=" in str(error)
-        else:
-            raise AssertionError(f"accepted {bad}")
+    registry = tmp_path / "registry"
+    _fake_skillex(registry / "dist/cli.js", "0.0.1")
+    home = tmp_path / "home"
+    bare = {"HOME": str(home), "PATH": str(tmp_path / "empty")}
+    shim = _fake_skillex(home / ".local/share/mise/shims/skillex")
+    argv, env = module.skillex_command(registry, bare)
+    assert argv == [str(shim)] and env["PJ_SKILLS_REGISTRY_ROOT"] == str(registry)
+
+    on_path = _fake_skillex(tmp_path / "bin/skillex")
+    argv, _ = module.skillex_command(registry, dict(bare, PATH=str(on_path.parent)))
+    assert argv == [str(on_path)]
+
+    npm = _fake_skillex(tmp_path / "skillex-npm")
+    argv, _ = module.skillex_command(registry, dict(bare, SKILLEX_BIN=str(npm)))
+    assert argv == [str(npm)]
+    for bad in (str(tmp_path / "missing"), str(tmp_path)):
+        with pytest.raises(RuntimeError, match="SKILLEX_BIN="):
+            module.skillex_command(registry, dict(bare, SKILLEX_BIN=bad))
+
+    shim.unlink()
+    with pytest.raises(RuntimeError, match="no usable skillex CLI"):
+        module.skillex_command(registry, bare)

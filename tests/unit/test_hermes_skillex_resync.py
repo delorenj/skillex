@@ -642,3 +642,31 @@ def test_the_deadline_marks_unreached_desks_instead_of_hiding_them(fleet):
     assert done.returncode == 1
     reasons = [row["reason"] for row in fleet.last()["results"]]
     assert reasons and all("deadline" in reason for reason in reasons)
+
+
+def test_a_registry_checkout_off_main_is_named_in_the_run(fleet):
+    """SKRILL-42: desks resolve sets from whatever branch the registry has out."""
+    git = ["git", "-C", str(fleet.registry), "-c", "core.hooksPath=/dev/null"]
+    ident = ["-c", "user.name=t", "-c", "user.email=t@t"]
+    for command in (
+        ["init", "-q", "-b", "main"],
+        [*ident, "commit", "-q", "--allow-empty", "-m", "c"],
+    ):
+        subprocess.run([*git, *command], check=True, capture_output=True)
+    fleet.desk("alpha-pm")
+    on_main = fleet.run()
+    assert on_main.returncode == 0 and fleet.last()["registry_branch"] == "main"
+    assert "REGISTRY ON" not in on_main.stdout + on_main.stderr
+
+    subprocess.run([*git, "switch", "-q", "-c", "wip/x"], check=True, capture_output=True)
+    off = fleet.run()
+    assert off.returncode == 0, "a warning, not a failure"
+    assert fleet.last()["registry_branch"] == "wip/x"
+    assert "REGISTRY ON wip/x (not main)" in off.stdout
+    assert "WARNING registry" in off.stderr
+
+
+def test_a_registry_that_is_not_its_own_checkout_reports_no_branch(fleet):
+    fleet.desk("alpha-pm")
+    assert fleet.run().returncode == 0
+    assert fleet.last()["registry_branch"] is None
