@@ -105,28 +105,9 @@ if status in {"blocked","stalled","error"}:
         or iso_epoch(state.get("last_runner_completed_at")) or iso_epoch(state.get("updated_at")))
     if last_blocked_run and (now - last_blocked_run) < blocked_full_run_cooldown:
         print("skip:blocker-cooldown"); raise SystemExit(0)
-if status in {"active","delegated","working"} and session:
-    process_active = False
-    try:
-        result = subprocess.run(["ps","-u",str(__import__("os").getuid()),"-o","pid=,command="],
-            check=False, text=True, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=5)
-        markers = ("codex exec","opencode run","auggie","gemini","kimi","copilot")
-        process_active = any(((session and session in line) or (worktree and worktree in line))
-            and any(m in line for m in markers) for line in result.stdout.splitlines())
-    except Exception: process_active = False
-    # Per-session liveness. zellij 0.44.3 has NO per-session log: there is one
-    # global log at /tmp/zellij-$UID/zellij-log/. The path this used to point at
-    # (~/.local/state/zellij/sessions/<s>/zellij.log) has never existed here, so
-    # log_recent was silently always False. session-metadata.kdl IS per-session
-    # and is rewritten every serialization tick (60s default), well inside the
-    # 600s active_max_idle window.
-    log_path = Path.home()/".cache"/"zellij"/"contract_version_1"/"session_info"/session/"session-metadata.kdl"
-    log_recent = log_path.exists() and (now - log_path.stat().st_mtime) <= active_max_idle
-    marker_recent = False
-    last_activity = iso_epoch(state.get("last_activity_at")) or iso_epoch(state.get("updated_at"))
-    if last_activity: marker_recent = (now - last_activity) <= active_max_idle
-    if process_active and (log_recent or marker_recent):
-        print("skip:active-worker"); raise SystemExit(0)
+# WIP=1 gate removed (owner directive 2026-11-05): a healthy worker on one
+# ticket no longer skips this pass. Workers run in parallel, one owner per
+# ticket; only the cooldowns below throttle passes.
 last_full_run = float(state.get("last_full_run_epoch") or 0)
 if last_full_run and (now - last_full_run) < full_run_cooldown: print("skip:cooldown")
 else: print("run:full")
