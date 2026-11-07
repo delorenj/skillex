@@ -1,10 +1,9 @@
 import importlib.util
 import json
-from pathlib import Path
 import shutil
 import tempfile
 import unittest
-
+from pathlib import Path
 
 SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "personal-learned-inventory.py"
 SPEC = importlib.util.spec_from_file_location("personal_inventory", SCRIPT)
