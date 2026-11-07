@@ -208,8 +208,8 @@ def migrate(profile, apply):
     name, identity, repo, _, expected = audit(profile, require_bound=False)
     source = source_for(identity)
     original = digest_tree(root)
-    if source.exists() or source.is_symlink():
-        existing = digest_tree(source)
+    existing = digest_tree(source) if source.exists() or source.is_symlink() else None
+    if existing is not None:
         if not original:
             existing.pop(".gitkeep", None)
         if existing != original:
@@ -221,7 +221,10 @@ def migrate(profile, apply):
             shutil.copytree(root, source, symlinks=False)
         else:
             source.mkdir()
-    if digest_tree(source) != original:
+    current = digest_tree(source)
+    if existing is not None and not original:
+        current.pop(".gitkeep", None)
+    if current != original:
         raise Refusal("copy did not preserve all learned files")
     registration(identity, name)
     # Git does not track empty directories: retain an explicit empty source marker.

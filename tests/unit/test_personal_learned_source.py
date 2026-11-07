@@ -108,6 +108,15 @@ class PersonalSourceTest(unittest.TestCase):
         self.assertTrue(self.run_script("check")["ok"])
         self.assertEqual(self.migrate()["commit"], result["commit"])
 
+    def test_empty_source_retries_after_push_failure(self):
+        shutil.rmtree(self.profile / "learned-skills")
+        git(self.repo, "remote", "set-url", "--push", "origin", str(self.tmp / "missing.git"))
+        self.run_script("migrate", "--apply", success=False)
+        self.assertTrue((self.identity / "learned-skills/.gitkeep").exists())
+        git(self.repo, "remote", "set-url", "--push", "origin", str(self.remote))
+        self.assertTrue(self.migrate()["pushed"])
+        self.assertTrue(self.profile.joinpath("learned-skills").is_symlink())
+
     def test_collisions_identity_and_bad_metadata_refuse(self):
         (self.profile / "skills/alias").mkdir(parents=True)
         (self.profile / "skills/alias/SKILL.md").write_text("---\nname: lesson\ndescription: Selected\n---\n")
