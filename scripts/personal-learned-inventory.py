@@ -13,7 +13,31 @@ from pathlib import Path
 import stat
 import sys
 
+import re
 import yaml
+
+SKILL_NAME = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
+
+
+def advertised_names(selected: Path) -> set[str]:
+    """Include both directory names and the public names advertised by selections."""
+    names = set()
+    if not selected.exists() and not selected.is_symlink():
+        return names
+    directory(selected)
+    for child in selected.iterdir():
+        if child.name.startswith("."):
+            continue
+        names.add(child.name)
+        if child.is_dir():
+            skill = child / "SKILL.md"
+            if skill.is_file():
+                content = skill.read_text(encoding="utf-8")
+                if content.startswith("---\n") and "\n---\n" in content[4:]:
+                    front = yaml.safe_load(content[4:].split("\n---\n", 1)[0])
+                    if isinstance(front, dict) and isinstance(front.get("name"), str):
+                        names.add(front["name"])
+    return names
 
 
 class InventoryError(Exception):
@@ -38,13 +62,13 @@ def mapping(path: Path) -> dict:
     return data
 
 
-def inventory(profile: Path, identity: Path) -> dict:
+def inventory(profile: Path, identity: Path, *, allow_bound: bool = False) -> dict:
     directory(profile)
     directory(identity)
     metadata = mapping(profile / "profile.yaml")
     contract = mapping(identity / "contract.yaml")
     name = contract.get("id")
-    if not isinstance(name, str) or not name or name in {".", ".."} or "/" in name:
+    if not isinstance(name, str) or not SKILL_NAME.fullmatch(name):
         raise InventoryError("identity contract has invalid id")
     if identity.name != name or metadata.get("name") != name:
         raise InventoryError("profile and contract do not bind the same identity")
@@ -57,18 +81,15 @@ def inventory(profile: Path, identity: Path) -> dict:
     regular(identity / "agent.yaml")
     root = profile / "learned-skills"
     if root.is_symlink():
-        raise InventoryError(f"learned root must be a real directory: {root}")
-    if root.exists():
+        if not allow_bound or root.resolve() != (identity / "learned-skills").resolve():
+            raise InventoryError(f"learned root must be a real directory or admitted bound link: {root}")
+        directory(root.resolve())
+    elif root.exists():
         directory(root)
     else:
         return {"identity": name, "profile": str(profile), "source": str(identity),
                 "skills": [], "entry_count": 0}
-    selected = profile / "skills"
-    if selected.exists() or selected.is_symlink():
-        directory(selected)
-        selected_names = {child.name for child in selected.iterdir() if not child.name.startswith(".")}
-    else:
-        selected_names = set()
+    selected_names = advertised_names(profile / "skills") | advertised_names(Path.home() / ".agents/skills")
     skills = []
     names = set()
     count = 0
@@ -88,16 +109,18 @@ def inventory(profile: Path, identity: Path) -> dict:
         if relative == Path("."):
             raise InventoryError("learned root cannot itself be a skill")
         skill_name = base_path.name
-        if skill_name in names or skill_name in selected_names:
-            raise InventoryError(f"duplicate or selected skill name: {skill_name}")
+        if not SKILL_NAME.fullmatch(skill_name) or skill_name in names or skill_name in selected_names:
+            raise InventoryError(f"invalid, duplicate or selected skill name: {skill_name}")
         names.add(skill_name)
         # YAML frontmatter, not the entire Markdown document, is a mapping.
         content = (base_path / "SKILL.md").read_text(encoding="utf-8")
         if not content.startswith("---\n") or "\n---\n" not in content[4:]:
             raise InventoryError(f"missing skill frontmatter: {base_path}")
         frontmatter = yaml.safe_load(content[4:].split("\n---\n", 1)[0])
-        if not isinstance(frontmatter, dict) or frontmatter.get("name") != skill_name:
-            raise InventoryError(f"skill metadata name does not match its directory: {base_path}")
+        if (not isinstance(frontmatter, dict) or frontmatter.get("name") != skill_name
+                or not isinstance(frontmatter.get("description"), str)
+                or not frontmatter["description"].strip()):
+            raise InventoryError(f"skill metadata name or description is invalid: {base_path}")
         payload = []
         for walk_base, subdirs, subfiles in os.walk(base_path, followlinks=False):
             for filename in sorted(subfiles):
