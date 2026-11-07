@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process";
 import type { Dirent } from "node:fs";
 import { constants } from "node:fs";
 import { open, readdir, readFile, realpath, stat } from "node:fs/promises";
@@ -128,6 +129,126 @@ export async function profileInheritsGlobal(profile: ProfileLocation): Promise<b
 
 const learnedScanLimit = 20_000;
 
+function object(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+/** Admit exactly one named, Git-backed identity's personal discovery source. */
+export async function admitPersonalSource(
+  profile: ProfileLocation,
+  options: ProfileOptions,
+  desired: ReadonlySet<string> = new Set(),
+): Promise<string | null> {
+  const bindingPath = join(profile.root, ".skillex-personal-source.json");
+  const bindingFile = await entry(bindingPath);
+  if (!bindingFile) return null;
+  if (!bindingFile.info.isFile())
+    refuse(bindingPath, "Personal source binding must be a regular file.");
+  let binding: unknown;
+  try {
+    binding = JSON.parse(await readFile(bindingPath, "utf8"));
+  } catch {
+    refuse(bindingPath, "Personal source binding is not valid JSON.");
+  }
+  if (
+    !object(binding) ||
+    Object.keys(binding).sort().join(",") !== "definition,identity,repository,schema,source" ||
+    binding.schema !== 1 ||
+    typeof binding.identity !== "string" ||
+    !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(binding.identity) ||
+    typeof binding.source !== "string" ||
+    typeof binding.repository !== "string" ||
+    typeof binding.definition !== "string"
+  )
+    refuse(bindingPath, "Personal source binding has an invalid schema or identity.");
+  const home = resolve(options.home ?? homedir());
+  const repository = join(home, ".agents");
+  const identity = join(repository, "workforce", binding.identity as string);
+  const source = join(identity, "learned-skills");
+  const definition = join(identity, "agent.yaml");
+  if (
+    binding.repository !== repository ||
+    binding.source !== source ||
+    binding.definition !== definition ||
+    (await realpath(repository).catch(() => null)) !== repository ||
+    (await realpath(identity).catch(() => null)) !== identity ||
+    (await realpath(source).catch(() => null)) !== source
+  )
+    refuse(bindingPath, "Personal source must be the canonical named workforce path in ~/.agents.");
+  const git = spawnSync("git", ["-C", repository, "rev-parse", "--show-toplevel"], {
+    encoding: "utf8",
+    timeout: 5000,
+  });
+  if (git.status !== 0 || git.stdout.trim() !== repository)
+    refuse(repository, "Personal source repository must be a real Git checkout at ~/.agents.");
+  for (const path of [
+    source,
+    definition,
+    join(identity, "contract.yaml"),
+    join(profile.root, "profile.yaml"),
+  ]) {
+    const node = await entry(path);
+    if (!node || !(path === source ? node.info.isDirectory() : node.info.isFile()))
+      refuse(
+        path,
+        "Personal source identity requires real directories and regular metadata files.",
+      );
+  }
+  const parse = async (path: string): Promise<unknown> => {
+    const doc = parseDocument(await readFile(path, "utf8"), { uniqueKeys: true });
+    if (doc.errors.length) refuse(path, "Personal source identity YAML is malformed.");
+    return doc.toJS();
+  };
+  const contract = await parse(join(identity, "contract.yaml"));
+  const metadata = await parse(join(profile.root, "profile.yaml"));
+  if (
+    !object(contract) ||
+    contract.id !== binding.identity ||
+    !object(metadata) ||
+    metadata.name !== binding.identity ||
+    !object(metadata.flume) ||
+    metadata.flume.employment !== "portable-specialist" ||
+    metadata.flume.definition !== definition
+  )
+    refuse(bindingPath, "Profile and identity contract do not bind the same portable specialist.");
+  const learned = join(profile.root, "learned-skills");
+  const link = await entry(learned);
+  if (
+    !link?.info.isSymbolicLink() ||
+    (await realpath(learned).catch(() => null)) !== source ||
+    resolve(profile.root, link.raw ?? "") !== source
+  )
+    refuse(learned, "Profile learned-skills must link directly to its bound personal source.");
+  const names = new Set<string>();
+  const pending = [source];
+  let seen = 0;
+  while (pending.length) {
+    const directory = pending.pop() as string;
+    const items = await children(directory);
+    if (!items) refuse(directory, "Cannot inspect personal source tree.");
+    for (const child of items) {
+      if (++seen > learnedScanLimit) refuse(source, "Personal source tree exceeds scan limit.");
+      const path = join(directory, child.name);
+      if (child.isDirectory()) pending.push(path);
+      else if (!child.isFile()) refuse(path, "Personal source contains a link or special file.");
+      else if (child.name === "SKILL.md") {
+        const name = basename(directory);
+        if (directory === source || names.has(name) || desired.has(name))
+          refuse(path, `Personal skill ${name} is duplicate or collides with selected skills.`);
+        const content = await readFile(path, "utf8");
+        const match = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/.exec(content);
+        if (!match) refuse(path, "Personal skill is missing YAML frontmatter.");
+        const frontmatter = parseDocument(match[1] ?? "", { uniqueKeys: true });
+        const advertised = frontmatter.toJS();
+        if (frontmatter.errors.length || !object(advertised) || advertised.name !== name)
+          refuse(path, "Personal skill advertised name must match its directory.");
+        names.add(name);
+      }
+    }
+  }
+  return source;
+}
+
 /**
  * Skills a desk's agent wrote for itself (Hermes skill_manage), or a category of them: a real,
  * non-dot directory whose whole tree holds only real directories and regular files. Returns the
@@ -186,7 +307,9 @@ async function privateCreateDir(
   const root = await real(profile.root);
   const target = await real(lexical);
   const inside = relative(root, target);
-  return inside !== "" && !inside.startsWith("..") && !isAbsolute(inside);
+  if (inside !== "" && !inside.startsWith("..") && !isAbsolute(inside)) return true;
+  const personal = await admitPersonalSource(profile, options);
+  return personal !== null && target === personal;
 }
 
 /**
@@ -202,6 +325,8 @@ export async function assertStrictProfile(
   desired: ReadonlySet<string> = new Set(),
 ): Promise<boolean> {
   if (!(await strictProfile(profile, options))) return false;
+  // Validate a declared personal source even when create_dir does not point at it.
+  await admitPersonalSource(profile, options, desired);
   for (const item of local) {
     if (await hermesMetadata(item)) continue;
     const learned = await learnedSkills(item);

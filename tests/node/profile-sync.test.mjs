@@ -85,6 +85,82 @@ function fixture(t) {
     skill,
   };
 }
+it("bound personal source admits only matching portable specialist and Git-backed tree", async (t) => {
+  const f = fixture(t);
+  const repository = f.directory(join(f.home, ".agents"));
+  const identity = f.directory(join(repository, "workforce", "work"));
+  const source = f.directory(join(identity, "learned-skills"));
+  const definition = f.file(join(identity, "agent.yaml"), "name: work\n");
+  f.file(join(identity, "contract.yaml"), "id: work\n");
+  f.file(
+    join(f.profile, "profile.yaml"),
+    `name: work\nflume:\n  employment: portable-specialist\n  definition: ${definition}\n`,
+  );
+  const binding = { schema: 1, identity: "work", repository, source, definition };
+  const bindingFile = join(f.profile, ".skillex-personal-source.json");
+  f.file(bindingFile, JSON.stringify(binding));
+  symlinkSync(source, join(f.profile, "learned-skills"));
+  f.file(join(f.profile, "config.yaml"), `skills:\n  external_dirs: []\n  create_dir: ${source}\n`);
+  const git = spawnSync("git", ["-C", repository, "init", "-q"], { encoding: "utf8" });
+  assert.equal(git.status, 0, git.stderr);
+  const skill = f.file(
+    join(source, "devops", "repair", "SKILL.md"),
+    "---\nname: repair\n---\n# Repair\n",
+  );
+  const strict = { ...f.options, skillexOnly: true };
+  const check = async (exit) => {
+    const result = await showProfile("work", strict);
+    assert.equal(result.exit, exit, JSON.stringify(result.findings));
+    if (exit === 3) assert(result.findings.some(({ code }) => code === "E_PROFILE_SKILLEX_ONLY"));
+  };
+  assert.equal((await syncProfile("work", { ...strict, dryRun: true })).exit, 0);
+  ok(await syncProfile("work", strict));
+  assert.deepEqual(ok(await syncProfile("work", { ...strict, dryRun: true })).changes, []);
+  await check(0);
+  for (const [path, replacement] of [
+    [bindingFile, JSON.stringify({ ...binding, identity: "stranger" })],
+    [
+      join(f.profile, "profile.yaml"),
+      `name: wrong\nflume:\n  employment: portable-specialist\n  definition: ${definition}\n`,
+    ],
+    [join(identity, "contract.yaml"), "id: wrong\n"],
+    [bindingFile, JSON.stringify({ ...binding, source: join(f.root, "outside") })],
+    [skill, "---\nname: alpha\n---\n# Collision\n"],
+  ]) {
+    const original = readFileSync(path, "utf8");
+    writeFileSync(path, replacement);
+    await check(3);
+    writeFileSync(path, original);
+  }
+  const duplicate = f.file(join(source, "other", "repair", "SKILL.md"), "---\nname: repair\n---\n");
+  await check(3);
+  rmSync(duplicate);
+  const nested = f.file(join(source, "other", "alpha", "SKILL.md"), "---\nname: alpha\n---\n");
+  await check(3);
+  rmSync(nested);
+  symlinkSync(source, join(source, "escape"));
+  await check(3);
+  unlinkSync(join(source, "escape"));
+  unlinkSync(join(f.profile, "learned-skills"));
+  await check(3);
+  symlinkSync(source, join(f.profile, "learned-skills"));
+  await check(0);
+  rmSync(join(repository, ".git"), { recursive: true, force: true });
+  await check(3);
+});
+
+it("unbound create_dir symlink escapes remain refused", async (t) => {
+  const f = fixture(t);
+  const outside = f.directory(join(f.root, "outside"));
+  symlinkSync(outside, join(f.profile, "learned-skills"));
+  f.file(
+    join(f.profile, "config.yaml"),
+    "skills:\n  external_dirs: []\n  create_dir: learned-skills\n",
+  );
+  const result = await syncProfile("work", { ...f.options, skillexOnly: true });
+  assert.equal(result.exit, 3);
+});
+
 it("set source revisions survive profile receipt rereads and converge", async (t) => {
   const f = fixture(t);
   const set = f.directory(join(f.registry, "sets", "desk"));
