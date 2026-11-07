@@ -200,6 +200,106 @@ test("a profile-private create_dir is tolerated; one that escapes the profile is
   }
 });
 
+test("identity-bound Git personal source is admitted, checked for collisions and converges", async (t) => {
+  const f = fixture(t);
+  await f.activate();
+  const identity = "morgan-finance";
+  const repository = f.dir(join(f.home, ".agents"));
+  const source = f.dir(join(repository, "workforce", identity, "learned-skills"));
+  const definition = f.file(
+    join(repository, "workforce", identity, "agent.yaml"),
+    "name: morgan\n",
+  );
+  f.file(join(repository, "workforce", identity, "contract.yaml"), `id: ${identity}\n`);
+  f.file(
+    join(f.profile, "profile.yaml"),
+    `name: ${identity}\nflume:\n  employment: portable-specialist\n  definition: ${definition}\n`,
+  );
+  const bind = (updates = {}) =>
+    f.file(
+      join(f.profile, ".skillex-personal-source.json"),
+      JSON.stringify({
+        schema: 1,
+        identity,
+        source,
+        repository,
+        definition,
+        ...updates,
+      }),
+    );
+  const config = (create) =>
+    f.file(
+      join(f.profile, "config.yaml"),
+      `skills:\n  external_dirs: []\n  create_dir: ${create}\n`,
+    );
+  const check = async (expected) => {
+    const shown = await showProfile("pilot", f.options);
+    assert.equal(shown.exit, expected, JSON.stringify(shown.findings));
+    assert.equal((await syncProfile("pilot", { ...f.options, dryRun: true })).exit, expected);
+  };
+  bind();
+  symlinkSync(source, join(f.profile, "learned-skills"));
+  config(source);
+  // Merely binding an arbitrary directory outside the profile is not enough: Git is mandatory.
+  await check(3);
+  const git = (...args) => {
+    const result = spawnSync("git", ["-C", repository, ...args], { encoding: "utf8" });
+    assert.equal(result.status, 0, result.stderr);
+  };
+  git("init", "-q");
+  git("config", "user.email", "fixture@example.invalid");
+  git("config", "user.name", "Fixture");
+  f.file(join(source, "category", "lesson", "SKILL.md"), "---\nname: lesson\n---\n# Lesson\n");
+  git("add", ".");
+  git("commit", "-qm", "fixture");
+  await check(0);
+  assert.deepEqual((await syncProfile("pilot", f.options)).data.applied, []);
+  await check(0);
+  for (const update of [
+    { identity: "other" },
+    { repository: f.root },
+    { source: f.root },
+    { definition: f.root },
+  ]) {
+    bind(update);
+    await check(3);
+  }
+  bind();
+  f.file(join(f.profile, "profile.yaml"), "name: someone-else\n");
+  await check(3);
+  f.file(
+    join(f.profile, "profile.yaml"),
+    `name: ${identity}\nflume:\n  employment: portable-specialist\n  definition: ${definition}\n`,
+  );
+  f.file(join(repository, "workforce", identity, "contract.yaml"), "id: someone-else\n");
+  await check(3);
+  f.file(join(repository, "workforce", identity, "contract.yaml"), `id: ${identity}\n`);
+  unlinkSync(join(f.profile, "learned-skills"));
+  await check(3);
+  symlinkSync(source, join(f.profile, "learned-skills"));
+  for (const [path, content] of [
+    [join(source, "category", "global", "SKILL.md"), "---\nname: global\n---\n"],
+    [join(source, "category", "extra", "SKILL.md"), "---\nname: global\n---\n"],
+  ]) {
+    f.file(path, content);
+    await check(3);
+    rmSync(dirname(path), { recursive: true });
+  }
+  const duplicate = join(source, "other", "lesson", "SKILL.md");
+  f.file(duplicate, "---\nname: lesson\n---\n");
+  await check(3);
+  rmSync(join(source, "other"), { recursive: true });
+  symlinkSync(f.root, join(source, "escape"));
+  await check(3);
+  unlinkSync(join(source, "escape"));
+  bind({ schema: 2 });
+  await check(3);
+  bind();
+  config(join(f.profile, "escape", "learned"));
+  symlinkSync(f.root, join(f.profile, "escape"));
+  await check(3);
+});
+
 test("foreign containers and trusted project shadows are reported and preserved", async (t) => {
   const f = fixture(t);
   await f.activate();
