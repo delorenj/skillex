@@ -9,11 +9,11 @@ import argparse
 import hashlib
 import json
 import os
-from pathlib import Path
+import re
 import stat
 import sys
+from pathlib import Path
 
-import re
 import yaml
 
 SKILL_NAME = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
@@ -24,6 +24,9 @@ def advertised_names(selected: Path) -> set[str]:
     names = set()
     if not selected.exists() and not selected.is_symlink():
         return names
+    # Selection roots may be Skillex-owned whole-root set aliases. This is a
+    # read-only collision inventory, unlike the no-follow learned-source audit.
+    selected = selected.resolve(strict=True)
     directory(selected)
     for child in selected.iterdir():
         if child.name.startswith("."):
@@ -122,7 +125,7 @@ def inventory(profile: Path, identity: Path, *, allow_bound: bool = False) -> di
                 or not frontmatter["description"].strip()):
             raise InventoryError(f"skill metadata name or description is invalid: {base_path}")
         payload = []
-        for walk_base, subdirs, subfiles in os.walk(base_path, followlinks=False):
+        for walk_base, _subdirs, subfiles in os.walk(base_path, followlinks=False):
             for filename in sorted(subfiles):
                 file = Path(walk_base) / filename
                 regular(file)

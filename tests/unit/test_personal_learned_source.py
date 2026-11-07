@@ -10,7 +10,9 @@ SCRIPT = Path(__file__).resolve().parents[2] / "scripts/personal-learned-source.
 
 
 def git(repo, *args):
-    return subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True, text=True).stdout.strip()
+    return subprocess.run(
+        ["git", "-C", str(repo), *args], check=True, capture_output=True, text=True
+    ).stdout.strip()
 
 
 class PersonalSourceTest(unittest.TestCase):
@@ -31,7 +33,8 @@ class PersonalSourceTest(unittest.TestCase):
         self.profile.mkdir(parents=True)
         (self.profile / "profile.yaml").write_text(
             "name: person\nflume:\n  employment: portable-specialist\n"
-            f"  definition: {self.identity / 'agent.yaml'}\n")
+            f"  definition: {self.identity / 'agent.yaml'}\n"
+        )
         self.skill = self.profile / "learned-skills/topic/lesson"
         self.skill.mkdir(parents=True)
         (self.skill / "SKILL.md").write_text("---\nname: lesson\ndescription: Lesson\n---\nHello\n")
@@ -43,8 +46,12 @@ class PersonalSourceTest(unittest.TestCase):
 
     def run_script(self, *args, success=True):
         env = dict(os.environ, XDG_STATE_HOME=str(self.tmp / "state"))
-        result = subprocess.run(["python3", str(SCRIPT), *args, "--profile", str(self.profile)],
-                                capture_output=True, text=True, env=env)
+        result = subprocess.run(
+            ["python3", str(SCRIPT), *args, "--profile", str(self.profile)],
+            capture_output=True,
+            text=True,
+            env=env,
+        )
         self.assertEqual(result.returncode == 0, success, result.stdout + result.stderr)
         return json.loads(result.stdout)
 
@@ -58,15 +65,59 @@ class PersonalSourceTest(unittest.TestCase):
         self.assertTrue(result["pushed"])
         self.assertEqual(git(self.repo, "rev-parse", "HEAD"), git(self.remote, "rev-parse", "HEAD"))
         self.assertTrue(self.profile.joinpath("learned-skills").is_symlink())
-        self.assertEqual(git(self.repo, "show", "HEAD:workforce/person/personal-learned-source.json"),
-                         '{"identity": "person", "schema": 1, "source": "learned-skills"}')
+        self.assertEqual(
+            git(self.repo, "show", "HEAD:workforce/person/personal-learned-source.json"),
+            '{"identity": "person", "schema": 1, "source": "learned-skills"}',
+        )
         self.assertEqual((self.skill / "assets/data.bin").read_bytes(), b"\x00\xff")
-        recovered = list((self.tmp / "state/skillex/personal-learning/person").glob("*/topic/lesson/assets/data.bin"))
+        recovered = list(
+            (self.tmp / "state/skillex/personal-learning/person").glob(
+                "*/topic/lesson/assets/data.bin"
+            )
+        )
         self.assertGreaterEqual(len(recovered), 1)
         self.assertTrue(all(path.read_bytes() == b"\x00\xff" for path in recovered))
         self.assertTrue(self.run_script("check")["ok"])
         self.assertTrue(self.run_script("migrate")["ok"])
         self.assertEqual(self.migrate()["commit"], result["commit"])
+
+    def test_ignored_support_file_refuses_durability_before_activation(self):
+        (self.repo / ".gitignore").write_text("*.log\n")
+        git(self.repo, "add", ".gitignore")
+        git(self.repo, "commit", "-m", "fixture ignore")
+        git(self.repo, "push", "origin", "HEAD")
+        before = git(self.repo, "rev-parse", "HEAD")
+        (self.skill / "assets/output.log").write_text("authored supporting example")
+        result = self.run_script("migrate", "--apply", success=False)
+        self.assertIn("payload", result["error"])
+        self.assertFalse((self.profile / "learned-skills").is_symlink())
+        self.assertTrue((self.skill / "assets/output.log").exists())
+        self.assertEqual(git(self.remote, "rev-parse", "HEAD"), before)
+
+    def test_ignored_new_payload_checkpoint_retains_content_and_refuses(self):
+        self.migrate()
+        (self.repo / ".gitignore").write_text("*.log\n")
+        git(self.repo, "add", ".gitignore")
+        git(self.repo, "commit", "-m", "fixture ignore")
+        git(self.repo, "push", "origin", "HEAD")
+        before = git(self.repo, "rev-parse", "HEAD")
+        (self.skill / "assets/output.log").write_text("retained learning")
+        result = self.run_script("checkpoint", success=False)
+        self.assertIn("payload", result["error"])
+        self.assertTrue((self.skill / "assets/output.log").exists())
+        self.assertEqual(git(self.remote, "rev-parse", "HEAD"), before)
+
+    def test_clean_filter_cannot_silently_change_migrated_bytes(self):
+        (self.repo / ".gitattributes").write_text("*.bin filter=learned-test\n")
+        git(self.repo, "config", "filter.learned-test.clean", "tr a-z A-Z")
+        git(self.repo, "add", ".gitattributes")
+        git(self.repo, "commit", "-m", "fixture filter")
+        git(self.repo, "push", "origin", "HEAD")
+        (self.skill / "assets/data.bin").write_bytes(b"original lowercase bytes")
+        result = self.run_script("migrate", "--apply", success=False)
+        self.assertIn("payload", result["error"])
+        self.assertFalse((self.profile / "learned-skills").is_symlink())
+        self.assertEqual((self.skill / "assets/data.bin").read_bytes(), b"original lowercase bytes")
 
     def test_checkpoint_create_edit_assets_and_unrelated_staged(self):
         self.migrate()
@@ -74,7 +125,9 @@ class PersonalSourceTest(unittest.TestCase):
         (self.repo / "unrelated.txt").write_text("staged bytes")
         git(self.repo, "add", "unrelated.txt")
         baseline = git(self.repo, "show", ":unrelated.txt")
-        (self.skill / "SKILL.md").write_text("---\nname: lesson\ndescription: Lesson\n---\nEdited\n")
+        (self.skill / "SKILL.md").write_text(
+            "---\nname: lesson\ndescription: Lesson\n---\nEdited\n"
+        )
         (self.skill / "assets/new.bin").write_bytes(b"new")
         second = self.identity / "learned-skills/topic/second"
         second.mkdir()
@@ -82,10 +135,14 @@ class PersonalSourceTest(unittest.TestCase):
         result = self.run_script("checkpoint")
         self.assertTrue(result["pushed"])
         self.assertEqual(git(self.repo, "show", ":unrelated.txt"), baseline)
-        self.assertNotIn("unrelated.txt", git(self.repo, "show", "--pretty=format:", "--name-only", "HEAD"))
+        self.assertNotIn(
+            "unrelated.txt", git(self.repo, "show", "--pretty=format:", "--name-only", "HEAD")
+        )
         self.assertEqual(git(self.remote, "rev-parse", "HEAD"), result["commit"])
-        self.assertIn("workforce/person/learned-skills/topic/second/SKILL.md",
-                      git(self.repo, "show", "--pretty=format:", "--name-only", "HEAD"))
+        self.assertIn(
+            "workforce/person/learned-skills/topic/second/SKILL.md",
+            git(self.repo, "show", "--pretty=format:", "--name-only", "HEAD"),
+        )
 
     def test_empty_identity_tracks_source_and_definition_without_generated_contract(self):
         (self.identity / "contract.yaml").unlink()
@@ -119,7 +176,9 @@ class PersonalSourceTest(unittest.TestCase):
 
     def test_collisions_identity_and_bad_metadata_refuse(self):
         (self.profile / "skills/alias").mkdir(parents=True)
-        (self.profile / "skills/alias/SKILL.md").write_text("---\nname: lesson\ndescription: Selected\n---\n")
+        (self.profile / "skills/alias/SKILL.md").write_text(
+            "---\nname: lesson\ndescription: Selected\n---\n"
+        )
         self.run_script("migrate", success=False)
         self.assertFalse((self.identity / "learned-skills").exists())
         shutil.rmtree(self.profile / "skills")
@@ -138,7 +197,9 @@ class PersonalSourceTest(unittest.TestCase):
 
     def test_failed_checkpoint_retains_written_changes_for_retry(self):
         self.migrate()
-        (self.skill / "SKILL.md").write_text("---\nname: lesson\ndescription: Lesson\n---\nChanged\n")
+        (self.skill / "SKILL.md").write_text(
+            "---\nname: lesson\ndescription: Lesson\n---\nChanged\n"
+        )
         git(self.repo, "remote", "set-url", "origin", str(self.tmp / "missing.git"))
         failure = self.run_script("checkpoint", success=False)
         self.assertFalse(failure["pushed"])

@@ -38,7 +38,9 @@ class PersonalInventoryTest(unittest.TestCase):
         self.assertEqual(json.loads(json.dumps(result))["entry_count"], 3)
 
     def test_rejects_mismatched_identity_binding(self):
-        (self.profile / "profile.yaml").write_text("name: person\nflume:\n  employment: portable-specialist\n  definition: /tmp/other/agent.yaml\n")
+        (self.profile / "profile.yaml").write_text(
+            "name: person\nflume:\n  employment: portable-specialist\n  definition: /tmp/other/agent.yaml\n"
+        )
         with self.assertRaises(MODULE.InventoryError):
             MODULE.inventory(self.profile, self.identity)
 
@@ -49,6 +51,21 @@ class PersonalInventoryTest(unittest.TestCase):
         (self.profile / "learned-skills" / "category" / "link").unlink()
         (self.profile / "skills").mkdir()
         (self.profile / "skills" / "lesson").mkdir()
+        with self.assertRaises(MODULE.InventoryError):
+            MODULE.inventory(self.profile, self.identity)
+
+    def test_selected_set_root_alias_is_followed_for_collision_inventory(self):
+        selected = self.temp / "selected"
+        selected.mkdir()
+        alias = self.profile / "skills"
+        alias.symlink_to(selected, target_is_directory=True)
+        self.assertEqual(
+            MODULE.inventory(self.profile, self.identity)["skills"][0]["name"], "lesson"
+        )
+        (selected / "different-alias").mkdir()
+        (selected / "different-alias/SKILL.md").write_text(
+            "---\nname: lesson\ndescription: Selected procedure\n---\n"
+        )
         with self.assertRaises(MODULE.InventoryError):
             MODULE.inventory(self.profile, self.identity)
 

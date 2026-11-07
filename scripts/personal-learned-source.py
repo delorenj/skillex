@@ -125,6 +125,37 @@ def locked(repo):
         yield
 
 
+def payload_objects(repo, paths):
+    """Expected raw Git objects for every owned file, including ignored payloads."""
+    files = []
+    for relative in paths:
+        root = repo / relative
+        if root.is_dir():
+            digest_tree(root)  # reject links and special files before reading
+            files.extend(sorted(p for p in root.rglob("*") if p.is_file()))
+        else:
+            INVENTORY.regular(root)
+            files.append(root)
+    if not files:
+        return {}
+    objects = git(repo, "hash-object", "--no-filters", "--", *map(str, files)).splitlines()
+    return {path.relative_to(repo).as_posix(): oid for path, oid in zip(files, objects, strict=True)}
+
+
+def verify_payload(repo, tree, paths, expected):
+    actual = {}
+    for record in git(repo, "ls-tree", "-r", "-z", tree, "--", *paths).split("\0"):
+        if not record:
+            continue
+        metadata, path = record.split("\t", 1)
+        mode, kind, oid = metadata.split()
+        if kind != "blob" or mode not in ("100644", "100755"):
+            raise Refusal(f"non-regular learned payload in Git tree: {path}")
+        actual[path] = oid
+    if actual != expected:
+        raise Refusal("Git tree does not preserve every learned payload byte; check ignore rules, filters or concurrent writes")
+
+
 def checkpoint_git(repo, name, *, include_definition=False):
     """Commit only this identity's learned subtree and registration."""
     with locked(repo):
@@ -144,11 +175,14 @@ def checkpoint_git(repo, name, *, include_definition=False):
         paths = [relative, registered]
         if include_definition:
             paths.append(f"workforce/{name}/agent.yaml")
+        expected = payload_objects(repo, paths)
         # The isolated index begins at HEAD, not the caller's staged changes.
         with tempfile.TemporaryDirectory(prefix="skillex-index-") as tmp:
             env = dict(os.environ, GIT_INDEX_FILE=str(Path(tmp) / "index"))
             git(repo, "read-tree", "HEAD", env=env)
             git(repo, "add", "-A", "--", *paths, env=env)
+            tree = git(repo, "write-tree", env=env)
+            verify_payload(repo, tree, paths, expected)
             staged = git(repo, "diff", "--cached", "--name-only", env=env)
             if staged:
                 git(repo, "commit", "-m", f"chore(skills): checkpoint {name} personal learning\n\nCo-Authored-By: Claude Code <noreply@anthropic.com>", env=env)
@@ -162,6 +196,9 @@ def checkpoint_git(repo, name, *, include_definition=False):
         advertised = git(repo, "ls-remote", remote, f"refs/heads/{remote_branch}")
         if advertised.split("\t")[0] != commit:
             raise Refusal("remote branch does not contain checkpoint HEAD")
+        verify_payload(repo, commit, paths, expected)
+        if payload_objects(repo, paths) != expected:
+            raise Refusal("learned payload changed during checkpoint; retry before claiming durability")
         return commit, True
 
 
