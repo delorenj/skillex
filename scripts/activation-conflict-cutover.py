@@ -99,6 +99,9 @@ def cutover(project: Path, backup_root: Path | None = None, apply: bool = False)
     backup_root = backup_root.resolve(strict=True)
     if backup_root.is_symlink() or not backup_root.is_dir() or backup_root.is_relative_to(project):
         raise ValueError("Backup root must be an existing real directory outside the project")
+    global_discovery = (Path.home() / ".agents/skills").resolve()
+    if backup_root == global_discovery or backup_root.is_relative_to(global_discovery):
+        raise ValueError("Backup root cannot be inside global skill discovery")
     if backup_root.stat().st_dev != alias.parent.stat().st_dev:
         raise ValueError("Backup root must be on the same filesystem for atomic rename")
     dest = backup_root / (relative.replace("/", "--") + "--" + alias.parent.name + "--skills")
