@@ -1,11 +1,10 @@
 import json
 import os
-from pathlib import Path
 import shutil
 import subprocess
 import tempfile
 import unittest
-
+from pathlib import Path
 
 SCRIPT = Path(__file__).resolve().parents[2] / "scripts/personal-learned-source.py"
 
@@ -59,6 +58,8 @@ class PersonalSourceTest(unittest.TestCase):
         self.assertTrue(result["pushed"])
         self.assertEqual(git(self.repo, "rev-parse", "HEAD"), git(self.remote, "rev-parse", "HEAD"))
         self.assertTrue(self.profile.joinpath("learned-skills").is_symlink())
+        self.assertEqual(git(self.repo, "show", "HEAD:workforce/person/personal-learned-source.json"),
+                         '{"identity": "person", "schema": 1, "source": "learned-skills"}')
         self.assertEqual((self.skill / "assets/data.bin").read_bytes(), b"\x00\xff")
         recovered = list((self.tmp / "state/skillex/personal-learning/person").glob("*/topic/lesson/assets/data.bin"))
         self.assertGreaterEqual(len(recovered), 1)
@@ -85,6 +86,27 @@ class PersonalSourceTest(unittest.TestCase):
         self.assertEqual(git(self.remote, "rev-parse", "HEAD"), result["commit"])
         self.assertIn("workforce/person/learned-skills/topic/second/SKILL.md",
                       git(self.repo, "show", "--pretty=format:", "--name-only", "HEAD"))
+
+    def test_empty_identity_tracks_source_and_definition_without_generated_contract(self):
+        (self.identity / "contract.yaml").unlink()
+        git(self.repo, "rm", "--cached", "workforce/person/contract.yaml")
+        (self.repo / ".gitignore").write_text("/workforce/*/contract.yaml\n")
+        (self.identity / "contract.yaml").write_text("id: person\n")
+        git(self.repo, "add", ".gitignore")
+        git(self.repo, "commit", "-m", "ignore generated contract")
+        git(self.repo, "push", "origin", "HEAD")
+        git(self.repo, "rm", "--cached", "workforce/person/agent.yaml")
+        git(self.repo, "commit", "-m", "simulate new definition")
+        git(self.repo, "push", "origin", "HEAD")
+        shutil.rmtree(self.profile / "learned-skills")
+        result = self.migrate()
+        paths = git(self.repo, "show", "--pretty=format:", "--name-only", result["commit"])
+        self.assertIn("workforce/person/agent.yaml", paths)
+        self.assertIn("workforce/person/learned-skills/.gitkeep", paths)
+        self.assertIn("workforce/person/personal-learned-source.json", paths)
+        self.assertNotIn("contract.yaml", paths)
+        self.assertTrue(self.run_script("check")["ok"])
+        self.assertEqual(self.migrate()["commit"], result["commit"])
 
     def test_collisions_identity_and_bad_metadata_refuse(self):
         (self.profile / "skills/alias").mkdir(parents=True)

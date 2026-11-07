@@ -11,7 +11,6 @@ import hashlib
 import importlib.util
 import json
 import os
-from pathlib import Path
 import re
 import shutil
 import stat
@@ -19,7 +18,8 @@ import subprocess
 import sys
 import tempfile
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import UTC, datetime
+from pathlib import Path
 
 import yaml
 
@@ -33,8 +33,11 @@ NAME = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
 
 
 def git(repo, *args, env=None):
-    result = subprocess.run(["git", "-C", str(repo), *args], text=True,
-                            stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env)
+    try:
+        result = subprocess.run(["git", "-C", str(repo), *args], text=True,
+                                capture_output=True, env=env, timeout=45)
+    except subprocess.TimeoutExpired as exc:
+        raise Refusal(f"git {args[0]} timed out after 45 seconds") from exc
     if result.returncode:
         raise Refusal(f"git {' '.join(args[:2])} failed: {result.stderr.strip() or result.stdout.strip()}")
     return result.stdout.strip()
@@ -122,8 +125,8 @@ def locked(repo):
         yield
 
 
-def checkpoint_git(repo, name):
-    """Commit only the identity subtree, leaving the user's real index untouched."""
+def checkpoint_git(repo, name, *, include_definition=False):
+    """Commit only this identity's learned subtree and registration."""
     with locked(repo):
         branch = git(repo, "symbolic-ref", "--quiet", "--short", "HEAD")
         remote = git(repo, "config", f"branch.{branch}.remote")
@@ -137,17 +140,21 @@ def checkpoint_git(repo, name):
         if git(repo, "merge-base", head, remote_sha) != remote_sha:
             raise Refusal("remote branch is ahead or diverged; reconcile before checkpoint")
         relative = f"workforce/{name}/learned-skills"
+        registered = f"workforce/{name}/personal-learned-source.json"
+        paths = [relative, registered]
+        if include_definition:
+            paths.append(f"workforce/{name}/agent.yaml")
         # The isolated index begins at HEAD, not the caller's staged changes.
         with tempfile.TemporaryDirectory(prefix="skillex-index-") as tmp:
             env = dict(os.environ, GIT_INDEX_FILE=str(Path(tmp) / "index"))
             git(repo, "read-tree", "HEAD", env=env)
-            git(repo, "add", "-A", "--", relative, env=env)
+            git(repo, "add", "-A", "--", *paths, env=env)
             staged = git(repo, "diff", "--cached", "--name-only", env=env)
             if staged:
                 git(repo, "commit", "-m", f"chore(skills): checkpoint {name} personal learning\n\nCo-Authored-By: Claude Code <noreply@anthropic.com>", env=env)
                 # HEAD moved while the caller's original index was deliberately untouched.
                 # Refresh only our path so unrelated staged bytes remain exactly staged.
-                git(repo, "reset", "--mixed", "HEAD", "--", relative)
+                git(repo, "reset", "--mixed", "HEAD", "--", *paths)
         commit = git(repo, "rev-parse", "HEAD")
         # A failed push leaves the commit in place; a later checkpoint retries it.
         if commit != remote_sha:
@@ -158,11 +165,26 @@ def checkpoint_git(repo, name):
         return commit, True
 
 
+def registration(identity, name):
+    path = identity / "personal-learned-source.json"
+    expected = {"schema": 1, "identity": name, "source": "learned-skills"}
+    if path.exists() or path.is_symlink():
+        INVENTORY.regular(path)
+        if json.loads(path.read_text()) != expected:
+            raise Refusal("identity source registration does not match validated identity")
+    else:
+        path.write_text(json.dumps(expected, sort_keys=True) + "\n")
+
+
 def audit(profile, *, require_bound, proposed_name=None):
     name, identity, repo = identity_for(profile)
     expected = binding(profile, name, identity, repo)
     if require_bound:
         bound(profile, expected)
+        path = identity / "personal-learned-source.json"
+        INVENTORY.regular(path)
+        if json.loads(path.read_text()) != {"schema": 1, "identity": name, "source": "learned-skills"}:
+            raise Refusal("identity source registration does not match validated identity")
     root = source_for(identity) if require_bound else profile / "learned-skills"
     result = INVENTORY.inventory(profile, identity, allow_bound=require_bound)
     digest_tree(root)
@@ -181,13 +203,16 @@ def audit(profile, *, require_bound, proposed_name=None):
 def migrate(profile, apply):
     root = profile / "learned-skills"
     if root.is_symlink():
-        name, identity, repo, result, expected = audit(profile, require_bound=True)
+        name, _, repo, _, _ = audit(profile, require_bound=True)
         return checkpoint_git(repo, name) if apply else (None, False)
-    name, identity, repo, result, expected = audit(profile, require_bound=False)
+    name, identity, repo, _, expected = audit(profile, require_bound=False)
     source = source_for(identity)
     original = digest_tree(root)
     if source.exists() or source.is_symlink():
-        if digest_tree(source) != original:
+        existing = digest_tree(source)
+        if not original:
+            existing.pop(".gitkeep", None)
+        if existing != original:
             raise Refusal("identity source already differs from original; refusing overwrite")
     if not apply:
         return None, False
@@ -198,11 +223,15 @@ def migrate(profile, apply):
             source.mkdir()
     if digest_tree(source) != original:
         raise Refusal("copy did not preserve all learned files")
+    registration(identity, name)
+    # Git does not track empty directories: retain an explicit empty source marker.
+    if not original:
+        (source / ".gitkeep").touch(exist_ok=True)
     # Recovery is verified BEFORE the Git checkpoint or activation.
     state_home = Path(os.environ.get("XDG_STATE_HOME", str(Path.home() / ".local/state")))
     recovery_base = state_home / "skillex/personal-learning" / name
     recovery_base.mkdir(parents=True, exist_ok=True)
-    recovery = recovery_base / datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+    recovery = recovery_base / datetime.now(UTC).strftime("%Y%m%dT%H%M%S%fZ")
     if root.exists():
         shutil.copytree(root, recovery)
     else:
@@ -212,7 +241,7 @@ def migrate(profile, apply):
     if digest_tree(root) != original:
         raise Refusal("original changed during transfer; recovery snapshot retained")
     # The original remains in place until Git durability is established.
-    commit, pushed = checkpoint_git(repo, name)
+    commit, pushed = checkpoint_git(repo, name, include_definition=True)
     if digest_tree(root) != original:
         raise Refusal("original changed during checkpoint; recovery snapshot retained")
     parked = recovery_base / (recovery.name + "-original")
@@ -251,7 +280,7 @@ def main():
         if args.command == "migrate":
             response["commit"], response["pushed"] = migrate(args.profile, args.apply)
         else:
-            name, identity, repo, result, expected = audit(
+            name, _, repo, _, _ = audit(
                 args.profile, require_bound=True,
                 proposed_name=getattr(args, "name", None))
             if args.command == "checkpoint":
