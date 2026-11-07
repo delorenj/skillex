@@ -69,6 +69,13 @@ class PersonalInventoryTest(unittest.TestCase):
         with self.assertRaises(MODULE.InventoryError):
             MODULE.inventory(self.profile, self.identity)
 
+    def test_nested_selected_alias_collision_is_not_silently_shadowed(self):
+        selected = self.profile / "skills/legacy/category/other-alias"
+        selected.mkdir(parents=True)
+        (selected / "SKILL.md").write_text("---\nname: lesson\ndescription: Existing skill\n---\n")
+        with self.assertRaises(MODULE.InventoryError):
+            MODULE.inventory(self.profile, self.identity)
+
     def test_missing_learned_root_is_empty_not_an_error(self):
         shutil.rmtree(self.profile / "learned-skills")
         self.assertEqual(MODULE.inventory(self.profile, self.identity)["skills"], [])

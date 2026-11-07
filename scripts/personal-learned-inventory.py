@@ -24,15 +24,25 @@ def advertised_names(selected: Path) -> set[str]:
     names = set()
     if not selected.exists() and not selected.is_symlink():
         return names
-    # Selection roots may be Skillex-owned whole-root set aliases. This is a
-    # read-only collision inventory, unlike the no-follow learned-source audit.
+    # Selection roots and projected leaves can be approved aliases. Resolve only
+    # in this read-only inventory, with cycle/size bounds; never in author trees.
     selected = selected.resolve(strict=True)
     directory(selected)
-    for child in selected.iterdir():
-        if child.name.startswith("."):
+    pending = [selected]
+    visited = set()
+    count = 0
+    while pending:
+        root = pending.pop().resolve(strict=True)
+        if root in visited:
             continue
-        names.add(child.name)
-        if child.is_dir():
+        visited.add(root)
+        for child in root.iterdir():
+            count += 1
+            if count > 20000:
+                raise InventoryError("selected skill tree exceeds 20000 entries")
+            if child.name.startswith(".") or not child.is_dir():
+                continue
+            names.add(child.name)
             skill = child / "SKILL.md"
             if skill.is_file():
                 content = skill.read_text(encoding="utf-8")
@@ -40,6 +50,8 @@ def advertised_names(selected: Path) -> set[str]:
                     front = yaml.safe_load(content[4:].split("\n---\n", 1)[0])
                     if isinstance(front, dict) and isinstance(front.get("name"), str):
                         names.add(front["name"])
+            else:
+                pending.append(child)
     return names
 
 

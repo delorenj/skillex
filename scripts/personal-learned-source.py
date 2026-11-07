@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """Identity-bound Git source for Hermes personal learned skills.
 
-Migration is preview-only unless --apply. Check is a read-only writer preflight;
-checkpoint stages only the owning identity's learned subtree in an isolated index.
+Migration is preview-only unless --apply; quiesce the profile's writers before
+its one-time unbound conversion (digest rechecks are not an old-writer lock).
+Check is a read-only writer preflight; checkpoint stages only the owning
+identity's learned subtree in an isolated index.
 """
 
 import argparse
@@ -56,11 +58,13 @@ def identity_for(profile):
     if definition.name != "agent.yaml":
         raise Refusal("identity definition must be agent.yaml")
     name = metadata.get("name")
-    if not isinstance(name, str) or not NAME.fullmatch(name):
+    if not isinstance(name, str) or not re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", name):
         raise Refusal("invalid personal identity name")
     if identity.name != name or identity.parent.name != "workforce":
         raise Refusal("definition does not identify a workforce desk")
     repo = identity.parent.parent
+    if repo != Path.home() / ".agents":
+        raise Refusal("personal identity must belong to the canonical ~/.agents repository")
     if not repo.is_absolute() or git(repo, "rev-parse", "--show-toplevel") != str(repo):
         raise Refusal("identity is not in its own Git repository")
     # Reject symlink traversal through the identity path.
@@ -171,28 +175,41 @@ def checkpoint_git(repo, name, *, include_definition=False):
         if git(repo, "merge-base", head, remote_sha) != remote_sha:
             raise Refusal("remote branch is ahead or diverged; reconcile before checkpoint")
         relative = f"workforce/{name}/learned-skills"
+        source = repo / relative
+        if not any(source.iterdir()):
+            (source / ".gitkeep").touch()
         registered = f"workforce/{name}/personal-learned-source.json"
         paths = [relative, registered]
         if include_definition:
             paths.append(f"workforce/{name}/agent.yaml")
         expected = payload_objects(repo, paths)
-        # The isolated index begins at HEAD, not the caller's staged changes.
+        # Commit through normal Git hooks on a private detached HEAD, then CAS
+        # the real branch. An ordinary concurrent Git writer cannot be reverted
+        # by publishing an isolated index based on an older HEAD.
         with tempfile.TemporaryDirectory(prefix="skillex-index-") as tmp:
-            env = dict(os.environ, GIT_INDEX_FILE=str(Path(tmp) / "index"))
-            git(repo, "read-tree", "HEAD", env=env)
+            private_git = Path(tmp) / "git"
+            private_git.mkdir()
+            common = git(repo, "rev-parse", "--path-format=absolute", "--git-common-dir")
+            (private_git / "commondir").write_text(common + "\n")
+            (private_git / "HEAD").write_text(head + "\n")
+            env = dict(os.environ, GIT_INDEX_FILE=str(Path(tmp) / "index"),
+                       GIT_DIR=str(private_git), GIT_WORK_TREE=str(repo))
+            git(repo, "read-tree", head, env=env)
             git(repo, "add", "-A", "--", *paths, env=env)
             tree = git(repo, "write-tree", env=env)
             verify_payload(repo, tree, paths, expected)
-            staged = git(repo, "diff", "--cached", "--name-only", env=env)
+            staged = git(repo, "diff", "--cached", head, "--name-only", env=env)
+            commit = head
             if staged:
                 git(repo, "commit", "-m", f"chore(skills): checkpoint {name} personal learning\n\nCo-Authored-By: Claude Code <noreply@anthropic.com>", env=env)
-                # HEAD moved while the caller's original index was deliberately untouched.
-                # Refresh only our path so unrelated staged bytes remain exactly staged.
-                git(repo, "reset", "--mixed", "HEAD", "--", *paths)
-        commit = git(repo, "rev-parse", "HEAD")
+                commit = git(repo, "rev-parse", "HEAD", env=env)
+                verify_payload(repo, commit, paths, expected)
+                git(repo, "update-ref", f"refs/heads/{branch}", commit, head)
+                # Refresh only owned paths; unrelated staged bytes stay staged.
+                git(repo, "reset", "--mixed", commit, "--", *paths)
         # A failed push leaves the commit in place; a later checkpoint retries it.
         if commit != remote_sha:
-            git(repo, "push", remote, f"HEAD:refs/heads/{remote_branch}")
+            git(repo, "push", remote, f"{commit}:refs/heads/{remote_branch}")
         advertised = git(repo, "ls-remote", remote, f"refs/heads/{remote_branch}")
         if advertised.split("\t")[0] != commit:
             raise Refusal("remote branch does not contain checkpoint HEAD")

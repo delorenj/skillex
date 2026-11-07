@@ -1,3 +1,4 @@
+import importlib.util
 import json
 import os
 import shutil
@@ -5,6 +6,7 @@ import subprocess
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 SCRIPT = Path(__file__).resolve().parents[2] / "scripts/personal-learned-source.py"
 
@@ -21,7 +23,7 @@ class PersonalSourceTest(unittest.TestCase):
         self.addCleanup(shutil.rmtree, self.tmp)
         self.remote = self.tmp / "remote.git"
         subprocess.run(["git", "init", "--bare", str(self.remote)], check=True, capture_output=True)
-        self.repo = self.tmp / "agents"
+        self.repo = self.tmp / ".agents"
         git(self.tmp, "clone", str(self.remote), str(self.repo))
         git(self.repo, "config", "user.name", "Fixture")
         git(self.repo, "config", "user.email", "fixture@example.test")
@@ -45,7 +47,7 @@ class PersonalSourceTest(unittest.TestCase):
         git(self.repo, "push", "-u", "origin", "HEAD")
 
     def run_script(self, *args, success=True):
-        env = dict(os.environ, XDG_STATE_HOME=str(self.tmp / "state"))
+        env = dict(os.environ, HOME=str(self.tmp), XDG_STATE_HOME=str(self.tmp / "state"))
         result = subprocess.run(
             ["python3", str(SCRIPT), *args, "--profile", str(self.profile)],
             capture_output=True,
@@ -57,6 +59,56 @@ class PersonalSourceTest(unittest.TestCase):
 
     def migrate(self):
         return self.run_script("migrate", "--apply")
+
+    def test_concurrent_ordinary_commit_is_not_reverted(self):
+        self.migrate()
+        (self.skill / "assets/new.bin").write_bytes(b"new learning")
+        spec = importlib.util.spec_from_file_location("personal_source_race", SCRIPT)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        real_git = module.git
+        injected = []
+
+        def race(repo, *args, env=None):
+            result = real_git(repo, *args, env=env)
+            if args[0] == "read-tree" and not injected:
+                (repo / "other-agent.txt").write_text("concurrent committed work")
+                git(repo, "add", "other-agent.txt")
+                git(repo, "commit", "-m", "ordinary concurrent writer")
+                injected.append(git(repo, "rev-parse", "HEAD"))
+            return result
+
+        with patch.object(module, "git", side_effect=race):
+            with self.assertRaises(module.Refusal):
+                module.checkpoint_git(self.repo, "person")
+        self.assertEqual(git(self.repo, "rev-parse", "HEAD"), injected[0])
+        self.assertEqual(
+            git(self.repo, "show", "HEAD:other-agent.txt"), "concurrent committed work"
+        )
+        self.assertTrue((self.skill / "assets/new.bin").exists())
+        self.assertTrue(self.run_script("checkpoint")["pushed"])
+
+    def test_noncanonical_repository_refuses_before_copy(self):
+        self.repo.rename(self.tmp / "elsewhere")
+        self.repo = self.tmp / "elsewhere"
+        self.identity = self.repo / "workforce/person"
+        (self.profile / "profile.yaml").write_text(
+            "name: person\nflume:\n  employment: portable-specialist\n"
+            f"  definition: {self.identity / 'agent.yaml'}\n"
+        )
+        result = self.run_script("migrate", "--apply", success=False)
+        self.assertIn("canonical", result["error"])
+        self.assertFalse((self.identity / "learned-skills").exists())
+
+    def test_last_skill_delete_retains_git_source_root(self):
+        self.migrate()
+        shutil.rmtree(self.identity / "learned-skills/topic")
+        result = self.run_script("checkpoint")
+        self.assertTrue(result["pushed"])
+        self.assertEqual(
+            git(self.repo, "show", "HEAD:workforce/person/learned-skills/.gitkeep"), ""
+        )
+        self.assertTrue(self.run_script("check")["ok"])
 
     def test_preview_migrate_recovery_and_idempotence(self):
         self.assertTrue(self.run_script("migrate")["ok"])

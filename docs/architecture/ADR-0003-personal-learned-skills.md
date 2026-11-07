@@ -1,6 +1,6 @@
 # ADR-0003: Personal Learned Skills Belong to Named Identities
 
-- **Status:** Accepted operator direction; runtime/source integration pending (SKRILL-47).
+- **Status:** Accepted; source migration and writer implemented (SKRILL-47). Gateway activation must be verified separately.
 - **Date:** 2026-11-07
 - **Decider:** Repository owner
 - **Related:** [ADR-0001](ADR-0001-reference-only-skill-topology.md),
@@ -97,5 +97,45 @@ Implementation must prove:
 - no unintended global activation and no copied second canonical definitions;
 - ordinary PM behavior unchanged unless separately authorized.
 
-Tracked in **SKRILL-47**. Acceptance of this ADR is not a claim that the live
-migration, auto-checkpoint writer or full runtime integration is implemented.
+## Deployed source contract (2026-11-07)
+
+Skillex 0.4.4 admits identity-bound personal collections. All nine named
+identities now own `~/.agents/workforce/<identity>/learned-skills/` in the private
+`delorenj/agents` Git repository. The profile's `learned-skills` is a direct
+symlink, declared by regular `.skillex-personal-source.json`; `skills.create_dir`
+remains `learned-skills` without hand-editing generated configuration. Identity
+`agent.yaml` and `personal-learned-source.json` registration are tracked;
+generated `contract.yaml` remains ignored.
+
+All 21 original skills / 35 original files were verified byte-for-byte against
+pushed Git objects. Empty sources carry `.gitkeep`. Original directories and
+verified recovery snapshots remain outside discovery under
+`~/.local/state/skillex/personal-learning/`. Legacy bundled category trees were
+left untouched; they are not counted as newly learned skills.
+
+`scripts/personal-learned-source.py` provides preview/apply `migrate`, read-only
+`check`, and durable `checkpoint`, each taking `--profile`. The fixed bridge is
+`~/.local/bin/skillex-personal-checkpoint`. For an unbound one-time migration,
+quiesce that profile's writers before `migrate --apply`; repeated digest checks
+are not a lock on an old Hermes process holding the original directory open.
+Already-bound normal learning does not copy or rename its source. Hermes fork
+`be1f5cfab7` invokes it
+after existing approval gates and once per successful atomic batch. It refuses
+shared/project writes, selected-name collisions and mismatched advertised names.
+Checkpoint failure returns failure with applied content retained. No-marker PM
+behavior remains unchanged. This is not automatic provisioning of future named
+hires: their validated source must be registered and migrated explicitly.
+
+Checkpointing isolates the identity's paths from unrelated staged work, verifies
+all raw file objects against the staged tree before committing and against the
+pushed commit afterward, and confirms the remote ref. Ignored or filter-altered
+payloads fail visibly; it never force-adds runtime garbage or bypasses Git guards.
+Read-only collision inventories follow supported selection-root set aliases.
+
+Native Hermes discovery, cross-CWD identity continuity, all nine no-op
+checkpoints and 41 strict desk resyncs were verified. Approved create, atomic
+support-file-plus-patch, and delete each produced a pushed checkpoint; the smoke
+skill was removed. A running gateway caches Python code: on-disk deployment is
+not restart proof. Verify `gateway_state.json` `code_sha` after the idle-gated
+`hermes-gateway-restart` before claiming that long-lived gateway loaded the
+writer. Final runtime/review evidence is recorded on **SKRILL-47**.
