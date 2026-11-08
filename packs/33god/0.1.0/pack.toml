@@ -1,0 +1,7 @@
+[pack]
+name = "33god"
+version = "0.1.0"
+description = "The complete set of skills that govern the 33god agentic development pipeline"
+
+[freeform]
+skills = ["33god-hub"]
