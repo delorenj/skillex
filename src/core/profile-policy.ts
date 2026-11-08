@@ -25,7 +25,7 @@ const metadataFiles = new Set([
 ]);
 const metadataDirectories = new Set([".curator_backups", ".locks"]);
 
-function hermesMetadata(item: ProfileLocalEntry): boolean {
+export function hermesMetadata(item: Pick<ProfileLocalEntry, "name" | "kind">): boolean {
   if (item.kind === "file") return metadataFiles.has(item.name);
   if (item.kind === "directory") return metadataDirectories.has(item.name);
   return false;
@@ -81,21 +81,31 @@ export async function assertStrictProfile(
   for (const item of local)
     if (!hermesMetadata(item))
       refuse(item.path, `Skillex-only profile contains unowned entry ${item.name}.`);
+  if (await externalSkillDiscovery(profile))
+    refuse(
+      join(profile.root, "config.yaml"),
+      "Skillex-only profiles require skills.external_dirs: [].",
+    );
+  await assertBundledOptOut(profile);
+  return true;
+}
+
+/** Whether strict config still names external skill roots; refuses config strict policy cannot read. */
+export async function externalSkillDiscovery(profile: ProfileLocation): Promise<boolean> {
   const path = join(profile.root, "config.yaml");
   const config = await entry(path);
-  if (config) {
-    if (!config.info.isFile())
-      refuse(path, "Strict profile config must be a regular generated file.");
-    const document = parseDocument(await readFile(path, "utf8"), { uniqueKeys: true });
-    if (document.errors.length) refuse(path, "Cannot validate strict skills configuration.");
-    const dirs: unknown = document.toJS()?.skills?.external_dirs;
-    if (dirs !== undefined && (!Array.isArray(dirs) || dirs.length))
-      refuse(path, "Skillex-only profiles require skills.external_dirs: [].");
-  }
+  if (!config) return false;
+  if (!config.info.isFile()) refuse(path, "Strict profile config must be a regular generated file.");
+  const document = parseDocument(await readFile(path, "utf8"), { uniqueKeys: true });
+  if (document.errors.length) refuse(path, "Cannot validate strict skills configuration.");
+  const dirs: unknown = document.toJS()?.skills?.external_dirs;
+  return dirs !== undefined && (!Array.isArray(dirs) || dirs.length > 0);
+}
+
+export async function assertBundledOptOut(profile: ProfileLocation): Promise<void> {
   const optOut = await entry(join(profile.root, ".no-bundled-skills"));
   if (optOut && !optOut.info.isFile())
     refuse(optOut.path, "Bundled opt-out marker must be a regular file.");
-  return true;
 }
 
 export async function publishStrictPolicy(profile: ProfileLocation): Promise<void> {
