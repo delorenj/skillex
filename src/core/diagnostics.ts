@@ -498,7 +498,7 @@ async function observeScope(
     scope: location.scope,
     root: location.root,
     manifestPath: location.path,
-    mode: resolved?.mode ?? (manifest ? (manifest.sets.length ? "set" : "composed") : null),
+    mode: resolved?.mode ?? (manifest ? (manifest.set ? "set" : "composed") : null),
     desired: resolved ? resolved.bindings.map((binding) => binding.name).sort() : null,
     actual: { root: observedRoot.observation, entries },
     counts: {
@@ -572,13 +572,13 @@ async function inspect(options: DiagnosticOptions): Promise<Inspection> {
       resolved &&
       location.scope === "project" &&
       manifest.inheritGlobal &&
-      manifest.sets.length === 0 &&
+      manifest.set === undefined &&
       manifest.skills.length
     ) {
       const inherited = resolution.data?.scopes.find((scope) => scope.scope === "global");
       const explicit = new Set(manifest.skills.map((skill) => skill.name));
       if (
-        inherited?.manifest.sets.length === 1 &&
+        inherited?.manifest.set !== undefined &&
         inherited.bindings.length &&
         inherited.bindings.every((binding) => explicit.has(binding.name))
       ) {
@@ -788,7 +788,7 @@ export async function explainSkill(
             finding.severity === "error" &&
             (finding.scope === undefined ||
               finding.scope === location.scope ||
-              (manifest?.inheritGlobal && !manifest.sets.length && finding.scope === "global")),
+              (manifest?.inheritGlobal && !manifest?.set && finding.scope === "global")),
         ),
       );
       const state: SkillExplanation["state"] =

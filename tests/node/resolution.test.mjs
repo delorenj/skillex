@@ -24,7 +24,7 @@ it("resolves set mode through a scope-owned derived set with complete provenance
     declaration,
   );
   const projectManifest = f.manifest(f.project, {
-    sets: [derived.name],
+    set: derived.name,
     skills: ["local-only"],
     exclude: ["exclude-me"],
   });
@@ -54,7 +54,7 @@ it("set extras on a shared set are refused unless the scope owns the derived set
   f.skill("shared");
   f.skill("extra");
   f.set("shared-base", ["shared"]);
-  f.manifest(f.project, { sets: ["shared-base"], skills: ["extra"] });
+  f.manifest(f.project, { set: "shared-base", skills: ["extra"] });
   assertFailure(await f.resolve(), "E_SET_CONFLICT");
 });
 
@@ -69,7 +69,7 @@ it("derived-set drift between the sidecar and the manifest is refused", async (t
     skills: ["extra"],
     removed: [],
   });
-  f.manifest(f.project, { sets: [derived.name], skills: [] });
+  f.manifest(f.project, { set: derived.name, skills: [] });
   assertFailure(await f.resolve(), "E_SET_DRIFT");
 });
 
@@ -159,7 +159,7 @@ it("a set resolves every member wholesale; broken members are errors", async (t)
   const f = createResolutionFixture(t, resolveSelection);
   f.skill("good");
   f.set("wholesale", ["good", "broken", "unselected"]);
-  f.manifest(f.project, { sets: ["wholesale"] });
+  f.manifest(f.project, { set: "wholesale" });
 
   // No filters exist anymore: the broken member link is resolved and refused.
   assertFailure(await f.resolve(), "E_SKILL_MISSING");
@@ -169,31 +169,28 @@ it("a set member whose canonical definition is missing is an error", async (t) =
   const f = createResolutionFixture(t, resolveSelection);
   f.skill("good");
   f.set("has-broken", ["good", "missing"]);
-  f.manifest(f.project, { sets: ["has-broken"] });
+  f.manifest(f.project, { set: "has-broken" });
   assertFailure(await f.resolve(), "E_SKILL_MISSING");
 });
 
-it("an optional missing set reports partial resolution with no partial activation", async (t) => {
+it("a missing set is a required-reference failure, not an optional skip", async (t) => {
   const f = createResolutionFixture(t, resolveSelection);
   f.skill("keep");
-  f.manifest(f.project, { sets: [{ name: "absent", optional: true }] });
-  const result = await f.resolve();
-  assertOptionalSkip(result);
-  assert.deepEqual(names(resolvedScope(result)), []);
+  f.manifest(f.project, { set: "absent" });
+  assertFailure(await f.resolve(), "E_SET_MISSING");
 });
 
-it("an optional set with unresolved members skips whole-set activation", async (t) => {
+it("a set with unresolved members refuses whole-set activation", async (t) => {
   const f = createResolutionFixture(t, resolveSelection);
   f.skill("good");
   f.set("partly-present", ["good", "broken"]);
-  f.manifest(f.project, { sets: [{ name: "partly-present", optional: true }] });
+  f.manifest(f.project, { set: "partly-present" });
   const result = await f.resolve();
-  assertOptionalSkip(result);
-  assert.deepEqual(names(resolvedScope(result)), []);
+  assertFailure(result, "E_SKILL_MISSING");
   assert.ok(result.findings.some((finding) => JSON.stringify(finding).includes("broken")));
 });
 
-it("optional set filters are legacy fields refused before resolution", async (t) => {
+it("legacy set filters are refused before resolution", async (t) => {
   const f = createResolutionFixture(t, resolveSelection);
   f.skill("good");
   f.set("filtered", ["good"]);
@@ -204,14 +201,14 @@ it("optional set filters are legacy fields refused before resolution", async (t)
   assertFailure(result, "E_LEGACY_FIELD");
 });
 
-for (const [field, reference, code] of [
-  ["skills", "absent", "E_SKILL_MISSING"],
-  ["sets", "absent", "E_SET_MISSING"],
-  ["packs", "absent@1.0.0", "E_PACK_MISSING"],
+for (const [declaration, code, field] of [
+  [{ skills: ["absent"] }, "E_SKILL_MISSING", "skills"],
+  [{ set: "absent" }, "E_SET_MISSING", "set"],
+  [{ packs: ["absent@1.0.0"] }, "E_PACK_MISSING", "packs"],
 ]) {
   it(`refuses a missing required ${field} reference`, async (t) => {
     const f = createResolutionFixture(t, resolveSelection);
-    f.manifest(f.project, { [field]: [reference] });
+    f.manifest(f.project, declaration);
     assertFailure(await f.resolve(), code);
   });
 }
@@ -222,7 +219,7 @@ it("an exclusive set resolves without reading a malformed global manifest", asyn
   const setRoot = f.set("focus", ["member"]);
   f.file(join(f.home, ".agents", "skills.json"), "not json\n");
   f.manifest(f.project, {
-    sets: ["focus"],
+    set: "focus",
     inherit_global: true,
   });
 
@@ -280,7 +277,7 @@ it("auto targeting resolves global writes even when the project selects an exclu
   f.skill("member");
   f.set("focus", ["member"]);
   f.manifest(f.home, { skills: ["global-skill"] });
-  f.manifest(f.project, { sets: ["focus"] });
+  f.manifest(f.project, { set: "focus" });
   const result = await f.resolve({ scope: "auto" });
   assertSuccess(result);
   assert.deepEqual(result.data.writeScopes, ["global", "project"]);
@@ -380,7 +377,7 @@ it("rejects copied definitions in a set even when a canonical definition exists"
   f.skill("original");
   const setRoot = f.set("copied");
   f.file(join(setRoot, "original", "SKILL.md"), "# Copied definition\n");
-  f.manifest(f.project, { sets: ["copied"] });
+  f.manifest(f.project, { set: "copied" });
   assertFailure(await f.resolve(), "E_NONCANONICAL_REFERENCE");
 });
 
@@ -390,7 +387,7 @@ it("set symlinks must point to the canonical definition of their declared name",
   const wrongTarget = f.skill("different");
   const setRoot = f.set("mismatched");
   f.link(join(setRoot, "declared"), wrongTarget);
-  f.manifest(f.project, { sets: ["mismatched"] });
+  f.manifest(f.project, { set: "mismatched" });
   assertFailure(await f.resolve(), "E_NONCANONICAL_REFERENCE");
 });
 
@@ -590,7 +587,7 @@ it("unsafe canonical names cannot escape a catalog or enter a composition", asyn
     { skills: ["../outside"] },
     { skills: ["/absolute"] },
     { skills: ["bad\\name"] },
-    { sets: ["bad/name"] },
+    { set: "bad/name" },
     { skills: [], exclude: ["../outside"] },
   ]) {
     await t.test(JSON.stringify(manifest), async () => {

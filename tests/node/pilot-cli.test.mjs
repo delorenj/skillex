@@ -72,7 +72,7 @@ test("installed CLI adopts, selects, derives, normalizes and isolates one projec
   assert.equal(realpathSync(join(project, ".agents/skills")), join(registry, "sets/base"));
   cli("enable", "pack", "addon@1.0.0", "--project", project);
   const selected = JSON.parse(readFileSync(join(project, ".agents/skills.json"), "utf8"));
-  assert.match(selected.sets[0], /^base-/);
+  assert.match(selected.set, /^base-/);
   assert.deepEqual(selected.packs, ["addon@1.0.0"]);
   assert.equal(readdirSync(join(registry, "sets/base")).length, 1);
   assert.deepEqual(cli("normalize", "--project", project).changes, []);
@@ -93,5 +93,90 @@ test("installed CLI adopts, selects, derives, normalizes and isolates one projec
   cli("clients", "unisolate", "--client", "opencode", "--project", project, "--apply");
   assert.equal(readFileSync(join(home, ".agents/skills.json"), "utf8"), before);
   assert.equal(readFileSync(join(home, ".agents/skills/sentinel"), "utf8"), "global unchanged");
-  assert.ok(readlinkSync(join(project, ".agents/skills")).includes(selected.sets[0]));
+  assert.ok(readlinkSync(join(project, ".agents/skills")).includes(selected.set));
+});
+
+test("installed CLI normalizes a Holocene-shaped legacy manifest with derived root and packs", (t) => {
+  const installed = createPackageFixture();
+  t.after(installed.cleanup);
+  const root = mkdtempSync("/tmp/skillex-pilot-cli-");
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const home = join(root, "home"),
+    project = join(root, "project"),
+    registry = join(root, "registry");
+  for (const p of [
+    home,
+    project,
+    join(project, ".git"),
+    join(project, ".agents/skills"),
+    join(registry, "all-skills"),
+    join(registry, "sets/base"),
+    join(registry, "packs"),
+  ])
+    mkdirSync(p, { recursive: true });
+  for (const name of ["alpha", "beta", "gamma"]) {
+    const p = join(registry, "all-skills", name);
+    mkdirSync(p);
+    writeFileSync(join(p, "SKILL.md"), `---\nname: ${name}\ndescription: pilot fixture\n---\n`);
+  }
+  symlinkSync(join(registry, "all-skills", "alpha"), join(registry, "sets/base/alpha"));
+  mkdirSync(join(home, ".agents/skills"), { recursive: true });
+  writeFileSync(join(home, ".agents/skills.json"), '{"skills":[]}\n');
+  writeFileSync(join(project, ".agents/skills.json"), '{"inherit_global":false}\n');
+  const env = {
+    ...installed.environment,
+    HOME: home,
+    XDG_STATE_HOME: join(root, "state"),
+    PJ_SKILLS_REGISTRY_ROOT: registry,
+  };
+  function run(...args) {
+    const execution = spawnSync(
+      process.execPath,
+      [installed.cli, "--json", "--registry-root", registry, ...args],
+      { cwd: project, env, encoding: "utf8", timeout: 20000 },
+    );
+    assert.ifError(execution.error);
+    return { status: execution.status, result: JSON.parse(execution.stdout) };
+  }
+  function cli(...args) {
+    const { status, result } = run(...args);
+    assert.equal(status, 0, JSON.stringify(result));
+    return result.data;
+  }
+  const source = join(root, "source");
+  mkdirSync(source);
+  for (const name of ["beta", "gamma"])
+    symlinkSync(join(registry, "all-skills", name), join(source, name));
+  cli("root", "adopt", "--project", project, "--apply");
+  cli("pack", "create", "packs2", "--version", "1.0.0", "--from-root", source);
+  cli("enable", "set", "base", "--project", project);
+  cli("enable", "pack", "packs2@1.0.0", "--project", project);
+  const corrected = JSON.parse(readFileSync(join(project, ".agents/skills.json"), "utf8"));
+  assert.match(corrected.set, /^base-/);
+  assert.deepEqual(corrected.packs, ["packs2@1.0.0"]);
+  const derivedRoot = realpathSync(join(project, ".agents/skills"));
+
+  // Holocene-shaped legacy state: the same corrected selection serialized with
+  // the retired sets array, activation root already symlinked at the derived set.
+  writeFileSync(
+    join(project, ".agents/skills.json"),
+    `${JSON.stringify({ inherit_global: false, sets: [corrected.set], packs: ["packs2@1.0.0"] }, null, 2)}\n`,
+  );
+  const normalized = cli("normalize", "--project", project, "--apply");
+  assert.equal(normalized.manifest.set, corrected.set);
+  const saved = JSON.parse(readFileSync(join(project, ".agents/skills.json"), "utf8"));
+  assert.equal(saved.set, corrected.set);
+  assert.deepEqual(saved.packs, ["packs2@1.0.0"]);
+  assert.equal("sets" in saved, false);
+  assert.equal(realpathSync(join(project, ".agents/skills")), derivedRoot);
+  assert.deepEqual(cli("normalize", "--project", project).changes, []);
+  assert.equal(realpathSync(join(project, ".agents/skills")), derivedRoot);
+
+  for (const value of [[corrected.set], { name: corrected.set }, null, ""]) {
+    const bytes = `${JSON.stringify({ inherit_global: false, set: value, packs: ["packs2@1.0.0"] }, null, 2)}\n`;
+    writeFileSync(join(project, ".agents/skills.json"), bytes);
+    const refused = run("normalize", "--project", project, "--apply");
+    assert.notEqual(refused.status, 0, JSON.stringify(value));
+    assert.equal(readFileSync(join(project, ".agents/skills.json"), "utf8"), bytes);
+  }
 });

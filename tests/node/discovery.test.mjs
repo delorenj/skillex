@@ -137,7 +137,7 @@ for (const mode of ["independent", "set"]) {
       await manifest(
         f.cwd,
         JSON.stringify(
-          mode === "set" ? { sets: ["chosen"] } : { inherit_global: false, skills: ["local"] },
+          mode === "set" ? { set: "chosen" } : { inherit_global: false, skills: ["local"] },
         ),
       );
       const globalPath = join(f.home, ".agents", "skills.json");

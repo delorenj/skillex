@@ -1126,12 +1126,16 @@ class TestCanonicalSchemaIsPublished:
         assert "anyOf" not in doc
         assert doc["additionalProperties"] is False
 
-    def test_schema_declares_sets(self) -> None:
+    def test_schema_declares_the_singular_set_contract(self) -> None:
         doc = json.loads(self.schema_path.read_text(encoding="utf-8"))
-        assert doc["properties"]["sets"]["type"] == "array"
-        # Published Node contract: sets replace roots; packs compose member links.
-        assert doc["properties"]["sets"]["maxItems"] == 1
-        assert "maxItems" not in doc["properties"]["packs"]
+        props = doc["properties"]
+        # Published Node contract (2026-10-11): one optional `set` string
+        # exclusively replaces the root; the legacy `sets` array is gone and
+        # packs compose member links without a maxItems cap.
+        assert props["set"]["type"] == "string"
+        assert "sets" not in props
+        assert "optional" not in props["set"]
+        assert "maxItems" not in props["packs"]
 
 
 @pytest.mark.integration

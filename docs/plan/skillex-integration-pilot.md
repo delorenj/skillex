@@ -19,11 +19,13 @@ context:
 
 ## Boundaries & Constraints
 
-**Always:** Sets exclusively replace canonical roots; packs add member symlinks. Definitions live in `all-skills/`. Project operations preserve global roots. Adding a pack to a shared set derives a scope-owned reference-only set and switches only that scope (user decision). Preserve foreign content, receipts, recovery and unrelated WIP. Simplification preserves effective membership and provenance; repeated global membership becomes a global-set reference.
+**Always:** A manifest selects at most one set using the optional string field `set`, never `sets`, an array, or an object (user correction 2026-10-11). Sets exclusively replace canonical roots; packs add member symlinks. Definitions live in `all-skills/`. Project operations preserve global roots. Adding a pack to a shared set derives a scope-owned reference-only set and switches only that scope (user decision). Preserve foreign content, receipts, recovery and unrelated WIP. Simplification preserves effective membership and provenance; repeated global membership becomes a global-set reference.
 
 **Ask First:** Destructive retirement, ambiguous identities/membership, or rollout beyond the pilot. Unsupported client isolation is a capability failure, not authorization to change global discovery.
 
 **Never:** Hand-edit pilot JSON/links as remediation; choose the first of multiple sets; write through shared-set aliases; mistake passing legacy tests for correctness; mutate other projects or fleet profiles.
+
+**Acquisition commands (user addition 2026-10-11):** `skillex import URL` directly copies the selected skill into `all-skills/` without a fork or activation. `skillex add URL` imports only when absent and adds to the current project by default (including a repo needing initialization), `-p PATH` selects a project, and `-g` or invocation outside a project selects global. GitHub tree/subdirectory URLs must select only that skill and preserve support files. Existing canonical content is never silently overwritten; partial import/activation results are explicit.
 
 **Holocene BMAD decision (2026-10-11):** user approved replacement of old installer-owned BMAD definitions and deprecated stubs with the frozen `bmad@6.12.1-next.1` pack, retaining the entire original root outside discovery. `_bmad/` customizations and outputs remain untouched; no upgrade to the newest npm BMAD release. The CLI must expose this replacement as an explicit, previewable policy, never silently infer equivalence from names.
 
@@ -71,6 +73,10 @@ context:
 - Given the user-confirmed representative project's freshly inventoried state, when CLI remedies run, then retained skills are accounted for, tested-client discovery has no duplicates, and unrelated project/global state is unchanged. LifeLaunch fixtures do not establish pilot acceptance.
 
 ## Spec Change Log
+
+- 2026-10-11: user added top-level `import URL` (catalog-only copy, no fork) and `add URL` (ensure import, then default project/outside-project global activation with `-p`/`-g`). Use existing guarded import/selection commands, never one-off root writes.
+
+- 2026-10-11: user rejected array-of-one `sets`. Canonical schema is optional `set: string`; `packs` remains composable array. Legacy `sets` is migration input only; ordinary readers reject it and all command writers emit singular strings. Convert Holocene through normalize, not manual JSON edits.
 
 - 2026-10-11: user selected Holocene as the real pilot. Fresh inventory: inherited-only manifest, 129 root entries with mixed canonical links/local BMAD directories, broken `liam`, six client aliases, old pinned mise skill task. No app-code/deployment changes are required for skill configuration. Preserve unrelated Holocene WIP and all differing local skill bytes.
 

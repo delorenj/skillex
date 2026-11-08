@@ -10,7 +10,7 @@ outrank contrary implementation behavior, older docs, tests, and recalled memory
 - **Skill Root**: A directory where an agent looks for skills, almost always named `skills/`.
 - **Global Skill Root**: A directory an agent automatically loads skills from regardless of project scope.
 - **Canonical Skill Root**: Skillex's SSOT skill root: `~/.agents/skills/` globally, or `<project>/.agents/skills/` locally. Agent-specific discovery roots alias this root.
-- **Skill Set**: Replaces a skill root. Selecting one in the manifest replaces `.agents/skills/` with a symlink to the set's skill root. **Sets are mutually exclusive.**
+- **Skill Set**: Replaces a skill root. The manifest uses an optional **`"set": "name"` string**, never `sets`, an array, or an object. Selecting it replaces `.agents/skills/` with a symlink to the set's skill root. **There can only be one set per manifest.**
 - **Skill Pack**: Populates an existing skill root with per-skill symlinks. A pack containing ten distinct additional skills adds ten links, not a root replacement. **Packs are composable.**
 - **`all-skills/`**: The Git submodule holding canonical skill definitions from [skills](https://github.com/delorenj/skills). Since ADR-0002 (2026-11-05) it holds **wild skills** and vendored third-party skills only. This definition catalog is not the canonical discovery root.
 - **Repo-owned skill**: A skill whose bytes live in the repo it describes, at `<repo>/skills/<hub>/`, declared in `all-skills/sources.toml` with `mode = "link"` and resolved to a checkout per machine (ADR-0002).

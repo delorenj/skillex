@@ -169,7 +169,7 @@ async function selectedDerived(f, inputs = INPUTS, owner = ownerOf(f)) {
   assert.equal(created.ok, true, JSON.stringify(created.findings));
   const name = derivedSetName(inputs.base, owner.root);
   f.manifest(owner.root, {
-    sets: [name],
+    set: name,
     packs: inputs.packs,
     skills: inputs.skills,
     exclude: inputs.removed,
@@ -302,7 +302,7 @@ it("validates nested derived bases and refuses sidecar cycles read-only", async 
 it("a project can select a globally derived set without duplicating its owner's extras", async (t) => {
   const f = fixture(t);
   const global = await selectedDerived(f, INPUTS, { scope: "global", root: f.home });
-  f.manifest(f.projectA, { sets: [global.name] });
+  f.manifest(f.projectA, { set: global.name });
   const options = { ...f.options, scope: "project", project: f.projectA };
   const preserved = { global: snapshot(f.home), source: snapshot(global.path) };
   const resolved = await resolveSelection(options);
@@ -455,13 +455,13 @@ for (const recovery of ["enable", "normalize"]) {
     const name = derivedSetName("writers", f.projectA);
     // This is the recoverable state of a successful intent save followed by a
     // process stop before any catalog writes; fixtures never edit live roots.
-    f.manifest(f.projectA, { sets: [name], skills: ["delta"] });
+    f.manifest(f.projectA, { set: name, skills: ["delta"] });
     const result =
       recovery === "enable"
         ? await enableSelection("skill", "delta", options)
         : await normalizeScope({ ...options, apply: true });
     assert.equal(result.ok, true, JSON.stringify(result.findings));
-    assert.deepEqual(declaration(f.projectA).sets, [name]);
+    assert.equal(declaration(f.projectA).set, name);
     assert.deepEqual(readdirSync(join(f.registry, "sets")).sort(), ["writers", name].sort());
     assert.equal(existsSync(join(scopeActivation(f.projectA), "delta")), true);
   });
@@ -694,7 +694,7 @@ it("derives a scope-owned set when one consumer of a shared set enables a pack",
   const packed = await enable("pack", "extra@1.0.0", { scope: "project", project: f.projectA });
   assert.equal(packed.ok, true, JSON.stringify(packed.findings));
   const derived = derivedSetName("writers", f.projectA);
-  assert.deepEqual(declaration(f.projectA).sets, [derived]);
+  assert.equal(declaration(f.projectA).set, derived);
   assert.equal(realpathSync(scopeActivation(f.projectA)), join(f.registry, "sets", derived));
   assert.deepEqual(
     readdirSync(join(f.registry, "sets", derived))
@@ -723,7 +723,7 @@ it("derives a scope-owned set when one consumer of a shared set enables a pack",
     project: f.projectA,
   });
   assert.equal(collapsed.ok, true, JSON.stringify(collapsed.findings));
-  assert.deepEqual(declaration(f.projectA).sets, ["writers"]);
+  assert.equal(declaration(f.projectA).set, "writers");
   assert.equal(realpathSync(scopeActivation(f.projectA)), realpathSync(shared));
   assert.equal(existsSync(join(f.registry, "sets", derived)), false);
   assert.deepEqual(snapshot(f.home), homeBefore);
@@ -876,7 +876,7 @@ process.stdout.write(JSON.stringify(await disableSelection('pack', 'extra@1.0.0'
   assertRefused(result, "E_SELECTION_PARTIAL");
   assert.equal(result.exit, 4);
   assert.equal(result.data.saved, true);
-  assert.deepEqual(declaration(f.projectA).sets, ["writers"]);
+  assert.equal(declaration(f.projectA).set, "writers");
   assert.ok(!result.data.applied.some((change) => change.action === "retire-set"));
   assert.equal(realpathSync(scopeActivation(f.projectA)), join(f.registry, "sets", "writers"));
   assert.ok(lstatSync(path).isDirectory());

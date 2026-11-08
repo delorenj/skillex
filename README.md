@@ -42,8 +42,10 @@ Keep a local registry checkout with its `all-skills/` submodule initialized. Sel
 
 ## Select and sync skills
 
-Selection lives in global or project `.agents/skills.json`. Select at most one
-set, any number of distinct packs, and residual individual skills. Use `-g` on
+Selection lives in global or project `.agents/skills.json`. Select one set with
+an optional **string** field, `"set": "name"`. Omit `set` when none is selected;
+`sets`, arrays, objects, and `null` are not valid current declarations. `packs`
+remains an array of composable references, alongside residual individual skills. Use `-g` on
 selection commands for global scope, or `--project PATH` for one project. Preview
 mutating commands before applying; foreign content requires explicit adoption.
 
@@ -86,6 +88,19 @@ skillex clients isolate --client opencode --project /workspace/example
 skillex clients verify --client opencode --project /workspace/example --session ses_probe --agent build
 ```
 
+A normalized manifest uses the singular shape:
+
+```json
+{
+  "set": "project-base",
+  "packs": ["project-tools@1.0.0"]
+}
+```
+
+`normalize` converts a legacy singleton `sets` array to `set` without switching
+its target or dropping packs. It refuses ambiguous optional/filter semantics
+unless an explicit membership-preserving migration is supplied.
+
 Source creation refuses differing same-name content and never silently skips
 requested unknown skills. `--import` explicitly authorizes missing definitions
 through the canonical importer; Git acquisition records a commit and never runs
@@ -97,6 +112,26 @@ OpenCode isolation preserves unrelated configuration and uses owned permission
 rules. Conflicting user rules require an explicit decision; other clients are not
 certified by this adapter. `clients unisolate` removes only owned rules. Verification
 checks canonical paths and actual permissions, not merely the raw registered list.
+
+## Import and activate a skill
+
+```sh
+# Direct copy into all-skills only: no fork and no activation.
+skillex import https://github.com/cathrynlavery/diagram-design/tree/main/skills/diagram-design
+
+# Ensure import, then activate for the current project.
+skillex add https://github.com/cathrynlavery/diagram-design/tree/main/skills/diagram-design
+skillex add https://github.com/cathrynlavery/diagram-design/tree/main/skills/diagram-design -p /workspace/project
+skillex add https://github.com/cathrynlavery/diagram-design/tree/main/skills/diagram-design -g
+```
+
+`add` defaults to the current project (even when its manifest needs initialization)
+and to global scope outside a project. `-p/--project` and `-g/--global` are mutually
+exclusive. Existing canonical skills are reused without silently refreshing their
+content. Imports preserve the selected subtree's supporting files and record its
+resolved Git commit. A different existing definition is never overwritten.
+Both commands support `--dry-run` and `--json`; an activation failure after a
+successful import is reported as partial, not rolled back or called complete.
 
 ## Manage the catalog
 

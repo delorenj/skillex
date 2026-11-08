@@ -34,7 +34,7 @@ it("invocation inside a globally aliased set selects global, not the registry pr
   const set = f.directory(join(f.registry, "sets", "current"));
   f.file(join(f.registry, ".agents", "skills.json"), "{}");
   f.directory(join(f.home, ".agents"));
-  f.manifest("global", { sets: ["current"] });
+  f.manifest("global", { set: "current" });
   const activated = await sync({ ...f.options, scope: "global" });
   assert.equal(activated.exit, 0, JSON.stringify(activated));
   const result = await enableSelection("skill", "from-global-root", {
@@ -273,7 +273,7 @@ it("masks inherited set members locally, then re-enables them without editing th
   const alpha = f.skill("alpha");
   f.skill("beta");
   const set = f.set("tools", ["alpha", "beta"]);
-  f.manifest("global", { sets: ["tools"] });
+  f.manifest("global", { set: "tools" });
   f.manifest("project", {});
   ok(await sync({ ...f.options, scope: "project" }));
   const globalBefore = snapshot(f.home);
@@ -297,7 +297,7 @@ for (const contributor of ["inherited-direct", "inherited-set", "pack", "base-se
     f.set("tools", ["alpha"]);
     f.pack("tools", "1.0.0", ["alpha"]);
     if (contributor === "inherited-direct") f.manifest("global", { skills: ["alpha"] });
-    if (contributor === "inherited-set") f.manifest("global", { sets: ["tools"] });
+    if (contributor === "inherited-set") f.manifest("global", { set: "tools" });
     if (contributor === "pack") f.manifest("project", { packs: ["tools@1.0.0"] });
     if (contributor === "base-set") ok(await enableSelection("set", "tools", f.options));
     ok(await enableSelection("skill", "alpha", f.options));
@@ -336,7 +336,7 @@ it("removes a direct-only skill without adding a needless exclusion", async (t) 
   assert.deepEqual(snapshot(f.root), stable);
 });
 
-it("refuses a legacy filtered set write-free while a clean optional set repairs activation on a no-op", async (t) => {
+it("refuses a legacy filtered set write-free while a clean set selection repairs activation on a no-op", async (t) => {
   const f = fixture(t);
   const alpha = f.skill("alpha");
   f.skill("beta");
@@ -351,10 +351,7 @@ it("refuses a legacy filtered set write-free while a clean optional set repairs 
   assert.ok(legacy.fix.includes("skillex normalize --dry-run"));
   assert.deepEqual(snapshot(f.root), before);
 
-  f.file(
-    manifestPath(f.project),
-    '{ "inherit_global": false, "sets": [{"name":"tools","optional":true}] }\n',
-  );
+  f.file(manifestPath(f.project), '{ "inherit_global": false, "set": "tools" }\n');
   chmodSync(manifestPath(f.project), 0o640);
   const bytes = readFileSync(manifestPath(f.project));
   const inode = lstatSync(manifestPath(f.project)).ino;
@@ -406,7 +403,7 @@ it("removes missing direct declarations without looking up their absent sources"
   const f = fixture(t);
   for (const [kind, raw, reference] of [
     ["skill", { skills: ["gone"] }, "gone"],
-    ["set", { sets: ["gone"] }, "gone"],
+    ["set", { set: "gone" }, "gone"],
     ["pack", { packs: ["gone@1.0.0"] }, "gone"],
   ]) {
     f.manifest("project", { inherit_global: false, ...raw });
@@ -423,7 +420,7 @@ it("removes missing direct declarations without looking up their absent sources"
 it("refuses a local exclusion when a retained required set still names a missing source", async (t) => {
   const f = fixture(t);
   f.set("tools", ["gone"]);
-  f.manifest("project", { inherit_global: false, skills: ["gone"], sets: ["tools"] });
+  f.manifest("project", { inherit_global: false, skills: ["gone"], set: "tools" });
   const before = snapshot(f.root);
   const result = await disableSelection("skill", "gone", f.options);
   assert.equal(result.exit, 3, JSON.stringify(result.findings));

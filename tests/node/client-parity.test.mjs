@@ -112,7 +112,7 @@ test("effective union ignores scope opt-out, deduplicates origins and survives r
   const set = f.dir(join(f.registryRoot, "sets", "desk"));
   for (const name of ["role", "shared"])
     symlinkSync(join(f.registryRoot, "all-skills", name), join(set, name));
-  f.manifest(f.project, { sets: ["desk"], inherit_global: false });
+  f.manifest(f.project, { set: "desk", inherit_global: false });
   const second = await resolveEffectiveSelection(f.options);
   assert.equal(second.exit, 0, JSON.stringify(second));
   assert.deepEqual(

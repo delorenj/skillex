@@ -165,7 +165,7 @@ it("set source revisions survive profile receipt rereads and converge", async (t
   const f = fixture(t);
   const set = f.directory(join(f.registry, "sets", "desk"));
   symlinkSync(join(f.registry, "all-skills", "beta"), join(set, "beta"));
-  f.manifest("project", { sets: ["desk"] });
+  f.manifest("project", { set: "desk" });
   ok(await syncProfile("work", f.options));
   const result = ok(await showProfile("work", f.options));
   assert.ok(result);

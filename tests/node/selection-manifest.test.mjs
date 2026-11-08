@@ -169,11 +169,10 @@ test("updates preserve permissions and replace only the declaration inode", asyn
 
 test("semantic no-ops preserve original bytes, mode, inode, and modification time", async (t) => {
   const f = await fixture(t);
-  const bytes =
-    '{ "sets": [ {"name":"general", "optional":false} ], "skills": [{"name":"alpha"}], "inherit_global":true }\r\n';
+  const bytes = '{ "set": "general", "skills": [{"name":"alpha"}], "inherit_global":true }\r\n';
   const previous = await seed(f, bytes, 0o640);
   const before = await lstat(f.path, { bigint: true });
-  const returned = await persist(f, previous, { skills: ["alpha"], sets: ["general"] });
+  const returned = await persist(f, previous, { skills: ["alpha"], set: "general" });
   const after = await lstat(f.path, { bigint: true });
   assert.equal(await readFile(f.path, "utf8"), bytes);
   for (const field of ["dev", "ino", "mode", "mtimeNs"]) assert.equal(after[field], before[field]);
@@ -233,7 +232,8 @@ test("invalid proposed declarations fail before creating .agents", async (t) => 
   const previous = await readSelectionManifest(f.scope);
   for (const [raw, code] of [
     [{ source: "legacy" }, "E_LEGACY_FIELD"],
-    [{ sets: ["alpha", "beta"] }, "E_SET_CONFLICT"],
+    [{ sets: ["alpha", "beta"] }, "E_LEGACY_FIELD"],
+    [{ set: ["alpha"] }, "E_MANIFEST_INVALID"],
     [{ inherit_global: "yes" }, "E_MANIFEST_INVALID"],
     [{ skills: ["../outside"] }, "E_MANIFEST_INVALID"],
   ]) {
@@ -262,7 +262,7 @@ test("tolerant reads keep object-shaped legacy declarations with their findings"
   await mkdir(f.agents);
   for (const [bytes, code] of [
     [Buffer.from('{"source":"legacy"}'), "E_LEGACY_FIELD"],
-    [Buffer.from('{"sets":["one","two"]}'), "E_SET_CONFLICT"],
+    [Buffer.from('{"sets":["one","two"]}'), "E_LEGACY_FIELD"],
     [Buffer.from('{"sets":[{"name":"one","include":["alpha"]}]}'), "E_LEGACY_FIELD"],
   ]) {
     await writeFile(f.path, bytes);

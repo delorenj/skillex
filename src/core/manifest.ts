@@ -10,7 +10,7 @@ interface ManifestInput {
   readonly inherit_global?: boolean;
   readonly registry?: string;
   readonly skills?: readonly (string | { readonly name: string })[];
-  readonly sets?: readonly (string | { readonly name: string; readonly optional?: boolean })[];
+  readonly set?: string;
   readonly packs?: readonly (
     | string
     | { readonly name: string; readonly version?: string; readonly optional?: boolean }
@@ -74,37 +74,24 @@ function manifestFinding(error: ErrorObject, path: string): Diagnostic {
   const pointer = fieldPointer(error);
   if (error.keyword === "additionalProperties") {
     const field = String(error.params.additionalProperty);
-    const setFilter =
-      (field === "include" || field === "exclude") && /^\/sets\//.test(error.instancePath);
+    const legacySets = field === "sets" && error.instancePath === "";
     const legacy =
+      legacySets ||
       retiredFields.has(field) ||
-      setFilter ||
-      (field === "registry" && /^\/(skills|sets|packs)\//.test(error.instancePath)) ||
-      (field === "version" && /^\/(skills|sets)\//.test(error.instancePath));
+      (field === "registry" && /^\/(skills|packs)\//.test(error.instancePath)) ||
+      (field === "version" && /^\/skills\//.test(error.instancePath));
     return {
       code: legacy ? "E_LEGACY_FIELD" : "E_MANIFEST_INVALID",
       severity: "error",
-      message: setFilter
-        ? `Legacy set filter ${pointer} is unsupported: a set exclusively replaces the root.`
+      message: legacySets
+        ? 'Legacy field /sets is unsupported: use one optional "set": "name" string, not an array or object.'
         : legacy
           ? `Legacy field ${pointer} is unsupported by canonical manifest resolution.`
           : `Unknown manifest field ${pointer}.`,
       path,
-      fix: setFilter
-        ? "Run skillex normalize --dry-run to plan folding this filtered selection into an exact-membership reference, or derive a scope-owned set with skillex enable."
-        : legacy
-          ? "Run skillex normalize --dry-run to plan converting this manifest to the corrected set/pack contract."
-          : "Remove or correct the field using skills.schema.json.",
-    };
-  }
-  if (error.keyword === "maxItems" && error.instancePath === "/sets") {
-    return {
-      code: "E_SET_CONFLICT",
-      severity: "error",
-      message:
-        "The /sets selection permits at most one set: sets are mutually exclusive root replacements.",
-      path,
-      fix: "Run skillex normalize --dry-run to plan the exact-membership replacement, or keep the one set this scope should activate.",
+      fix: legacy
+        ? "Run skillex normalize --dry-run to preview conversion, then --apply; multiple legacy sets require an explicit --base-set NAME."
+        : "Remove or correct the field using skills.schema.json.",
     };
   }
   return {
@@ -144,11 +131,7 @@ export function parseManifest(raw: unknown, path: string): SkillsManifest {
     skills: (raw.skills ?? []).map((entry) => ({
       name: typeof entry === "string" ? entry : entry.name,
     })),
-    sets: (raw.sets ?? []).map((entry) =>
-      typeof entry === "string"
-        ? { name: entry, optional: false }
-        : { name: entry.name, optional: entry.optional ?? false },
-    ),
+    ...(raw.set === undefined ? {} : { set: raw.set }),
     packs: (raw.packs ?? []).map((entry) => {
       if (typeof entry !== "string") {
         return {

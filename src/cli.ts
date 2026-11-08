@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { Command, CommanderError } from "commander";
+import { registerAcquisitionCommands } from "./commands/acquisition.js";
 import { registerBmadCommands } from "./commands/bmad.js";
 import { registerClientCommands } from "./commands/clients.js";
 import { registerCompositionCommands } from "./commands/compositions.js";
@@ -264,6 +265,7 @@ function mutationText(
 registerCompositionCommands(program, { emit, help });
 registerBmadCommands(program, { emit, help });
 registerSelectionCommands(program, { emit });
+registerAcquisitionCommands(program, { emit });
 registerSyncCommand(program, { emit });
 registerDiagnosticCommands(program, { emit });
 registerVendorCommands(program, { emit, help });

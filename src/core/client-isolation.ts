@@ -459,13 +459,40 @@ function validateRules(
   overrides: { path: string; rule: number }[],
 ): void {
   const root = document.node.value as ObjectValue;
-  if ("permission" in root || "agent" in root)
+  if ("agent" in root || "mode" in root)
     refuse(
       "E_CLIENT_CONFIG_UNSUPPORTED",
-      "Legacy permission/agent configuration needs explicit V2 migration before isolation.",
+      "Legacy agent maps require supported normalized inspection before isolation.",
       document.path,
     );
-  const top = permissionNode(document);
+  const legacyRules: Rule[] = [];
+  if ("permission" in root && !("permissions" in root)) {
+    // V2 normalizes supported V1 permissions in memory; do the same for conflict
+    // inspection only. Never rewrite the user's global document.
+    if (!object(root.permission))
+      refuse("E_CLIENT_CONFIG_UNSUPPORTED", "Legacy permissions must be an object.", document.path);
+    for (const [action, value] of Object.entries(root.permission)) {
+      const effects = typeof value === "string" ? { "*": value } : object(value) ? value : null;
+      if (!effects)
+        refuse(
+          "E_CLIENT_CONFIG_UNSUPPORTED",
+          "Unsupported legacy permission value.",
+          document.path,
+        );
+      for (const [resource, effect] of Object.entries(effects)) {
+        if (!["allow", "ask", "deny"].includes(String(effect)))
+          refuse(
+            "E_CLIENT_CONFIG_UNSUPPORTED",
+            "Unsupported legacy permission effect.",
+            document.path,
+          );
+        legacyRules.push({ action, resource, effect: effect as Rule["effect"] });
+      }
+    }
+  }
+  const top =
+    permissionNode(document) ??
+    (legacyRules.length ? { start: 0, end: 0, value: legacyRules } : undefined);
   if (top) {
     for (const [index, rule] of rules(top, document.path).entries()) {
       if (!matches(rule.action, "skill")) continue;
