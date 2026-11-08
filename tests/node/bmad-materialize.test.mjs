@@ -15,7 +15,7 @@
  */
 
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
   chmodSync,
@@ -35,6 +35,7 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 import { it } from "node:test";
+import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import {
   assertSameManaged,
   expectedRuntimeNodes,
@@ -167,12 +168,16 @@ function sourceFixture(t, { version, variant, completeRuntime = true }) {
   mkdirSync(join(root, "_bmad", "core"), { recursive: true });
   writeFileSync(join(root, "_bmad", "core", "workflow.md"), `core workflow ${variant}\n`);
   // Support assets outside the legacy 3 roots.
-  mkdirSync(join(root, "_bmad", "bmm", "plan", "bmad-prd", "assets"), { recursive: true });
+  mkdirSync(join(root, "_bmad", "bmm", "plan", "bmad-prd", "assets"), {
+    recursive: true,
+  });
   writeFileSync(
     join(root, "_bmad", "bmm", "plan", "bmad-prd", "assets", "prd-template.md"),
     `prd template ${variant}\n`,
   );
-  mkdirSync(join(root, "_bmad", "bmb", "bmad-bmb-setup", "assets"), { recursive: true });
+  mkdirSync(join(root, "_bmad", "bmb", "bmad-bmb-setup", "assets"), {
+    recursive: true,
+  });
   writeFileSync(
     join(root, "_bmad", "bmb", "bmad-bmb-setup", "assets", "module.yaml"),
     `module: bmb-setup ${variant}\n`,
@@ -205,7 +210,12 @@ function registryFixture(t) {
     root,
     registry,
     stateHome,
-    options: { registryRoot: registry, home: root, cwd: root, env: { XDG_STATE_HOME: stateHome } },
+    options: {
+      registryRoot: registry,
+      home: root,
+      cwd: root,
+      env: { XDG_STATE_HOME: stateHome },
+    },
   };
 }
 
@@ -231,7 +241,10 @@ const CLIENT_COMBOS = [
 /** Build specs for both versions into their own ISOLATED registries via real freeze. */
 function materializationWorld(t, seed) {
   const random = rng(seed);
-  const v1Source = sourceFixture(t, { version: "6.12.1-next.0", variant: "v1" });
+  const v1Source = sourceFixture(t, {
+    version: "6.12.1-next.0",
+    variant: "v1",
+  });
   const v2Source = sourceFixture(t, { version: "6.13.0-rc.1", variant: "v2" });
   const reg1 = registryFixture(t);
   const reg2 = registryFixture(t);
@@ -243,7 +256,11 @@ function materializationWorld(t, seed) {
     env: { ...process.env, XDG_STATE_HOME: reg2.stateHome },
   });
   assert.equal(freeze2.exit, 0, freeze2.stderr + freeze2.stdout);
-  return { random, sources: { v1: v1Source, v2: v2Source }, registries: { v1: reg1, v2: reg2 } };
+  return {
+    random,
+    sources: { v1: v1Source, v2: v2Source },
+    registries: { v1: reg1, v2: reg2 },
+  };
 }
 
 function buildSpec(world, versionKey, clients, specPath, projectName) {
@@ -262,7 +279,9 @@ function buildSpec(world, versionKey, clients, specPath, projectName) {
     specPath,
   ];
   if (projectName) args.push("--project-name", projectName);
-  return run(args, { env: { ...process.env, HOME: world.sources[versionKey].root } });
+  return run(args, {
+    env: { ...process.env, HOME: world.sources[versionKey].root },
+  });
 }
 
 function planOrApply(world, versionKey, projectRoot, specPath, dryRun, extraEnv = {}) {
@@ -277,7 +296,12 @@ function planOrApply(world, versionKey, projectRoot, specPath, dryRun, extraEnv 
       registry.registry,
     ],
     {
-      env: { ...process.env, HOME: registry.root, XDG_STATE_HOME: registry.stateHome, ...extraEnv },
+      env: {
+        ...process.env,
+        HOME: registry.root,
+        XDG_STATE_HOME: registry.stateHome,
+        ...extraEnv,
+      },
     },
   );
 }
@@ -537,6 +561,85 @@ it("L5d tampered canonical member file mode refuses", (t) => {
   );
 });
 
+it("committed local BMAD overlay keeps freeze identity and rejects foreign edits", (t) => {
+  const world = materializationWorld(t, 88002);
+  const catalog = world.registries.v1.registry;
+  const skill = join(catalog, "all-skills", "bmad-alpha");
+  const source = join(skill, ".source.yaml");
+  const spec = join(world.registries.v1.root, "overlay-spec.json");
+  const git = (...args) =>
+    execFileSync("git", args, {
+      cwd: join(catalog, "all-skills"),
+      encoding: "utf8",
+    }).trim();
+  git("init", "-q");
+  git("-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "add", ".");
+  git(
+    "-c",
+    "user.name=Fixture",
+    "-c",
+    "user.email=fixture@example.invalid",
+    "commit",
+    "-qm",
+    "freeze",
+  );
+  const baseCommit = git("rev-parse", "HEAD");
+  const skillMd = join(skill, "SKILL.md");
+  writeFileSync(skillMd, `${readFileSync(skillMd, "utf8")}\n# approved edit\n`);
+  git("add", ".");
+  git(
+    "-c",
+    "user.name=Fixture",
+    "-c",
+    "user.email=fixture@example.invalid",
+    "commit",
+    "-qm",
+    "overlay",
+  );
+  const patch = execFileSync(
+    "git",
+    [
+      "diff",
+      "--binary",
+      baseCommit,
+      "HEAD",
+      "--",
+      "bmad-alpha",
+      ":(exclude)bmad-alpha/.source.yaml",
+    ],
+    { cwd: join(catalog, "all-skills") },
+  );
+  const patchDigest = `sha256:${createHash("sha256").update(patch).digest("hex")}`;
+  const status = run(["bmad", "status", "--registry-root", catalog]);
+  const effectiveDigest = status.data.skills.find((item) => item.name === "bmad-alpha").digest;
+  const receipt = parseYaml(readFileSync(source, "utf8"));
+  receipt.modified_locally = true;
+  receipt.origin.local_overlay = {
+    base_commit: baseCommit,
+    base_digest: receipt.origin.digest,
+    patch_digest: patchDigest,
+    effective_digest: effectiveDigest,
+  };
+  writeFileSync(source, stringifyYaml(receipt));
+  git("add", ".");
+  git(
+    "-c",
+    "user.name=Fixture",
+    "-c",
+    "user.email=fixture@example.invalid",
+    "commit",
+    "-qm",
+    "overlay receipt",
+  );
+  assert.equal(buildSpec(world, "v1", ["claude-code"], spec, "OverlayProject").exit, 0);
+  writeFileSync(skillMd, `${readFileSync(skillMd, "utf8")}\n# unexplained\n`);
+  const rejection = buildSpec(world, "v1", ["claude-code"], spec, "OverlayProject");
+  assert.equal(rejection.exit, 3);
+  assert.ok(
+    rejection.envelope.findings.some((finding) => finding.code === "E_BMAD_SPEC_RUNTIME_REFUSE"),
+  );
+});
+
 /** I1 aggregate pin interface: names-only members + exact pack.toml bytes bound. */
 it("I1 composition aggregate pin binds exact pack bytes with names-only members", (t) => {
   const seed = 110011;
@@ -659,7 +762,10 @@ it("I6 unsafe spec fields refuse before any target write", (t) => {
       raw.sources.members[0] = { name: "bmad-alpha", digest: "x" };
     },
     (raw) => {
-      raw.sources.commands[0].files[0] = { name: "../../evil", sha256: "0".repeat(64) };
+      raw.sources.commands[0].files[0] = {
+        name: "../../evil",
+        sha256: "0".repeat(64),
+      };
     },
     (raw) => {
       delete raw.sources.composition;
@@ -742,7 +848,9 @@ it("L7 polluted global environment cannot influence materialization", (t) => {
   );
   const root = realpathSync(mkdtempSync("/tmp/skrill27-project-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));
-  const apply = planOrApply(world, "v1", root, specPath, false, { HOME: pollutedHome });
+  const apply = planOrApply(world, "v1", root, specPath, false, {
+    HOME: pollutedHome,
+  });
   assert.equal(apply.exit, 0, `seed=${seed}: ${apply.stderr}${apply.stdout}`);
   const manifest = JSON.parse(readFileSync(join(root, ".agents", "skills.json"), "utf8"));
   assert.equal(manifest.inherit_global, false, "ambient global inheritance leaked");

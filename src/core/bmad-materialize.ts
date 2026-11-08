@@ -19,6 +19,8 @@
  *  - Authored edits to owned files refuse (never silently repaired).
  *  - Spec pin integrity: same digest label + changed pinned inputs refuses.
  */
+
+import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import {
@@ -34,6 +36,7 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { dirname, join, relative, resolve, sep } from "node:path";
+import { promisify } from "node:util";
 import type {
   BmadMaterializeData,
   BmadMaterializeOptions,
@@ -59,6 +62,37 @@ import {
   type SelectionManifestSnapshot,
   writeSelectionManifest,
 } from "./selection-manifest.js";
+
+const GIT = promisify(execFile);
+async function committedRuntimePath(
+  projectRoot: string,
+  path: string,
+  node: BmadMaterialNode,
+): Promise<boolean> {
+  try {
+    const { stdout } = await GIT(
+      "git",
+      ["status", "--porcelain", "--untracked-files=all", "--", path],
+      { cwd: projectRoot },
+    );
+    if (stdout.trim()) return false;
+    const tracked = await GIT("git", ["ls-files", "--", path], {
+      cwd: projectRoot,
+    });
+    if (node.kind === "dir" || tracked.stdout.trim()) return true;
+    const ignored = await GIT("git", ["check-ignore", "-q", path], {
+      cwd: projectRoot,
+    }).then(
+      () => true,
+      () => false,
+    );
+    if (!ignored || node.kind !== "file" || !node.digest) return false;
+    const bytes = await readFile(join(projectRoot, path));
+    return `sha256:${createHash("sha256").update(bytes).digest("hex")}` === node.digest;
+  } catch {
+    return false;
+  }
+}
 
 const SPEC_SCHEMA = "skillex.bmad-spec/v1";
 // The materialization writer serializes on the SHARED activation lock used by
@@ -360,7 +394,10 @@ export function verifySpecificationDigest(spec: BmadSpecification, path: string)
     members: spec.sources.members,
     composition: spec.sources.composition,
     commands: spec.sources.commands,
-    runtime: { path: "__runtime_relocated__", digest: spec.sources.runtime.digest },
+    runtime: {
+      path: "__runtime_relocated__",
+      digest: spec.sources.runtime.digest,
+    },
     runtimeDeps: spec.sources.runtimeDeps,
     runtimeExtraPolicy: spec.sources.runtimeExtraPolicy,
   };
@@ -751,7 +788,10 @@ async function lstatEnoentOk(path: string): Promise<Awaited<ReturnType<typeof ls
     fail(
       "E_IO",
       `Cannot inspect ${path}: ${error instanceof Error ? error.message : String(error)}`,
-      { path, fix: "Check the path and its filesystem permissions, then retry." },
+      {
+        path,
+        fix: "Check the path and its filesystem permissions, then retry.",
+      },
       ExitCode.FAILURE,
     );
   }
@@ -813,7 +853,29 @@ async function preflight(options: BmadMaterializeOptions): Promise<Preflight> {
   await verifyPinnedInputs(registry.root, spec);
   // Runtime availability is part of preflight (explicit missing deps => refuse).
   await resolveRuntimeForRead(spec);
-  const nodes = await desiredRuntimeNodes(projectRoot, spec);
+  // The live pilot already has installer-owned runtime. Adoption is deliberately
+  // limited to version-control-clean paths in this project, never arbitrary
+  // byte-identical foreign content. Existing customized config stays authored.
+  const preserved = new Set<string>();
+  if (options.adoptCommittedRuntime === true) {
+    for (const node of await desiredRuntimeNodes(projectRoot, spec)) {
+      const absolute = join(projectRoot, node.path);
+      const info = await lstatEnoentOk(absolute);
+      if (!info) continue;
+      const clean = await committedRuntimePath(projectRoot, node.path, node);
+      if (!clean || (node.kind === "dir" && !info.isDirectory()))
+        fail(
+          "E_BMAD_SPEC_COLLISION",
+          `Cannot preserve uncommitted or foreign runtime path: ${node.path}.`,
+          { path: absolute },
+          ExitCode.REFUSED,
+        );
+      preserved.add(node.path);
+    }
+  }
+  const nodes = (await desiredRuntimeNodes(projectRoot, spec)).filter(
+    (node) => !preserved.has(node.path),
+  );
   // Existing receipt: authored edits / foreign receipts refuse. A symlinked
   // `.skillex` receipt directory would let the receipt write escape the project;
   // it is refused outright (links are never followed into outside trees).
@@ -1053,7 +1115,10 @@ async function preflight(options: BmadMaterializeOptions): Promise<Preflight> {
         });
       }
     } else {
-      refuses.push({ path: node.path, reason: "owned path has the wrong filesystem type" });
+      refuses.push({
+        path: node.path,
+        reason: "owned path has the wrong filesystem type",
+      });
     }
   }
   // Readonly activation prepare: build the proposed manifest and validate EVERY
@@ -1064,61 +1129,51 @@ async function preflight(options: BmadMaterializeOptions): Promise<Preflight> {
   const rawManifest: Record<string, unknown> = snapshot.raw
     ? { ...(snapshot.raw as Record<string, unknown>) }
     : {};
-  // Authored-selection preservation (F3): an existing manifest's authored policy
-  // is NEVER silently replaced. The materializer declares its own pin
-  // (inherit_global=false + the bmad pack + the resolved registry), but an
-  // authored declaration that conflicts refuses BEFORE any write — the same
-  // refusal for dry-run and apply, with the whole tree (manifest bytes
-  // included) untouched.
-  const bmadPackName = spec.sources.pack.name;
+  // Existing project selections are authored scope policy, not runtime assets.
+  // Preserve them verbatim when the exact pinned pack is already selected;
+  // the existing global root and project extras remain discoverable.
+  const pin = `${spec.sources.pack.name}@${spec.sources.pack.version}`;
   if (snapshot.exists && snapshot.raw) {
-    const authoredRefusals: string[] = [];
-    if (rawManifest.inherit_global !== false)
-      authoredRefusals.push(
-        `inherit_global is authored as ${JSON.stringify(rawManifest.inherit_global)} (materialization requires false; ambient global inheritance is never adopted silently)`,
-      );
-    const authoredPacks = Array.isArray(rawManifest.packs)
-      ? rawManifest.packs.filter((entry): entry is Record<string, unknown> => isRecord(entry))
-      : [];
-    const foreignPacks = authoredPacks.filter(
-      (entry) => entry.name !== bmadPackName || entry.version !== spec.sources.pack.version,
+    const packs = Array.isArray(rawManifest.packs) ? rawManifest.packs : [];
+    const selected = packs.some(
+      (entry) =>
+        entry === pin ||
+        (isRecord(entry) &&
+          entry.name === spec.sources.pack.name &&
+          entry.version === spec.sources.pack.version &&
+          entry.optional !== true),
     );
-    if (foreignPacks.length)
-      authoredRefusals.push(
-        `packs declare non-pinned selection(s): ${foreignPacks
-          .map((entry) => `${String(entry.name)}@${String(entry.version)}`)
-          .join(", ")} (authored selections are never dropped silently)`,
-      );
-    if (
-      options.registryRoot &&
-      "registry" in rawManifest &&
-      rawManifest.registry !== options.registryRoot
-    )
-      authoredRefusals.push(
-        `registry pointer is authored as ${JSON.stringify(rawManifest.registry)} (resolved registry is ${options.registryRoot})`,
-      );
-    if (authoredRefusals.length)
+    if (!selected)
       fail(
         "E_BMAD_SPEC_COLLISION",
-        `Refusing to materialize: the existing selection manifest carries authored declarations the materializer will not silently replace (first: ${authoredRefusals[0]}).`,
+        `Existing project selection does not declare pinned ${pin}.`,
         {
           path: snapshot.path,
-          detail: authoredRefusals,
-          fix: "Remove the authored selection deliberately (accepting the pinned bmad declaration), or keep the authored manifest and do not materialize. Authored selections and policies are never dropped silently.",
+          fix: `Select ${pin} through Skillex before materializing; existing authored selections are preserved.`,
         },
         ExitCode.REFUSED,
       );
+    if ("registry" in rawManifest && rawManifest.registry !== registry.root)
+      fail(
+        "E_BMAD_SPEC_COLLISION",
+        "Existing project registry does not match the pinned registry.",
+        {
+          path: snapshot.path,
+          fix: "Resolve the authored registry before materializing; it is never replaced silently.",
+        },
+        ExitCode.REFUSED,
+      );
+  } else {
+    rawManifest.inherit_global = false;
+    if (options.registryRoot) rawManifest.registry = options.registryRoot;
+    rawManifest.packs = [
+      {
+        name: spec.sources.pack.name,
+        version: spec.sources.pack.version,
+        optional: false,
+      },
+    ];
   }
-  // No ambient global inheritance: the materialized project declares its own pin.
-  rawManifest.inherit_global = false;
-  if (options.registryRoot) rawManifest.registry = options.registryRoot;
-  rawManifest.packs = [
-    {
-      name: spec.sources.pack.name,
-      version: spec.sources.pack.version,
-      optional: false,
-    },
-  ];
   const syncOptions: SyncOptions = {
     ...options,
     project: projectRoot,

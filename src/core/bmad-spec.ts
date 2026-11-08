@@ -27,6 +27,7 @@ import type {
   BmadSpecification,
   BmadSpecificationSources,
 } from "./bmad-materialize-types.js";
+import { verifiedBmadDigest } from "./bmad-overlay.js";
 import { BMAD_COMMAND_CLIENTS, inspectBmadSource } from "./bmad-source.js";
 import { canonicalSkill, packInventory } from "./composition.js";
 import { type ContentEntry, captureContent, digestContent } from "./content.js";
@@ -34,7 +35,6 @@ import { discoverRegistry } from "./discovery.js";
 import { fail, SkillexError } from "./error.js";
 import { inspectPath } from "./filesystem.js";
 import { isSkillName } from "./manifest.js";
-import { readSkillMetadata } from "./metadata.js";
 import { ExitCode, makeResult, type ResultEnvelope } from "./result.js";
 import type { RegistrySelection } from "./selection.js";
 
@@ -321,26 +321,7 @@ export async function deriveRuntimeDependencies(
     }
     if (registryRoot) {
       const root = await canonicalSkill(registryRoot, owner.name);
-      const metadata = await readSkillMetadata(root);
-      const provenance = metadata.provenance?.origin;
-      const recorded =
-        provenance && typeof provenance === "object" && !Array.isArray(provenance)
-          ? (provenance as Record<string, unknown>).digest
-          : null;
-      const captured = await captureContent(root);
-      const actual = digestContent(
-        captured.entries.filter((entry) => entry.path !== ".source.yaml"),
-      );
-      if (typeof recorded !== "string" || recorded !== actual)
-        fail(
-          "E_BMAD_SPEC_RUNTIME_REFUSE",
-          `Frozen canonical member ${owner.name} differs from its recorded baseline.`,
-          {
-            path: root,
-            fix: "Restore the frozen canonical member before building a spec.",
-          },
-          ExitCode.REFUSED,
-        );
+      await verifiedBmadDigest(root, registryRoot);
       const relativePath = owner.suffix.split("/");
       const content = join(root, ...relativePath);
       const info = await inspectPath(content);

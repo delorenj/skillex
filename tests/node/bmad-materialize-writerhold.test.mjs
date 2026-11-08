@@ -453,7 +453,7 @@ it("F3a: declared-but-not-installed optional foreign pack refuses, dry and apply
   );
 });
 
-it("F3b: authored inherit_global=true refuses and is never silently flipped", (t) => {
+it("F3b: authored inherit_global=true is preserved when pinned pack is already selected", (t) => {
   const world = buildWorld(t);
   const project = projectFixture(t);
   authoredManifest(world, project, (m) => {
@@ -461,11 +461,11 @@ it("F3b: authored inherit_global=true refuses and is never silently flipped", (t
   });
   const manifestBytesBefore = readFileSync(join(project, ".agents", "skills.json"), "utf8");
   const dry = planCmd(world, project);
-  assert.equal(dry.exit, 3, `dry-run must refuse authored inherit_global=true: ${dry.stdout}`);
+  assert.equal(dry.exit, 0, dry.stdout);
   const apply = applyCmd(world, project);
-  assert.equal(apply.exit, 3, `apply must refuse authored inherit_global=true: ${apply.stdout}`);
+  assert.equal(apply.exit, 0, apply.stdout);
   assert.equal(readFileSync(join(project, ".agents", "skills.json"), "utf8"), manifestBytesBefore);
-  assert.ok(!existsSync(join(project, "_bmad")), "refusal wrote runtime anyway");
+  assert.ok(existsSync(join(project, "_bmad", "scripts", "render_skill.py")));
 });
 
 it("F3c: authored registry pointer differing from the resolved registry refuses", (t) => {

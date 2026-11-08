@@ -237,12 +237,20 @@ export function registerBmadCommands(program: Command, output: Output): void {
     .description(
       "Validate a specification against a project and emit the desired-state graph without writing.",
     )
+    .option(
+      "--adopt-committed-runtime",
+      "Preserve existing committed installer runtime paths without taking ownership (pilot only).",
+    )
     .action(async (projectRoot: string, specPath: string, _local, command: Command) => {
       const result = await materializeBmadProject({
         ...registryOptions(command),
         projectRoot,
         specPath,
         dryRun: true,
+        ...(command.optsWithGlobals<Options & { adoptCommittedRuntime?: boolean }>()
+          .adoptCommittedRuntime
+          ? { adoptCommittedRuntime: true }
+          : {}),
         ...stateOptions(command),
       });
       output.emit(result, result.data ? materializeText(result.data) : "");
@@ -253,19 +261,30 @@ export function registerBmadCommands(program: Command, output: Output): void {
     .description(
       "Materialize a validated specification into a project (runtime support + canonical activation).",
     )
+    .option(
+      "--adopt-committed-runtime",
+      "Preserve existing committed installer runtime paths without taking ownership (pilot only).",
+    )
     .action(async (projectRoot: string, specPath: string, _local, command: Command) => {
       const result = await materializeBmadProject({
         ...registryOptions(command),
         projectRoot,
         specPath,
         dryRun: false,
+        ...(command.optsWithGlobals<Options & { adoptCommittedRuntime?: boolean }>()
+          .adoptCommittedRuntime
+          ? { adoptCommittedRuntime: true }
+          : {}),
         ...stateOptions(command),
       });
       output.emit(result, result.data ? materializeText(result.data) : "");
     });
 }
 
-function stateOptions(command: Command): { stateHome?: string; timeoutMs?: number } {
+function stateOptions(command: Command): {
+  stateHome?: string;
+  timeoutMs?: number;
+} {
   const { stateHome, timeoutMs } = command.optsWithGlobals<Options>();
   const timeout = timeoutMs === undefined ? undefined : Number(timeoutMs);
   return {

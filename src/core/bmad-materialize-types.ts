@@ -128,7 +128,10 @@ export interface BmadSpecificationSources {
     readonly client: string;
     readonly layout: string;
     readonly commandsPath: string;
-    readonly files: ReadonlyArray<{ readonly name: string; readonly sha256: string }>;
+    readonly files: ReadonlyArray<{
+      readonly name: string;
+      readonly sha256: string;
+    }>;
   }>;
   /** Pinned runtime support source (explicit; no ambient global inheritance). */
   readonly runtime: BmadRuntimeSupportSource;
@@ -184,6 +187,8 @@ export interface BmadMaterializeOptions extends RegistryOptions {
   readonly projectRoot: string;
   readonly specPath: string;
   readonly dryRun?: boolean;
+  /** Explicit pilot adoption: preserve existing committed runtime without claiming ownership. */
+  readonly adoptCommittedRuntime?: boolean;
   readonly stateHome?: string;
   readonly timeoutMs?: number;
 }
@@ -220,7 +225,10 @@ export interface BmadMaterialPlan {
   readonly creates: readonly string[];
   readonly updates: readonly string[];
   readonly unchanged: readonly string[];
-  readonly refuses: ReadonlyArray<{ readonly path: string; readonly reason: string }>;
+  readonly refuses: ReadonlyArray<{
+    readonly path: string;
+    readonly reason: string;
+  }>;
   readonly dryRun: boolean;
   readonly findings: readonly import("./result.js").Diagnostic[];
 }
