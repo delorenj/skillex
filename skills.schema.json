@@ -70,32 +70,10 @@
         ]
       }
     },
-    "sets": {
-      "type": "array",
-      "maxItems": 1,
-      "description": "Sets are mutually exclusive root replacements: selecting one replaces .agents/skills/ with a symlink to the set's skill root and replaces inherited global selection. At most one set per scope.",
-      "items": {
-        "anyOf": [
-          {
-            "$ref": "#/definitions/compositionName"
-          },
-          {
-            "type": "object",
-            "additionalProperties": false,
-            "required": ["name"],
-            "properties": {
-              "name": {
-                "$ref": "#/definitions/compositionName"
-              },
-              "optional": {
-                "type": "boolean",
-                "default": false,
-                "description": "Report an unavailable set as an optional skip instead of a required-reference failure."
-              }
-            }
-          }
-        ]
-      }
+    "set": {
+      "type": "string",
+      "pattern": "^[a-zA-Z0-9]([a-zA-Z0-9._-]*[a-zA-Z0-9])?(?![\\s\\S])",
+      "description": "One required set reference replacing .agents/skills/ with a symlink to the set's skill root and replacing inherited global selection. Omit this field for no set; arrays, objects, null, and empty strings are invalid."
     },
     "packs": {
       "type": "array",

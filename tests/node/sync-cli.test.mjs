@@ -545,21 +545,25 @@ describe("installed sync CLI", () => {
     assert.equal(existsSync(activation(catalog.project)), false);
   });
 
-  it("preserves activation and receipts when an optional pack or set cannot be fully resolved", (context) => {
+  it("preserves activation and receipts when an optional pack or a required set cannot be resolved", (context) => {
     const catalog = catalogFor(context);
     manifest(catalog.project, { skills: ["alpha"], inherit_global: false });
     json(catalog, ["--scope", "project"]);
-    for (const declaration of [
-      { packs: [{ name: "missing", optional: true }], inherit_global: false },
-      { skills: ["beta"], sets: [{ name: "missing", optional: true }], inherit_global: false },
+    for (const [declaration, exit, code] of [
+      [
+        { packs: [{ name: "missing", optional: true }], inherit_global: false },
+        4,
+        "W_OPTIONAL_SKIPPED",
+      ],
+      [{ skills: ["beta"], set: "missing", inherit_global: false }, 3, "E_SET_MISSING"],
     ]) {
       manifest(catalog.project, declaration);
       const preview = unchanged(catalog.root, () =>
-        json(catalog, ["--scope", "project", "--dry-run", "--exit-code"], 4),
+        json(catalog, ["--scope", "project", "--dry-run", "--exit-code"], exit),
       );
-      assert.ok(preview.findings.some(({ code }) => code === "W_OPTIONAL_SKIPPED"));
-      const result = unchangedProtected(catalog, () => json(catalog, ["--scope", "project"], 4));
-      assert.ok(result.findings.some(({ code }) => code === "W_OPTIONAL_SKIPPED"));
+      assert.ok(preview.findings.some(({ code: found }) => found === code));
+      const result = unchangedProtected(catalog, () => json(catalog, ["--scope", "project"], exit));
+      assert.ok(result.findings.some(({ code: found }) => found === code));
       assert.deepEqual(readdirSync(activation(catalog.project)), ["alpha"]);
     }
   });

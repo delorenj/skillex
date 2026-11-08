@@ -281,7 +281,7 @@ it("rejects set-root aliases that bypass the stable root and blocks them on set 
   f.skill("beta");
   f.set("tools", ["alpha", "beta"]);
   f.set("suite", ["alpha", "beta"]);
-  f.manifest("project", { sets: ["tools"] });
+  f.manifest("project", { set: "tools" });
   for (const alias of PROJECT_CLI_ALIASES) f.link(join(f.project, alias), activation(f.project));
   result(await sync(f.options));
   const healthy = scope(result(await inspectStatus(f.options)));
@@ -307,7 +307,7 @@ it("rejects set-root aliases that bypass the stable root and blocks them on set 
     false,
   );
   // The stale set-root alias must block a switch to another set, write-free.
-  f.manifest("project", { sets: ["suite"] });
+  f.manifest("project", { set: "suite" });
   const before = snapshot(f.root);
   const blocked = await inspectStatus(f.options);
   finding(blocked, "E_ACTIVATION_CONFLICT", 3);
@@ -554,7 +554,12 @@ it("retains invariant exits through file and cyclic roots and supports write-fre
 
 it("retains an independent root-file invariant before an optional-resolution partial exit", async (t) => {
   const f = fixture(t);
-  f.manifest("project", { inherit_global: false, sets: [{ name: "missing", optional: true }] });
+  f.manifest("project", {
+    inherit_global: false,
+    packs: [{ name: "missing", optional: true }],
+    skills: ["alpha"],
+  });
+  f.skill("alpha");
   f.file(activation(f.project), "Preserve foreign root content\n");
   const before = snapshot(f.root);
   const blocked = await inspectStatus(f.options);

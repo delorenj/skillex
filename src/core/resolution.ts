@@ -88,7 +88,7 @@ async function resolveScope(
       kind,
       reference,
     });
-    const selectedSet = manifest.sets[0];
+    const selectedSet = manifest.set;
     let set: ResolvedSet | undefined;
     if (manifest.scope && manifest.scope !== location.scope) {
       findings.push({
@@ -105,8 +105,8 @@ async function resolveScope(
       // and competing selectors are refused unless this scope owns a derived
       // set whose materialization already includes them.
       try {
-        const inventory = await setMembers(registry.root, selectedSet.name);
-        set = { name: selectedSet.name, path: inventory.path };
+        const inventory = await setMembers(registry.root, selectedSet);
+        set = { name: selectedSet, path: inventory.path };
         const derived = (await readSetOrigin(inventory.path))?.derived;
         const owned =
           derived !== undefined &&
@@ -128,7 +128,7 @@ async function resolveScope(
           if (!isDeepStrictEqual(declared, selected)) {
             fail(
               "E_SET_DRIFT",
-              `Set ${selectedSet.name} was derived from a different selection than this manifest declares.`,
+              `Set ${selectedSet} was derived from a different selection than this manifest declares.`,
               {
                 path: inventory.path,
                 detail: [
@@ -146,10 +146,10 @@ async function resolveScope(
           if (competing)
             fail(
               "E_SET_CONFLICT",
-              `Set ${selectedSet.name} exclusively replaces this scope's root; packs, skills, and exclusions cannot be added through it.`,
+              `Set ${selectedSet} exclusively replaces this scope's root; packs, skills, and exclusions cannot be added through it.`,
               {
                 path: manifest.path,
-                fix: `Run skillex enable pack or skillex enable skill to derive a scope-owned set from ${selectedSet.name}, or remove the competing selections. skillex normalize --dry-run plans this repair.`,
+                fix: `Run skillex enable pack or skillex enable skill to derive a scope-owned set from ${selectedSet}, or remove the competing selections. skillex normalize --dry-run plans this repair.`,
               },
               ExitCode.REFUSED,
             );
@@ -159,13 +159,13 @@ async function resolveScope(
         if (derived) await verifyDerivedMembers(registry.root, inventory, derived);
         for (const name of inventory.names) {
           contribute(bindings, name, await setMemberTarget(registry.root, inventory.path, name), [
-            origin("set", selectedSet.name),
+            origin("set", selectedSet),
           ]);
         }
       } catch (error) {
-        // An optional absent set skips its whole root replacement; a root that a
-        // full set cannot honor is never degraded to a partial activation.
-        if (!optionalAbsence(error, selectedSet.optional, findings, location.scope)) throw error;
+        // A set selection is required: an absent set never degrades the root
+        // replacement to a partial activation.
+        if (!optionalAbsence(error, false, findings, location.scope)) throw error;
         bindings.clear();
         set = undefined;
       }
@@ -272,7 +272,7 @@ export async function resolveSelectionWithManifests(
         : savedProjectManifest;
     const needsGlobal =
       locations.writeScopes.includes("global") ||
-      (projectManifest?.inheritGlobal && projectManifest.sets.length === 0);
+      (projectManifest?.inheritGlobal && projectManifest.set === undefined);
     const scopes: ResolvedScope[] = [];
     let global: ResolvedScope | undefined;
     const context = { ...options, home: locations.global.root };

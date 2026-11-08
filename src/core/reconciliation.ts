@@ -184,7 +184,7 @@ async function verifySelectedSet(scope: ResolvedScope): Promise<void> {
   const derived = (await readSetOrigin(inventory.path))?.derived;
   if (derived) await verifyDerivedMembers(scope.registry.root, inventory, derived);
   const owned = derived?.owner.scope === scope.scope && derived.owner.root === scope.root;
-  const selected = scope.manifest.sets[0];
+  const selected = scope.manifest.set;
   if (!selected)
     refuse(scope.manifest.path, "The set selection disappeared.", "E_OWNERSHIP_CHANGED");
   const declared = owned
@@ -430,7 +430,7 @@ async function buildScope(
     if (!scope.set)
       fail(
         "E_INCOMPLETE_RESOLUTION",
-        "An optional set was unavailable; existing activation is preserved.",
+        "A selected set was unavailable; existing activation is preserved.",
         {
           path: scope.manifest.path,
           fix: "Make the selected set available, or remove its selection before syncing.",
@@ -640,7 +640,7 @@ export async function preflightDerivedActivation(
     removed: [...manifest.exclude],
   };
   if (
-    manifest.sets[0]?.name !== preview.name ||
+    manifest.set !== preview.name ||
     !isDeepStrictEqual(expected, {
       packs: [...preview.inputs.packs],
       skills: [...preview.inputs.skills],

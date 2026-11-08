@@ -263,7 +263,7 @@ async function propose(
   if (edit.operation === "init") return raw;
   const next: Record<string, unknown> = { ...raw };
   if (edit.operation === "inherit") {
-    if (manifest?.sets.length)
+    if (manifest?.set)
       fail(
         "E_SCOPE",
         "Inheritance is replaced while a set exclusively selects this scope's root.",
@@ -290,7 +290,7 @@ async function propose(
     edit.kind === "skill"
       ? { skills: [edit.reference] }
       : edit.kind === "set"
-        ? { sets: [edit.reference] }
+        ? { set: edit.reference }
         : { packs: [edit.reference] },
     manifest?.path ?? "selection",
   );
@@ -321,29 +321,29 @@ async function propose(
         next.exclude = [...excluded, name];
     }
   } else if (edit.kind === "set") {
-    const name = reference.sets[0]?.name;
+    const name = reference.set;
     if (!name)
       fail("E_SELECTION_REFERENCE", "A set name is required.", {
         ...(manifest === null || manifest.path === undefined ? {} : { path: manifest.path }),
         fix: "Pass the name of a set.",
       });
     if (edit.operation === "enable") {
-      if (manifest?.sets.some((set) => set.name === name)) return next;
-      next.sets = [name];
+      if (manifest?.set === name) return next;
+      next.set = name;
     } else {
-      const selected = manifest?.sets[0];
+      const selected = manifest?.set;
       if (!selected) return next;
-      if (selected.name !== name && !context.ownedDerived)
+      if (selected !== name && !context.ownedDerived)
         fail(
           "E_SET_SELECTION_MISMATCH",
           "The requested set does not match the selected declaration.",
           {
             ...(manifest === null || manifest.path === undefined ? {} : { path: manifest.path }),
-            fix: `Disable ${selected.name} explicitly to remove the selection.`,
+            fix: `Disable ${selected} explicitly to remove the selection.`,
           },
           ExitCode.REFUSED,
         );
-      next.sets = [];
+      delete next.set;
     }
   } else {
     const pack = reference.packs[0];
@@ -385,18 +385,18 @@ async function propose(
   const previousBase = currentBase();
   const base =
     edit.operation === "enable" && edit.kind === "set"
-      ? (candidate.sets[0]?.name ?? previousBase)
+      ? (candidate.set ?? previousBase)
       : previousBase;
-  if (candidate.sets[0] && !extrasEmpty(candidate) && base) {
-    next.sets = [derivedFor(base)];
+  if (candidate.set && !extrasEmpty(candidate) && base) {
+    next.set = derivedFor(base);
   } else if (
-    candidate.sets[0] &&
+    candidate.set &&
     extrasEmpty(candidate) &&
     context.ownedDerived &&
     base &&
-    candidate.sets[0].name === derivedFor(base)
+    candidate.set === derivedFor(base)
   ) {
-    next.sets = [base];
+    next.set = base;
   }
   return next;
 }
@@ -407,7 +407,7 @@ async function setContextFor(
   registry: RegistrySelection | undefined,
 ): Promise<SetContext> {
   const owner: DerivationOwner = { scope: target.scope, root: target.root };
-  const selected = manifest?.sets[0]?.name;
+  const selected = manifest?.set;
   if (!selected || !registry)
     return { owner, selected, ownedDerived: false, base: selected ?? null };
   const state = await derivedState(registry.root, selected);
@@ -453,7 +453,7 @@ async function prepare(
     ...(target.scope === "project" ? { project: target.root } : {}),
   };
   // One registry selection backs set-ownership reads and derivation planning.
-  const registry = snapshot.manifest?.sets.length
+  const registry = snapshot.manifest?.set
     ? await discoverRegistry({
         ...options,
         home: target.home,
@@ -495,7 +495,7 @@ async function prepare(
       async (name, next, base) => {
         try {
           const candidate = parseManifest(next, snapshot.path);
-          if (candidate.sets.length && registry) {
+          if (candidate.set && registry) {
             const members = await desiredDerivedMembers(registry.root, {
               base,
               ...extrasOf(candidate),
@@ -551,14 +551,9 @@ async function prepare(
     // Derivation: a set with extras must be the scope's own derived set.
     const owner: DerivationOwner = { scope: target.scope, root: target.root };
     const retire: { name: string; registry: RegistrySelection }[] = [];
-    if (
-      registry &&
-      context.ownedDerived &&
-      context.selected &&
-      proposed.sets[0]?.name !== context.selected
-    )
+    if (registry && context.ownedDerived && context.selected && proposed.set !== context.selected)
       retire.push({ name: context.selected, registry });
-    const selectedSet = proposed.sets[0];
+    const selectedSet = proposed.set;
     let preview: DerivationPreview | undefined;
     if (selectedSet && !extrasEmpty(proposed)) {
       const selectedRegistry = await discoverRegistry({
@@ -566,7 +561,7 @@ async function prepare(
         home: target.home,
         ...(proposed.registry === undefined ? {} : { registry: proposed.registry }),
       });
-      const state = await derivedState(selectedRegistry.root, selectedSet.name);
+      const state = await derivedState(selectedRegistry.root, selectedSet);
       const owned =
         state?.origin.derived &&
         state.origin.derived.owner.scope === owner.scope &&
@@ -576,11 +571,11 @@ async function prepare(
       // pack/skill on a shared set converges the name before it exists).
       const base = owned
         ? (state.origin.derived.base as string | null)
-        : parseDerivedName(selectedSet.name, owner.root);
-      if (base === undefined || selectedSet.name !== derivedSetName(base, owner.root))
+        : parseDerivedName(selectedSet, owner.root);
+      if (base === undefined || selectedSet !== derivedSetName(base, owner.root))
         fail(
           "E_SET_CONFLICT",
-          `Set extras require this scope's derived set, not ${selectedSet.name}.`,
+          `Set extras require this scope's derived set, not ${selectedSet}.`,
           {
             path: snapshot.path,
             fix: `Re-run the skillex enable/disable command for this scope, or run skillex normalize --dry-run to plan the repair.`,

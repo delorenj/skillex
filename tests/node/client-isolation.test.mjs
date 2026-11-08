@@ -93,7 +93,7 @@ function fixture(t) {
   f.skill("global-only");
   f.set("team", ["alpha", "beta"]);
   f.set("smaller", ["alpha"]);
-  f.manifest(f.project, { sets: ["team"] });
+  f.manifest(f.project, { set: "team" });
   f.manifest(f.home, { skills: ["global-only"] });
   const options = {
     client: "opencode",
@@ -217,7 +217,7 @@ test("preserves JSONC siblings/comments and foreign permissions on refresh and u
   assert.match(original, /"number":1e2/);
   assert.match(original, /\/\/ The user's shell rule stays in place\./);
   assert.equal(lstatSync(path).mode & 0o777, 0o640);
-  f.manifest(f.project, { sets: ["smaller"] });
+  f.manifest(f.project, { set: "smaller" });
   ok(await isolateClient({ ...f.options, apply: true }));
   const updated = readFileSync(path, "utf8");
   assert.ok(!updated.includes('"resource":"beta"'));
@@ -277,7 +277,7 @@ test("requires project resolved set, refuses unsupported clients and conflicting
   await refusedWithoutWrites(f, { client: "claude" }, "E_CLIENT_UNSUPPORTED");
   f.manifest(f.project, { skills: ["alpha"] });
   await refusedWithoutWrites(f, {}, "E_CLIENT_SET_REQUIRED");
-  f.manifest(f.project, { sets: [{ name: "absent", optional: true }] });
+  f.manifest(f.project, { set: "absent" });
   const result = await isolateClient(f.options);
   assert.equal(result.ok, false);
   assert.equal(existsSync(f.config), false);
@@ -360,6 +360,22 @@ test("unisolate preserves newly inserted comments and works despite unrelated pr
   assert.ok(readFileSync(f.config, "utf8").includes("// Keep this comment"));
   assert.equal(readFileSync(other, "utf8"), '{"permission":"allow"}');
   assert.equal(readFileSync(global, "utf8"), "{invalid");
+});
+
+test("supported legacy global permission maps are inspected without rewriting global bytes", async (t) => {
+  const f = fixture(t);
+  const global = f.file(
+    join(f.home, ".config/opencode/opencode.json"),
+    '{"permission":{"*":"allow","external_directory":"allow"}}',
+  );
+  const before = readFileSync(global, "utf8");
+  await refusedWithoutWrites(f, { apply: true }, "E_CLIENT_PERMISSION_CONFLICT");
+  ok(await isolateClient({ ...f.options, overridePermissions: true, apply: true }));
+  assert.equal(readFileSync(global, "utf8"), before);
+  assert.deepEqual(
+    ok(await isolateClient({ ...f.options, overridePermissions: true })).changes,
+    [],
+  );
 });
 
 test("global deny and agent-specific override are conflicts, never global mutations", async (t) => {

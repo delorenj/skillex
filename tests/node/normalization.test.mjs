@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { readFileSync, rmSync, symlinkSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import {
@@ -53,6 +54,104 @@ test("normalize refuses multiple legacy sets without an explicit base", async (t
   assert.equal(readFileSync(join(f.project, ".agents/skills.json"), "utf8"), before);
 });
 
+test("normalize translates a plain single legacy set with packs and zero root changes", async (t) => {
+  const f = fixture(t);
+  for (const name of ["one", "two"]) f.skill(name);
+  f.set("min-global", ["one"]);
+  const opts = {
+    registryRoot: f.registry,
+    stateHome: join(f.root, "state"),
+    home: f.home,
+    env: {},
+  };
+  ok(await createPack("packs2", "1.0.0", opts));
+  ok(await addPackSkills("packs2@1.0.0", ["two"], opts));
+  // Holocene-shaped legacy state: the selected name is already this project's
+  // derived set (base + owner digest), the root is its symlink, packs ride on it.
+  const derived = `min-global-${createHash("sha256").update(f.project).digest("hex").slice(0, 6)}`;
+  f.set(derived, ["one", "two"]);
+  writeFileSync(
+    join(f.registry, "sets", derived, ".skillex-set.json"),
+    `${JSON.stringify(
+      {
+        schema: 1,
+        derived: {
+          owner: { scope: "project", root: f.project },
+          base: "min-global",
+          packs: ["packs2@1.0.0"],
+          skills: [],
+          removed: [],
+        },
+      },
+      null,
+      2,
+    )}\n`,
+  );
+  f.manifest(f.project, { sets: [derived], packs: ["packs2@1.0.0"] });
+  symlinkSync(join(f.registry, "sets", derived), join(f.project, ".agents/skills"));
+  const rootBefore = realpathSync(join(f.project, ".agents/skills"));
+  const result = ok(await normalizeScope(f.options));
+  assert.equal(result.manifest.set, derived);
+  assert.deepEqual(result.manifest.packs, ["packs2@1.0.0"]);
+  ok(await normalizeScope({ ...f.options, apply: true }));
+  const saved = JSON.parse(readFileSync(join(f.project, ".agents/skills.json"), "utf8"));
+  assert.equal(saved.set, derived);
+  assert.deepEqual(saved.packs, ["packs2@1.0.0"]);
+  assert.equal(saved.sets, undefined);
+  assert.equal(realpathSync(join(f.project, ".agents/skills")), rootBefore);
+  assert.deepEqual(ok(await normalizeScope(f.options)).changes, []);
+});
+
+test("normalize translates a legacy empty sets array by omitting the field", async (t) => {
+  const f = fixture(t);
+  f.skill("one");
+  f.manifest(f.project, { sets: [], inherit_global: false });
+  const result = ok(await normalizeScope(f.options));
+  assert.equal(result.manifest.set, undefined);
+  ok(await normalizeScope({ ...f.options, apply: true }));
+  const saved = JSON.parse(readFileSync(join(f.project, ".agents/skills.json"), "utf8"));
+  assert.equal("set" in saved, false);
+  assert.equal("sets" in saved, false);
+  assert.deepEqual(ok(await normalizeScope(f.options)).changes, []);
+});
+
+test("normalize refuses mixed set and sets declarations even when they match", async (t) => {
+  const f = fixture(t);
+  f.skill("one");
+  f.set("base", ["one"]);
+  f.manifest(f.project, { set: "base", sets: ["base"], inherit_global: false });
+  const before = readFileSync(join(f.project, ".agents/skills.json"), "utf8");
+  const r = await normalizeScope({ ...f.options, apply: true });
+  assert.equal(r.exit, 3);
+  assert.match(r.findings[0].message, /cannot mix/);
+  assert.equal(readFileSync(join(f.project, ".agents/skills.json"), "utf8"), before);
+});
+
+test("normalize refuses a legacy optional set rather than stripping its semantics", async (t) => {
+  const f = fixture(t);
+  f.skill("one");
+  f.set("base", ["one"]);
+  f.manifest(f.project, { sets: [{ name: "base", optional: true }], inherit_global: false });
+  const before = readFileSync(join(f.project, ".agents/skills.json"), "utf8");
+  const r = await normalizeScope({ ...f.options, apply: true });
+  assert.equal(r.exit, 3);
+  assert.match(r.findings[0].message, /optional/i);
+  assert.equal(readFileSync(join(f.project, ".agents/skills.json"), "utf8"), before);
+});
+
+test("normalize refuses array, object, and null set values without mutating the manifest", async (t) => {
+  const f = fixture(t);
+  f.skill("one");
+  for (const value of [["base"], { name: "base" }, null, ""]) {
+    f.manifest(f.project, { set: value, inherit_global: false });
+    const before = readFileSync(join(f.project, ".agents/skills.json"), "utf8");
+    const r = await normalizeScope({ ...f.options, apply: true });
+    assert.equal(r.exit, 3, JSON.stringify(value));
+    assert.match(r.findings[0].message, /set.*string|arrays, objects, null/i);
+    assert.equal(readFileSync(join(f.project, ".agents/skills.json"), "utf8"), before);
+  }
+});
+
 test("legacy multi-set grouping uses the explicitly chosen base and pack references", async (t) => {
   const f = fixture(t);
   for (const name of ["one", "two", "three"]) f.skill(name);
@@ -68,7 +167,7 @@ test("legacy multi-set grouping uses the explicitly chosen base and pack referen
   ok(await addPackSkills("addon@1.0.0", ["two", "three"], opts));
   f.manifest(f.project, { sets: ["addon", "global"], inherit_global: false });
   const result = ok(await normalizeScope({ ...f.options, baseSet: "global" }));
-  assert.match(result.manifest.sets[0], /^global-/);
+  assert.match(result.manifest.set, /^global-/);
   assert.deepEqual(result.manifest.packs, ["addon@1.0.0"]);
   assert.equal(result.manifest.skills, undefined);
 });
@@ -176,7 +275,7 @@ test("global expanded members are simplified even around a selected shared set",
   };
   ok(await createPack("pair", "1.0.0", opts));
   ok(await addPackSkills("pair@1.0.0", ["two", "three"], opts));
-  f.manifest(f.project, { sets: ["base"], skills: ["two", "three"], inherit_global: false });
+  f.manifest(f.project, { set: "base", skills: ["two", "three"], inherit_global: false });
   const result = ok(await normalizeScope(f.options));
   assert.deepEqual(result.manifest.packs, ["pair@1.0.0"]);
   assert.equal(result.manifest.skills, undefined);
@@ -195,9 +294,9 @@ test("normalize decomposes an exact captured set into explicit base and packs", 
   };
   ok(await createPack("pair", "1.0.0", opts));
   ok(await addPackSkills("pair@1.0.0", ["two", "three"], opts));
-  f.manifest(f.project, { sets: ["captured"] });
+  f.manifest(f.project, { set: "captured" });
   const result = ok(await normalizeScope({ ...f.options, baseSet: "base" }));
-  assert.match(result.manifest.sets[0], /^base-/);
+  assert.match(result.manifest.set, /^base-/);
   assert.deepEqual(result.manifest.packs, ["pair@1.0.0"]);
   ok(await normalizeScope({ ...f.options, baseSet: "base", apply: true }));
   assert.deepEqual(ok(await normalizeScope({ ...f.options, baseSet: "base" })).changes, []);
@@ -225,13 +324,13 @@ test("normalize replaces individually repeated global group by global set", asyn
   f.skill("one");
   f.skill("two");
   f.set("global", ["one", "two"]);
-  f.manifest(f.home, { sets: ["global"] });
+  f.manifest(f.home, { set: "global" });
   f.manifest(f.project, { inherit_global: true, skills: ["one", "two"] });
   const globalManifest = readFileSync(join(f.home, ".agents/skills.json"), "utf8");
   const status = await inspectStatus(f.options);
   assert.ok(status.findings.some((finding) => finding.code === "W_MANIFEST_GLOBAL_EXPANDED"));
   const r = ok(await normalizeScope(f.options));
-  assert.deepEqual(r.manifest.sets, ["global"]);
+  assert.equal(r.manifest.set, "global");
   assert.equal(r.manifest.skills, undefined);
   ok(await normalizeScope({ ...f.options, apply: true }));
   assert.equal(readFileSync(join(f.home, ".agents/skills.json"), "utf8"), globalManifest);
@@ -242,11 +341,11 @@ test("normalize deduplicates an inherited partial group without replacing global
   const f = fixture(t);
   for (const name of ["one", "two", "three"]) f.skill(name);
   f.set("global", ["one", "two"]);
-  f.manifest(f.home, { sets: ["global"] });
+  f.manifest(f.home, { set: "global" });
   f.manifest(f.project, { inherit_global: true, skills: ["one", "three"] });
   const r = ok(await normalizeScope(f.options));
   assert.deepEqual(r.manifest.skills, ["three"]);
-  assert.equal(r.manifest.sets, undefined);
+  assert.equal(r.manifest.set, undefined);
 });
 
 test("normalize refuses conflicting preview/apply and does not hide invalid references", async (t) => {

@@ -8,6 +8,11 @@
 > The resolver, schema, and their tests still require correction; do not reproduce
 > this behavior as intended design or apply a contradictory activation plan.
 
+Current Node contract and migration commands are documented in
+[Skillex pilot commands](skillex-pilot-commands.md). The canonical manifest now
+uses optional singular `set: string`; `sets` is legacy migration input only.
+The dated behavior below is retained as history, not current implementation.
+
 Implemented 2026-09-14 for [CLI Revamp](../plan/cli-revamp.md).
 Ticket: [SKRILL-11](https://plane.delo.sh/33god/projects/5aa8ec5c-3c66-49f9-b900-cca8a8446b65/issues/9f99f363-1d09-422a-a98b-8330610f4bc9).
 

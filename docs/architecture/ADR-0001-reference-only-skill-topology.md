@@ -14,8 +14,9 @@ this ADR and reversed set/pack semantics in older implementation material:
 - The **canonical skill root** is `~/.agents/skills/` globally or
   `<project>/.agents/skills/` locally. `all-skills/` owns definition bytes; it is
   not the canonical discovery root.
-- A **set replaces the root** with a symlink to the set's skill root. Sets are
-  mutually exclusive.
+- A **set replaces the root** with a symlink to the set's skill root. There is
+  only one per manifest: optional `"set": "name"` string, never a `sets` array
+  (user clarification, 2026-10-11). Omission means no selected set.
 - A **pack populates the existing root** with per-member symlinks. Packs are
   composable; ten distinct additional skills produce ten additional links.
 

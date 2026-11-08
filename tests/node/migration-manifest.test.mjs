@@ -271,7 +271,7 @@ it("translates slash references and preserves legacy empty-include selection mea
   ok(await migrate({ ...f.options, apply: true }));
   assert.deepEqual(JSON.parse(readFileSync(f.target, "utf8")), {
     inherit_global: false,
-    sets: [{ name: "tools" }],
+    set: "tools",
   });
   const resolved = ok(await resolveSelection({ ...f.options, scope: "project" }), "resolve");
   assert.deepEqual(

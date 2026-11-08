@@ -5,11 +5,6 @@ export interface SkillSelection {
   readonly name: string;
 }
 
-export interface SetSelection {
-  readonly name: string;
-  readonly optional: boolean;
-}
-
 export interface PackSelection {
   readonly name: string;
   readonly version?: string;
@@ -22,7 +17,7 @@ export interface SkillsManifest {
   readonly inheritGlobal: boolean;
   readonly registry?: string;
   readonly skills: readonly SkillSelection[];
-  readonly sets: readonly SetSelection[];
+  readonly set?: string;
   readonly packs: readonly PackSelection[];
   readonly exclude: readonly string[];
 }

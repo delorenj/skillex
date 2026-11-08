@@ -38,7 +38,8 @@ const manifestFields = [
   "scope",
   "inherit_global",
   "registry",
-  "sets",
+  "set",
+  "sets", // tolerated only in explicit legacy normalization input
   "packs",
   "skills",
   "exclude",
@@ -104,7 +105,7 @@ function legacySets(raw: Readonly<Record<string, unknown>>, path: string): Legac
   if (!Array.isArray(raw.sets))
     refused(
       path,
-      "The sets selection must be an array.",
+      "The legacy sets selection must be an array.",
       "Correct the declaration using skills.schema.json.",
     );
   const sets: LegacySet[] = [];
@@ -245,7 +246,7 @@ async function foldLegacySets(
       "The chosen base is not among this manifest's legacy sets.",
       "Choose a declared set with --base-set NAME.",
     );
-  for (const set of sets) parseManifest({ sets: [set.name] }, path);
+  for (const set of sets) parseManifest({ set: set.name }, path);
   for (const name of skills) await canonicalSkill(registry, name);
   const memberLists: (readonly string[])[] = [];
   for (const set of sets) memberLists.push(await membersOf(registry, set.name, path));
@@ -381,7 +382,7 @@ async function simplifyMembers(
     );
     for (const name of inventory.names) remaining.delete(name);
   }
-  if (target.scope === "project" && manifest.inheritGlobal && !manifest.sets.length) {
+  if (target.scope === "project" && manifest.inheritGlobal && manifest.set === undefined) {
     const { project: _project, ...globalOptions } = options;
     const global = await resolveSelection({
       ...globalOptions,
@@ -391,7 +392,7 @@ async function simplifyMembers(
     });
     if (!global.ok || !global.data) throw new SkillexError(global.exit, global.findings);
     const inherited = global.data.scopes.find((scope) => scope.scope === "global");
-    const globalSet = inherited?.manifest.sets[0]?.name;
+    const globalSet = inherited?.manifest.set;
     const inheritedNames = inherited?.bindings.map((binding) => binding.name) ?? [];
     const allExplicit = new Set(manifest.skills.map((skill) => skill.name));
     if (
@@ -399,7 +400,7 @@ async function simplifyMembers(
       inheritedNames.length > 0 &&
       inheritedNames.every((name) => allExplicit.has(name))
     ) {
-      raw.sets = [globalSet];
+      raw.set = globalSet;
       findings.push({
         code: "I_NORMALIZE_GLOBAL_SET",
         severity: "info",
@@ -473,7 +474,7 @@ async function simplifyMembers(
     if (excluded.length) raw.exclude = excluded;
     else delete raw.exclude;
   }
-  if (Array.isArray(raw.sets) && raw.sets.length === 0) delete raw.sets;
+  if (typeof raw.set !== "string" || raw.set.length === 0) delete raw.set;
   if (
     JSON.stringify(raw.skills) !== JSON.stringify(snapshot.raw?.skills) ||
     JSON.stringify(raw.packs) !== JSON.stringify(snapshot.raw?.packs)
@@ -502,21 +503,16 @@ async function inventory(
     // The declaration parses: normalization only repairs representation conflicts
     // the resolver refuses (extras on a shared set, stale derivations, collapse).
     const manifest = snapshot.manifest;
-    const selected = manifest.sets[0];
+    const selected = manifest.set;
     const extrasEmpty =
       manifest.packs.length === 0 && manifest.skills.length === 0 && manifest.exclude.length === 0;
     const owner = { scope: target.scope, root: target.root };
-    const state = selected ? await derivedState(registry, selected.name) : undefined;
+    const state = selected ? await derivedState(registry, selected) : undefined;
     const owned =
       state &&
       state.origin.derived.owner.scope === owner.scope &&
       state.origin.derived.owner.root === owner.root;
-    if (
-      selected &&
-      options.baseSet &&
-      selected.name !== options.baseSet &&
-      (!owned || state?.origin.derived.base !== options.baseSet)
-    ) {
+    if (selected && options.baseSet && selected !== options.baseSet) {
       const current = await resolveSelection({
         ...options,
         home: target.home,
@@ -539,7 +535,7 @@ async function inventory(
       const extras = [...names].filter((name) => !baseMembers.includes(name)).sort();
       const candidate: Record<string, unknown> = {
         ...passthrough(raw),
-        sets: [extras.length ? derivedSetName(options.baseSet, target.root) : options.baseSet],
+        set: extras.length ? derivedSetName(options.baseSet, target.root) : options.baseSet,
         ...(extras.length ? { skills: extras } : {}),
       };
       findings.push({
@@ -561,17 +557,18 @@ async function inventory(
     if (selected && !extrasEmpty && !owned) {
       // Extras on a shared (or not-yet-derived) set converge to this scope's
       // derived name; an already correctly-shaped name needs no rewrite.
-      if (parseDerivedName(selected.name, target.root) === undefined) {
+      if (parseDerivedName(selected, target.root) === undefined) {
         findings.push({
           code: "I_NORMALIZE_DERIVE_EXTRAS",
           severity: "info",
-          message: `Set ${selected.name} exclusively replaces this scope; its extra selections derive scope-owned set ${derivedSetName(selected.name, target.root)}.`,
+          message: `Set ${selected} exclusively replaces this scope; its extra selections derive scope-owned set ${derivedSetName(selected, target.root)}.`,
           path,
           fix: "Apply with skillex normalize --apply; the shared set and other consumers stay unchanged.",
         });
         const simplified = await simplifyMembers(snapshot, target, registry, options, findings);
+        const { sets: _sets, ...rest } = simplified;
         return {
-          candidate: { ...simplified, sets: [derivedSetName(selected.name, target.root)] },
+          candidate: { ...rest, set: derivedSetName(selected, target.root) },
           findings,
         };
       }
@@ -582,12 +579,13 @@ async function inventory(
       findings.push({
         code: "I_NORMALIZE_COLLAPSE_BASE",
         severity: "info",
-        message: `Derived set ${selected.name} no longer carries extras; the selection collapses back to ${base ?? "an empty composed scope"}.`,
+        message: `Derived set ${selected} no longer carries extras; the selection collapses back to ${base ?? "an empty composed scope"}.`,
         path,
         fix: "Apply with skillex normalize --apply; the retired derived set disappears and the shared base stays untouched.",
       });
+      const { sets: _sets, set: _set, ...rest } = raw;
       return {
-        candidate: { ...raw, ...(base === null ? { sets: [] } : { sets: [base] }) },
+        candidate: { ...rest, ...(base === null ? {} : { set: base }) },
         findings,
       };
     }
@@ -615,7 +613,7 @@ async function inventory(
             fix: "Apply with skillex normalize --apply; effective membership is preserved exactly.",
           });
           const next = passthrough(raw);
-          next.sets = [name];
+          next.set = name;
           return { candidate: next, findings };
         }
         if (matches.length > 1)
@@ -629,15 +627,15 @@ async function inventory(
       }
     }
     const simplified = await simplifyMembers(snapshot, target, registry, options, findings);
-    const base = Array.isArray(simplified.sets) ? entryName(simplified.sets[0]) : undefined;
+    const base = typeof simplified.set === "string" ? entryName(simplified.set) : undefined;
     if (
       base &&
-      base !== selected?.name &&
+      base !== selected &&
       ((Array.isArray(simplified.skills) && simplified.skills.length) ||
         (Array.isArray(simplified.packs) && simplified.packs.length) ||
         (Array.isArray(simplified.exclude) && simplified.exclude.length))
     )
-      simplified.sets = [derivedSetName(base, target.root)];
+      simplified.set = derivedSetName(base, target.root);
     return { candidate: simplified, findings };
   }
 
@@ -662,12 +660,58 @@ async function inventory(
     });
   const sets = legacySets(raw, path);
   const { packs, skills, exclude } = legacyArrays(raw, path);
-  if (sets.length === 0)
+  if (raw.set !== undefined) {
+    if (typeof raw.set !== "string" || raw.set.length === 0)
+      refused(
+        path,
+        'The corrected "set" field must be one set name string; arrays, objects, null, and empty strings are invalid.',
+        "Correct the field using skills.schema.json, or remove it so normalize can translate the legacy declaration.",
+      );
+    refused(
+      path,
+      'The legacy "sets" array cannot mix with the corrected "set" string in one manifest, even when they match.',
+      "Keep exactly one form: remove the legacy sets array, or remove the corrected set field; normalize cannot know which selection the scope should keep.",
+    );
+  }
+  if (sets.length === 0 && raw.sets === undefined)
     refused(
       path,
       "This legacy declaration has no foldable set selection for normalize to repair.",
       "Correct the declaration using skills.schema.json, or translate it with skillex migrate and an authored mapping.",
     );
+  // A plain single-entry sets array (no filters, no optional) is the corrected
+  // selection serialized in the retired shape: translate the representation and
+  // re-inventory it through the corrected path, preserving packs, skills, and
+  // any named derived set exactly. `sets: []` means no set: omit the field.
+  const plain =
+    sets.length === 1 &&
+    (sets[0] as LegacySet).optional === false &&
+    (sets[0] as LegacySet).include === undefined &&
+    (sets[0] as LegacySet).exclude === undefined;
+  if (plain || sets.length === 0) {
+    const next = passthrough(raw);
+    if (plain) next.set = (sets[0] as LegacySet).name;
+    if (packs.length) next.packs = packs;
+    if (skills.length) next.skills = skills;
+    if (exclude.length) next.exclude = exclude;
+    findings.push({
+      code: plain ? "I_NORMALIZE_LEGACY_SETS" : "I_NORMALIZE_LEGACY_EMPTY_SETS",
+      severity: "info",
+      path,
+      message: plain
+        ? `Translate the legacy sets array to the corrected "set": "${next.set}" string; every other selection is preserved.`
+        : "Translate the legacy empty sets array by omitting the field: this scope selects no set.",
+      fix: "Apply with skillex normalize --apply; this is a representation change only.",
+    });
+    const { parseFindings: _parseFindings, ...corrected } = snapshot;
+    const outcome = await inventory(
+      { ...corrected, raw: next, manifest: parseManifest(next, path) },
+      target,
+      registry,
+      options,
+    );
+    return { candidate: outcome.candidate, findings: [...findings, ...outcome.findings] };
+  }
   if (packs.length)
     refused(
       path,
@@ -709,7 +753,7 @@ async function inventory(
   const extrasEmpty =
     packs.length === 0 && folded.skillsExtras.length === 0 && folded.removed.length === 0;
   const next = passthrough(raw);
-  next.sets = extrasEmpty ? [folded.base] : [derivedSetName(folded.base, target.root)];
+  next.set = extrasEmpty ? folded.base : derivedSetName(folded.base, target.root);
   if (packs.length) next.packs = packs;
   if (folded.skillsExtras.length) next.skills = [...folded.skillsExtras];
   if (folded.removed.length) next.exclude = [...folded.removed];

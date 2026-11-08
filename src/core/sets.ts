@@ -46,7 +46,7 @@ export interface CreateSetOptions extends CompositionOptions {
 }
 
 function validateName(name: string): void {
-  parseManifest({ sets: [{ name }] }, "set name");
+  parseManifest({ set: name }, "set name");
 }
 
 async function readSet(registry: string, name: string): Promise<CompositionDetails> {

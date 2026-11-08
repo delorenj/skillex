@@ -45,7 +45,7 @@ function failure<T>(command: string, error: unknown, path: string): ResultEnvelo
 
 function compositionName(name: string, kind: "set" | "pack", path: string): void {
   try {
-    parseManifest(kind === "set" ? { sets: [name] } : { packs: [{ name }] }, path);
+    parseManifest(kind === "set" ? { set: name } : { packs: [{ name }] }, path);
   } catch {
     fail("E_COMPOSITION_NAME", `Invalid ${kind} directory name: ${name}`, {
       path,

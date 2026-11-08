@@ -259,7 +259,7 @@ test("adopted ownership allows a later set switch without losing the quarantined
     symlinkSync(target, join(selected, name));
   f.file(
     join(f.project, ".agents", "skills.json"),
-    JSON.stringify({ inherit_global: false, sets: ["pilot"] }),
+    JSON.stringify({ inherit_global: false, set: "pilot" }),
   );
   const synced = await f.sync({ ...f.options, scope: "project" });
   ok(synced);

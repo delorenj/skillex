@@ -433,7 +433,7 @@ describe("installed selection CLI", () => {
       );
       namedError(result, "E_OWNERSHIP_CHANGED");
       assert.equal(result.data, null);
-      assert.deepEqual(readManifest(catalog.project).sets, ["writers"]);
+      assert.equal(readManifest(catalog.project).set, "writers");
       assert.deepEqual(readdirSync(join(catalog.registry, "sets")), ["writers"]);
       assert.deepEqual(snapshot(catalog.root), before);
     }
@@ -463,15 +463,15 @@ describe("installed selection CLI", () => {
     assertActivated(catalog, catalog.project, ["beta", "gamma"], set);
     json(catalog, ["disable", "skill", "gamma"]);
     const masked = readManifest(catalog.project);
-    const derived = names(masked, "sets")[0];
+    const derived = masked.set;
     assert.match(derived, /^writers-/);
     assert.ok(masked.exclude.includes("gamma"));
     assertActivated(catalog, catalog.project, ["beta"], join(catalog.registry, "sets", derived));
     json(catalog, ["enable", "skill", "gamma"]);
-    assert.deepEqual(names(readManifest(catalog.project), "sets"), ["writers"]);
+    assert.equal(readManifest(catalog.project).set, "writers");
     assertActivated(catalog, catalog.project, ["beta", "gamma"], set);
     json(catalog, ["disable", "set", "writers"]);
-    assert.deepEqual(names(readManifest(catalog.project), "sets"), []);
+    assert.equal(readManifest(catalog.project).set, undefined);
     assertActivated(catalog, catalog.project, ["alpha"]);
     assert.deepEqual(snapshot(set), shared);
     assert.deepEqual(readdirSync(join(catalog.registry, "sets")), ["writers"]);

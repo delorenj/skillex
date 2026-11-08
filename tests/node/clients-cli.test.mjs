@@ -75,7 +75,7 @@ function fixture(t) {
   f.skill("alpha");
   f.skill("global-only");
   f.set("team", ["alpha"]);
-  f.manifest(f.project, { sets: ["team"] });
+  f.manifest(f.project, { set: "team" });
   const bin = f.directory(join(f.root, "bin"));
   const calls = join(f.root, "api-calls.jsonl");
   const opencode = f.file(

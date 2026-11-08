@@ -207,7 +207,6 @@ export type {
   ScopeDiscovery,
   ScopeLocation,
   ScopeName,
-  SetSelection,
   SkillOrigin,
   SkillSelection,
   SkillsManifest,
@@ -246,6 +245,26 @@ export {
   removeSetSkills,
   showSet,
 } from "./core/sets.js";
+export {
+  type AcquiredSkillSource,
+  type AcquisitionSourceInfo,
+  acquireSkillSource,
+  addSkillFromSource,
+  type GitRunner,
+  type GitRunnerCall,
+  importSkillFromSource,
+  parseSourceLocation,
+  provisionalSkillName,
+  releaseAcquired,
+  resolveTreeLocation,
+  type SkillAcquisitionOptions,
+  type SkillActivationSummary,
+  type SkillAddData,
+  type SkillAddOptions,
+  type SkillImportData,
+  type SourceLocation,
+  type TreeResolution,
+} from "./core/skill-acquisition.js";
 export { inspectVendorStatus, listVendorSources, showVendorSource } from "./core/vendor-inspect.js";
 export { syncVendorSources } from "./core/vendor-sync.js";
 export type {

@@ -401,11 +401,12 @@ describe("installed Hermes profile CLI", () => {
     world.sync();
     for (const scenario of [
       {
-        declaration: { sets: [{ name: "missing", optional: true }] },
+        declaration: { packs: [{ name: "missing", optional: true }] },
         exit: 4,
         code: "W_OPTIONAL_SKIPPED",
       },
       { declaration: { skills: ["missing"] }, exit: 3, code: "E_SKILL_MISSING" },
+      { declaration: { set: "missing" }, exit: 3, code: "E_SET_MISSING" },
       { declaration: null, exit: 2, code: "E_MANIFEST_PARSE" },
     ]) {
       if (scenario.declaration === null)

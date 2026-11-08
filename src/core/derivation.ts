@@ -76,7 +76,7 @@ export async function desiredDerivedMembers(
 ): Promise<Map<string, string>> {
   parseManifest(
     {
-      sets: inputs.base === null ? [] : [inputs.base],
+      ...(inputs.base === null ? {} : { set: inputs.base }),
       packs: inputs.packs,
       skills: inputs.skills,
       exclude: inputs.removed,
@@ -345,7 +345,7 @@ async function prepareRetirement(
   owner: DerivationOwner,
   name: string,
 ): Promise<RetirementSnapshot | undefined> {
-  parseManifest({ sets: [name] }, "derived set retirement");
+  parseManifest({ set: name }, "derived set retirement");
   const path = join(registry.root, "sets", name);
   const directories = new Map<string, Stats>();
   for (const directory of [registry.root, join(registry.root, "sets"), path]) {

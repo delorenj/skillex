@@ -260,14 +260,14 @@ it("switches composed to set, set to set, then back using the same receipt key",
   f.manifest("project", { inherit_global: false, skills: ["alpha"] });
   const composed = ok(await sync({ ...f.options, scope: "project" }));
   const key = receipt(composed).path;
-  f.manifest("project", { sets: ["tools"] });
+  f.manifest("project", { set: "tools" });
   const selected = ok(await sync({ ...f.options, scope: "project" }));
   assert.equal(lstatSync(activation(f.project)).isSymbolicLink(), true);
   assert.equal(realpathSync(activation(f.project)), first);
   assert.equal(receipt(selected).path, key);
   assert.deepEqual(Object.keys(receipt(selected).value.data.directories), []);
   assert.ok(receipt(selected).value.data.links[activation(f.project)]);
-  f.manifest("project", { sets: ["suite"] });
+  f.manifest("project", { set: "suite" });
   ok(await sync({ ...f.options, scope: "project" }));
   assert.equal(realpathSync(activation(f.project)), second);
   f.manifest("project", { inherit_global: false, skills: ["alpha"] });
@@ -363,7 +363,7 @@ it("refuses whole-root transitions when the root or any contained entry is unown
   f.manifest("project", { inherit_global: false });
   ok(await sync({ ...f.options, scope: "project" }));
   f.file(join(activation(f.project), "foreign", "keep.txt"), "preserve\n");
-  f.manifest("project", { sets: ["tools"] });
+  f.manifest("project", { set: "tools" });
   const before = snapshot(f.root);
   finding(await sync({ ...f.options, scope: "project" }), "E_ACTIVATION_CONFLICT");
   assert.deepEqual(snapshot(f.root), before);
@@ -374,10 +374,10 @@ it("refuses foreign aliases that point directly at the old set when switching pl
   f.skill("alpha");
   const first = f.set("tools", ["alpha"]);
   f.set("suite", ["alpha"]);
-  f.manifest("project", { sets: ["tools"] });
+  f.manifest("project", { set: "tools" });
   f.link(join(f.project, ".codex", "skills"), first, true);
   ok(await sync({ ...f.options, scope: "project" }));
-  f.manifest("project", { sets: ["suite"] });
+  f.manifest("project", { set: "suite" });
   const before = snapshot(f.root);
   finding(await sync({ ...f.options, scope: "project" }), "E_ACTIVATION_CONFLICT");
   assert.deepEqual(snapshot(f.root), before);
@@ -510,7 +510,7 @@ for (const mode of ["root-unpublished", "root-published"]) {
     const options = { ...f.options, scope: "project" };
     f.manifest("project", { inherit_global: false, skills: ["alpha"] });
     ok(await sync(options));
-    f.manifest("project", { sets: ["tools"] });
+    f.manifest("project", { set: "tools" });
     finding(injectSync(options, mode), "E_SYNC_PARTIAL", 4);
     const before = snapshot(f.root);
     ok(await planSync(options));
@@ -663,7 +663,7 @@ for (const kind of ["skill", "set"]) {
     ok(await sync(options));
     f.manifest(
       "project",
-      kind === "skill" ? { inherit_global: false, skills: ["beta"] } : { sets: ["tools"] },
+      kind === "skill" ? { inherit_global: false, skills: ["beta"] } : { set: "tools" },
     );
     const result = injectBoundary(options, `source-${kind}`);
     finding(result, "E_SYNC_PARTIAL", 4);
@@ -751,7 +751,7 @@ it("records actual local Git commit hashes for the catalog and set sources", asy
   );
   git(["update-ref", "refs/heads/fixture", commit]);
   git(["symbolic-ref", "HEAD", "refs/heads/fixture"]);
-  f.manifest("project", { sets: ["tools"] });
+  f.manifest("project", { set: "tools" });
   const result = ok(await sync({ ...f.options, scope: "project" }));
   assert.deepEqual(receipt(result).value.data.sources, [
     { kind: "catalog", path: join(f.registry, "all-skills"), commit, reason: null },

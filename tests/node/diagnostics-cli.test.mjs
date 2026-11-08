@@ -295,7 +295,7 @@ describe("installed diagnostics CLI", () => {
   it("reports set mode and set-owned membership through a whole-root link", (context) => {
     const catalog = catalogFor(context);
     const set = catalog.set("writers", ["gamma"]);
-    manifest(catalog.project, { sets: ["writers"], inherit_global: false });
+    manifest(catalog.project, { set: "writers", inherit_global: false });
     setup(catalog);
     const report = scope(json(catalog, ["status"]));
     assert.equal(report.mode, "set");
@@ -309,7 +309,7 @@ describe("installed diagnostics CLI", () => {
 
     const bypass = catalogFor(context);
     const directSet = bypass.set("writers", ["gamma"]);
-    manifest(bypass.project, { sets: ["writers"], inherit_global: false });
+    manifest(bypass.project, { set: "writers", inherit_global: false });
     const alias = join(bypass.project, ".claude", "skills");
     link(alias, directSet);
     setup(bypass);
@@ -407,7 +407,7 @@ describe("installed diagnostics CLI", () => {
     assert.equal(report.receipt.state, "valid");
     assert.equal(report.desired, null);
     manifest(catalog.project, {
-      sets: [{ name: "missing", optional: true }],
+      packs: [{ name: "missing", optional: true }],
       inherit_global: false,
     });
     const partial = json(catalog, ["status", "--scope", "project"], 4);
@@ -423,7 +423,7 @@ describe("installed diagnostics CLI", () => {
   it("explains inherited, set, and direct origins as well as local exclusion", (context) => {
     const catalog = catalogFor(context);
     catalog.set("writers", ["alpha", "beta"]);
-    manifest(catalog.home, { sets: ["writers"] });
+    manifest(catalog.home, { set: "writers" });
     manifest(catalog.project, { skills: ["alpha"], exclude: ["beta"] });
     setup(catalog);
     const result = json(catalog, ["explain", "alpha", "--scope", "project"], 0, "middle");

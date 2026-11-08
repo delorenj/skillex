@@ -93,6 +93,7 @@ const modernFields = [
   "scope",
   "inherit_global",
   "registry",
+  "set",
   "sets",
   "packs",
   "skills",
@@ -482,9 +483,11 @@ async function translateJson(
       context.target,
       "Unknown, slot, payload, or adapter fields cannot be silently discarded.",
     );
-  for (const key of ["skills", "sets", "packs"])
+  for (const key of ["skills", "packs"])
     if (raw[key] !== undefined && !Array.isArray(raw[key]))
       blocked(context.target, `${key} must be an array.`);
+  if (raw.sets !== undefined && !Array.isArray(raw.sets))
+    blocked(context.target, "sets must be an array.");
   const packs = (raw.packs ?? []) as unknown[];
   if (legacy && packs.length > 1)
     blocked(
@@ -509,10 +512,10 @@ async function translateJson(
         context.target,
         "Legacy additive set selections cannot map to one exclusive root replacement; run skillex normalize --dry-run to plan the exact-membership replacement.",
       );
-    const sets: unknown[] = [];
+    let set: string | undefined;
     for (const entry of raw.sets as unknown[]) {
       if (typeof entry === "string") {
-        sets.push(entry);
+        set = entry;
         continue;
       }
       if (
@@ -566,11 +569,15 @@ async function translateJson(
           context.target,
           `Filtered legacy set ${String(entry.name)} cannot filter an exclusive root replacement; run skillex normalize --dry-run to plan the exact-membership replacement.`,
         );
-      delete next.include;
-      delete next.exclude;
-      sets.push(next);
+      if (next.optional === true)
+        blocked(
+          context.target,
+          "A legacy optional set has no corrected equivalent: a set reference is required and must exist. Choose an explicit replacement.",
+        );
+      set = entry.name;
     }
-    output.sets = sets;
+    delete output.sets;
+    if (set !== undefined) output.set = set;
   }
   if (packs.length) {
     const entry = packs[0];
@@ -772,10 +779,7 @@ async function verifySelection(
   dependencies: Set<string>,
 ): Promise<void> {
   const manifest = parseManifest(raw, context.target);
-  if (
-    manifest.sets.length &&
-    (manifest.packs.length || manifest.skills.length || manifest.exclude.length)
-  )
+  if (manifest.set && (manifest.packs.length || manifest.skills.length || manifest.exclude.length))
     fail(
       "E_MIGRATION_MANIFEST_MAPPING",
       "A selected set exclusively replaces this scope's root; legacy selections alongside it cannot be translated verbatim.",
@@ -808,16 +812,16 @@ async function verifySelection(
     }
     return;
   }
-  for (const set of manifest.sets) {
-    const prefix = `sets/${set.name}/`;
+  for (const set of [manifest.set].filter((name): name is string => name !== undefined)) {
+    const prefix = `sets/${set}/`;
     if (
       context.options.apply !== true &&
       Object.keys(nameMap).some((key) => key.startsWith(prefix))
     ) {
-      dependencies.add(`composition:sets/${set.name}`);
+      dependencies.add(`composition:sets/${set}`);
       continue;
     }
-    const members = await setMembers(context.registry, set.name);
+    const members = await setMembers(context.registry, set);
     for (const name of members.names) {
       if (!members.names.includes(name))
         blocked(

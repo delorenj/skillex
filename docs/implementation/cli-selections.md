@@ -8,6 +8,11 @@
 > Do not use the old pack commands below as an activation recipe without checking
 > a dry-run against that contract. Runtime repair is not part of this doc change.
 
+Current commands write optional `set: string`, never a `sets` array. See
+[Skillex pilot commands](skillex-pilot-commands.md) for corrected activation,
+normalization, import and add behavior. The original implementation record below
+is historical.
+
 Implemented for [CLI Revamp](../plan/cli-revamp.md).
 Ticket: [SKRILL-15](https://plane.delo.sh/33god/projects/5aa8ec5c-3c66-49f9-b900-cca8a8446b65/issues/a3480478-25a3-4e26-a869-ba8e8a2cbb21).
 
