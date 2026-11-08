@@ -102,6 +102,50 @@ test("normalize translates a plain single legacy set with packs and zero root ch
   assert.deepEqual(ok(await normalizeScope(f.options)).changes, []);
 });
 
+test("fleet singleton legacy sets preserve global union, scoped membership and no-op replay", async (t) => {
+  const names = [
+    ["joe-pesci", "founder-portfolio-advisor"],
+    ["rererere", "n8n"],
+    ["n8n-specialist", "n8n"],
+    ["infra-specialist", "infra-specialist"],
+    ["morgan-finance", "automaticai-finance"],
+    ["bennett", "automaticai-executive-office"],
+    ["marge-simpson", "hr-director"],
+    ["context-director", "context-director"],
+    ["peter-griffin", "token-ops"],
+  ];
+  for (const [profile, setName] of names) {
+    await t.test(profile, async (caseContext) => {
+      const f = fixture(caseContext);
+      f.skill("global-member");
+      f.skill("role-member");
+      f.set(setName, ["role-member"]);
+      f.manifest(f.home, { skills: ["global-member"] });
+      f.manifest(f.project, { inherit_global: false, sets: [setName] });
+      const preview = ok(await normalizeScope(f.options));
+      assert.deepEqual(preview.manifest, { inherit_global: false, set: setName });
+      assert.equal(
+        preview.changes.some((change) => change.action === "write-manifest"),
+        true,
+      );
+      ok(await normalizeScope({ ...f.options, apply: true }));
+      const resolved = ok(await resolveSelection(f.options));
+      assert.deepEqual(
+        resolved.scopes
+          .find((scope) => scope.scope === "project")
+          .bindings.map((binding) => binding.name),
+        ["role-member"],
+      );
+      const global = ok(await resolveSelection({ ...f.options, scope: "global" }));
+      assert.deepEqual(
+        global.scopes[0].bindings.map((binding) => binding.name),
+        ["global-member"],
+      );
+      assert.deepEqual(ok(await normalizeScope(f.options)).changes, []);
+    });
+  }
+});
+
 test("normalize translates a legacy empty sets array by omitting the field", async (t) => {
   const f = fixture(t);
   f.skill("one");
