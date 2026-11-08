@@ -77,7 +77,7 @@ async function idleHub(item: ProfileLocalEntry): Promise<boolean> {
   return true;
 }
 
-async function hermesMetadata(item: ProfileLocalEntry): Promise<boolean> {
+export async function hermesMetadata(item: ProfileLocalEntry): Promise<boolean> {
   if (item.kind === "file") return metadataFiles.has(item.name);
   if (item.kind === "directory")
     return (
@@ -339,22 +339,35 @@ export async function assertStrictProfile(
       );
   }
   const path = join(profile.root, "config.yaml");
+  if (await externalSkillDiscovery(profile))
+    refuse(path, "Skillex-only profiles require skills.external_dirs: [].");
   const config = await entry(path);
   if (config) {
-    if (!config.info.isFile())
-      refuse(path, "Strict profile config must be a regular generated file.");
     const document = parseDocument(await readFile(path, "utf8"), { uniqueKeys: true });
-    if (document.errors.length) refuse(path, "Cannot validate strict skills configuration.");
-    const dirs: unknown = document.toJS()?.skills?.external_dirs;
     const create: unknown = document.toJS()?.skills?.create_dir;
-    if (dirs !== undefined && (!Array.isArray(dirs) || dirs.length))
-      refuse(path, "Skillex-only profiles require skills.external_dirs: [].");
     if (!(await privateCreateDir(create, profile, options)))
       refuse(
         path,
         "Skillex-only profiles require skills.create_dir to be unset or inside the profile.",
       );
   }
+  await assertBundledOptOut(profile);
+  return true;
+}
+
+/** Whether strict config still names external skill roots; refuses config strict policy cannot read. */
+export async function externalSkillDiscovery(profile: ProfileLocation): Promise<boolean> {
+  const path = join(profile.root, "config.yaml");
+  const config = await entry(path);
+  if (!config) return false;
+  if (!config.info.isFile()) refuse(path, "Strict profile config must be a regular generated file.");
+  const document = parseDocument(await readFile(path, "utf8"), { uniqueKeys: true });
+  if (document.errors.length) refuse(path, "Cannot validate strict skills configuration.");
+  const dirs: unknown = document.toJS()?.skills?.external_dirs;
+  return dirs !== undefined && (!Array.isArray(dirs) || dirs.length > 0);
+}
+
+export async function assertBundledOptOut(profile: ProfileLocation): Promise<void> {
   const optOut = await entry(join(profile.root, ".no-bundled-skills"));
   if (optOut && !optOut.info.isFile())
     refuse(optOut.path, "Bundled opt-out marker must be a regular file.");
@@ -363,7 +376,6 @@ export async function assertStrictProfile(
       join(profile.root, ".no-bundled-skills"),
       "Strict profile is missing its bundled opt-out marker.",
     );
-  return true;
 }
 
 export async function publishStrictPolicy(profile: ProfileLocation): Promise<void> {

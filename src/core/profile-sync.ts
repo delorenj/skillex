@@ -61,14 +61,14 @@ interface Desired {
   readonly origins: readonly SkillOrigin[];
   readonly winner: "global" | "project";
 }
-interface Projection {
+export interface Projection {
   readonly project: string;
   readonly desired: readonly Desired[];
   readonly scopes: readonly ResolvedScope[];
   readonly sources: readonly SourceRevision[];
   readonly findings: readonly Diagnostic[];
 }
-interface ProfileWork {
+export interface ProfileWork {
   readonly profile: ProfileLocation;
   readonly state: ProfileState;
   readonly root: Entry | undefined;
@@ -88,7 +88,7 @@ export interface ProfileInspection {
 function refused(code: Diagnostic["code"], message: string, path: string, fix: string): never {
   fail(code, message, { path, fix }, ExitCode.REFUSED);
 }
-function asFailure(error: unknown): SkillexError {
+export function asFailure(error: unknown): SkillexError {
   return error instanceof SkillexError
     ? error
     : new SkillexError(ExitCode.FAILURE, [
@@ -100,7 +100,7 @@ function asFailure(error: unknown): SkillexError {
         },
       ]);
 }
-function receiptOptions(
+export function receiptOptions(
   profile: ProfileLocation,
   options: ProfileOptions,
   scopes: readonly ResolvedScope[] = [],
@@ -129,7 +129,7 @@ function receiptOptions(
   };
 }
 
-async function resolveProjection(
+export async function resolveProjection(
   profile: ProfileLocation,
   options: ProfileOptions & { project: string },
 ): Promise<Projection> {
@@ -193,7 +193,7 @@ async function resolveProjection(
   };
 }
 
-async function observations(
+export async function observations(
   profile: ProfileLocation,
   state: ProfileState | null,
 ): Promise<{ root: Entry | undefined; entries: Map<string, Entry>; local: ProfileLocalEntry[] }> {
@@ -277,12 +277,8 @@ function readExit(findings: readonly Diagnostic[], pending = false): ExitCode {
     : ExitCode.SUCCESS;
 }
 
-async function buildWork(
-  profile: ProfileLocation,
-  state: ProfileState,
-  options: ProfileOptions & { project: string },
-): Promise<ProfileWork> {
-  const projection = await resolveProjection(profile, options);
+/** Refuse projections whose sources or canonical targets overlap the profile skills directory. */
+export function assertProjectionPlacement(profile: ProfileLocation, projection: Projection): void {
   for (const scope of projection.scopes) {
     for (const protectedRoot of [
       scope.registry.root,
@@ -304,6 +300,15 @@ async function buildWork(
         desired.target,
         "Move the profile skills directory outside canonical definitions before syncing.",
       );
+}
+
+export async function buildWork(
+  profile: ProfileLocation,
+  state: ProfileState,
+  options: ProfileOptions & { project: string },
+): Promise<ProfileWork> {
+  const projection = await resolveProjection(profile, options);
+  assertProjectionPlacement(profile, projection);
   state = await readProfileState(profile, receiptOptions(profile, options, projection.scopes));
   const observed = await observations(profile, state);
   await assertStrictProfile(
@@ -741,6 +746,73 @@ async function apply(
   }
 }
 
+/** Mutable observations shared with the caller so failures report the latest locked state. */
+export interface ProfileSyncProgress {
+  state: ProfileState | null;
+  result: ProfileShowResult | null;
+  readonly findings: Diagnostic[];
+  readonly applied: ProfileChange[];
+  readonly mark: (change: ProfileChange) => void;
+  readonly begin: () => void;
+}
+
+/**
+ * Lock-held body of profile sync. The caller must already own
+ * `skillex:profiles:v2:<skillsRoot>`; that lock is not reentrant, so this never takes it.
+ */
+export async function syncProfileLocked(
+  name: string,
+  selected: ProfileLocation,
+  options: ProfileSyncOptions,
+  progress: ProfileSyncProgress,
+): Promise<ProfileSyncResult> {
+  checkProfileSignal(options);
+  await assertProfileIdentity(selected);
+  let state = await readProfileState(selected, receiptOptions(selected, options));
+  progress.state = state;
+  if (state.data.pending) {
+    state = await recoverProfile(selected, state, options, progress.mark, progress.findings);
+    progress.state = state;
+  }
+  const work = await buildWork(selected, state, options);
+  progress.result = work.result;
+  progress.findings.push(
+    ...[...work.projection.findings, ...recoveryArtifacts(work.result.preserved)].filter(
+      (finding) => !progress.findings.some((other) => isDeepStrictEqual(other, finding)),
+    ),
+  );
+  if (work.result.changes.length) {
+    state = await apply(work, progress.mark, progress.begin);
+    progress.state = state;
+  }
+  await assertProfileIdentity(selected);
+  if (
+    await assertStrictProfile(
+      selected,
+      options,
+      (await observations(selected, state)).local,
+      new Set(work.projection.desired.map((desired) => desired.name)),
+    )
+  )
+    await publishStrictPolicy(selected);
+  const currentProfile = await discoverProfile(name, options);
+  if (currentProfile.root !== selected.root || currentProfile.skillsRoot !== selected.skillsRoot)
+    refused(
+      "E_PROFILE_ROOT_CHANGED",
+      "The profile root changed after publication.",
+      selected.root,
+      "Inspect the profile root and retained receipt before retrying.",
+    );
+  return {
+    ...work.result,
+    profile: currentProfile,
+    project: work.projection.project,
+    pending: state.data.pending !== undefined,
+    dryRun: false,
+    applied: progress.applied,
+  };
+}
+
 export async function runProfileSync(
   name: string,
   options: ProfileSyncOptions,
@@ -754,6 +826,16 @@ export async function runProfileSync(
   const mark = (change: ProfileChange) => {
     started = true;
     applied.push(change);
+  };
+  const progress: ProfileSyncProgress = {
+    state: null,
+    result: null,
+    findings,
+    applied,
+    mark,
+    begin: () => {
+      started = true;
+    },
   };
   try {
     checkProfileSignal(options);
@@ -816,54 +898,7 @@ export async function runProfileSync(
     const selected = profile;
     const output = await withLock(
       `skillex:profiles:v2:${profile.skillsRoot}`,
-      async () => {
-        checkProfileSignal(options);
-        await assertProfileIdentity(selected);
-        state = await readProfileState(selected, receiptOptions(selected, options));
-        if (state.data.pending)
-          state = await recoverProfile(selected, state, options, mark, findings);
-        work = await buildWork(selected, state, options);
-        result = work.result;
-        findings.push(
-          ...[...work.projection.findings, ...recoveryArtifacts(work.result.preserved)].filter(
-            (finding) => !findings.some((other) => isDeepStrictEqual(other, finding)),
-          ),
-        );
-        if (work.result.changes.length) {
-          state = await apply(work, mark, () => {
-            started = true;
-          });
-        }
-        await assertProfileIdentity(selected);
-        if (
-          await assertStrictProfile(
-            selected,
-            options,
-            (await observations(selected, state)).local,
-            new Set(work.projection.desired.map((desired) => desired.name)),
-          )
-        )
-          await publishStrictPolicy(selected);
-        const currentProfile = await discoverProfile(name, options);
-        if (
-          currentProfile.root !== selected.root ||
-          currentProfile.skillsRoot !== selected.skillsRoot
-        )
-          refused(
-            "E_PROFILE_ROOT_CHANGED",
-            "The profile root changed after publication.",
-            selected.root,
-            "Inspect the profile root and retained receipt before retrying.",
-          );
-        return {
-          ...work.result,
-          profile: currentProfile,
-          project: work.projection.project,
-          pending: state.data.pending !== undefined,
-          dryRun: false,
-          applied,
-        };
-      },
+      () => syncProfileLocked(name, selected, options, progress),
       options,
     );
     return makeResult("profile sync", output, {
@@ -883,6 +918,8 @@ export async function runProfileSync(
           },
         ])
       : asFailure(error);
+    if (progress.state) state = progress.state;
+    if (progress.result) result = progress.result;
     if (profile) {
       try {
         const latest = await readProfileState(profile, receiptOptions(profile, options));
