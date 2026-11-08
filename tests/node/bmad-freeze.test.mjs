@@ -41,7 +41,7 @@ function bmadSourceFixture(t, version = "6.12.1-next.0", options = {}) {
     ),
   ];
   writeFileSync(join(config, "skill-manifest.csv"), `${csvRows.join("\n")}\n`);
-  const manifest = {
+  const _manifest = {
     installation: {
       version,
       installDate: "2026-02-06T07:38:12.789Z",
@@ -235,7 +235,7 @@ it("re-freezing the same version is idempotent and changes nothing", async (t) =
   const source = bmadSourceFixture(t);
   const registry = registryFixture(t);
   ok(await freezeBmadPack(source.root, registry.options));
-  const filesOnly = (rows) => rows.filter(([path, , , kind]) => kind !== "directory");
+  const filesOnly = (rows) => rows.filter(([_path, , , kind]) => kind !== "directory");
   const before = filesOnly(snapshot(registry.root));
   const again = ok(await freezeBmadPack(source.root, registry.options));
   assert.equal(again.skillsImported, 0);

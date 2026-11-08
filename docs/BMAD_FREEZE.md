@@ -17,9 +17,9 @@ The `6.12.1-next.0` release is registered as:
   bodies imported into `all-skills/<name>/` with `.source.yaml` receipts;
   `skills/<name>` are reference-only symlinks; `commands/<client>/` are
   byte-for-byte legacy command copies.
-- **Additive reference set** `sets/bmad-6.12.1-next.0/` — exactly the pack's
-  declared membership as canonical links; enabling the set is an explicit,
-  reviewed selection step.
+- **Reference set** `sets/bmad-6.12.1-next.0/` — exactly the pack's
+  declared membership as canonical links; selecting this set replaces the
+  scope-owned root, while the pack adds member links compositionally.
 
 Registration ran through the **built CLI from the repository working tree**
 (for example `node dist/cli.js bmad freeze …`) because the installed `skillex`
@@ -194,6 +194,30 @@ green against its own canonical baselines),
   resident canonical version at a time. Retired packs live in the archive, not
   alongside the resident version.
 - Registry **URLs are identity-only** (below).
+
+## Pinned project materialization (SKRILL-27)
+
+`skillex bmad spec build bmad@<version> <runtime-root> --client claude-code --spec-path <spec.json>`
+constructs an offline, content-addressed specification. `skillex bmad plan <project> <spec.json>`
+checks the target without writing; `skillex bmad apply <project> <spec.json>` publishes
+runtime support, a recoverable ownership receipt, a project selection and native
+activation. This is source machinery, not authorization to deploy to a live host.
+
+The skill manifest identifies each canonical **subtree**, not just its `SKILL.md`:
+children in the files manifest resolve to the frozen catalog and are never
+copied into `_bmad/`. Frozen member bytes must match their baseline receipt;
+missing declared support refuses, while generated `__pycache__/*.pyc` is a
+bounded non-materialized cache. Installer metadata in `_config` is required,
+including `bmad-help.csv`; observed metadata is copied even with the default
+`declared` policy. A source install missing those files is not silently repaired.
+
+A project manifest has at most one `set` string; materialization selects an
+additive `bmad` pack, not a legacy `sets` array. `inherit_global: false` limits
+project-owned inheritance but does **not** suppress the universally available
+global selection. Authored packs and incompatible policies refuse before any
+write. Runtime files and activation links have separate exact-ownership checks;
+interrupted publication retains a journal and a retry verifies identity rather
+than adopting matching foreign bytes.
 
 ## Runtime prerequisites NOT carried by the pack
 
