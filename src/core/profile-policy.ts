@@ -119,7 +119,9 @@ export async function profileInheritsGlobal(profile: ProfileLocation): Promise<b
   // a generated regular file through assertStrictProfile before projection.
   if (!config.info.isFile() && !(config.info.isSymbolicLink() && (await stat(path)).isFile()))
     refuse(path, "Profile config must resolve to a regular file.");
-  const document = parseDocument(await readFile(path, "utf8"), { uniqueKeys: true });
+  const document = parseDocument(await readFile(path, "utf8"), {
+    uniqueKeys: true,
+  });
   if (document.errors.length) refuse(path, "Cannot validate profile skill inheritance.");
   const inherit: unknown = document.toJS()?.skills?.inherit_global;
   if (inherit !== undefined && typeof inherit !== "boolean")
@@ -195,7 +197,9 @@ export async function admitPersonalSource(
       );
   }
   const parse = async (path: string): Promise<unknown> => {
-    const doc = parseDocument(await readFile(path, "utf8"), { uniqueKeys: true });
+    const doc = parseDocument(await readFile(path, "utf8"), {
+      uniqueKeys: true,
+    });
     if (doc.errors.length) refuse(path, "Personal source identity YAML is malformed.");
     return doc.toJS();
   };
@@ -343,7 +347,9 @@ export async function assertStrictProfile(
     refuse(path, "Skillex-only profiles require skills.external_dirs: [].");
   const config = await entry(path);
   if (config) {
-    const document = parseDocument(await readFile(path, "utf8"), { uniqueKeys: true });
+    const document = parseDocument(await readFile(path, "utf8"), {
+      uniqueKeys: true,
+    });
     const create: unknown = document.toJS()?.skills?.create_dir;
     if (!(await privateCreateDir(create, profile, options)))
       refuse(
@@ -360,8 +366,11 @@ export async function externalSkillDiscovery(profile: ProfileLocation): Promise<
   const path = join(profile.root, "config.yaml");
   const config = await entry(path);
   if (!config) return false;
-  if (!config.info.isFile()) refuse(path, "Strict profile config must be a regular generated file.");
-  const document = parseDocument(await readFile(path, "utf8"), { uniqueKeys: true });
+  if (!config.info.isFile())
+    refuse(path, "Strict profile config must be a regular generated file.");
+  const document = parseDocument(await readFile(path, "utf8"), {
+    uniqueKeys: true,
+  });
   if (document.errors.length) refuse(path, "Cannot validate strict skills configuration.");
   const dirs: unknown = document.toJS()?.skills?.external_dirs;
   return dirs !== undefined && (!Array.isArray(dirs) || dirs.length > 0);

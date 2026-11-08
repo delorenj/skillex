@@ -1,11 +1,14 @@
 import type { Command } from "commander";
+import { makeResult } from "../core/result.js";
 import {
   type BmadExplainData,
   type BmadFreezeData,
   type BmadStatusData,
+  buildBmadSpecification,
   explainBmadSkill,
   freezeBmadPack,
   inspectBmadStatus,
+  materializeBmadProject,
   type RegistryOptions,
   type ResultEnvelope,
 } from "../index.js";
@@ -157,4 +160,143 @@ export function registerBmadCommands(program: Command, output: Output): void {
       const result = await explainBmadSkill(name, registryOptions(command));
       output.emit(result, result.data ? explainText(result.data) : "");
     });
+
+  bmad
+    .command("spec")
+    .description("Build a validated offline pinned BMAD installation specification.")
+    .command("build <packRef> <runtimeRoot>")
+    .description(
+      "Pin a frozen bmad pack + explicit runtime support root into a versioned, content-addressed specification JSON.",
+    )
+    .option(
+      "--client <client>",
+      "Native client adapter to include (repeatable).",
+      (value: string, previous: string[]) => [...previous, value],
+      [] as string[],
+    )
+    .option("--project-name <name>", "Explicit project name for the materialized runtime config.")
+    .option(
+      "--core <key=value>",
+      "Extra [core] config key for the materialized config.toml (repeatable).",
+      (value: string, previous: string[]) => [...previous, value],
+      [] as string[],
+    )
+    .option("--spec-path <path>", "Write the specification JSON to this path.")
+    .option(
+      "--include-observed-runtime",
+      "Also materialize _bmad/ paths observed but not declared in the source files-manifest (explicit policy; default: declared closure only).",
+    )
+    .action(async (packRef: string, runtimeRoot: string, _local, command: Command) => {
+      const opts = command.optsWithGlobals<
+        Options & {
+          client?: string[];
+          core?: string[];
+          projectName?: string;
+          specPath?: string;
+          includeObservedRuntime?: boolean;
+        }
+      >();
+      const core: Record<string, string> = {};
+      for (const entry of opts.core ?? []) {
+        const eq = entry.indexOf("=");
+        if (eq <= 0) {
+          output.emit(
+            makeResult("bmad spec build", null, {
+              exit: 2,
+              findings: [
+                {
+                  code: "E_USAGE" as never,
+                  severity: "error" as never,
+                  message: `--core expects key=value, got: ${entry}`,
+                  fix: "Pass --core document_output_language=English style pairs.",
+                },
+              ],
+            }),
+          );
+          return;
+        }
+        core[entry.slice(0, eq)] = entry.slice(eq + 1);
+      }
+      const result = await buildBmadSpecification({
+        ...registryOptions(command),
+        packRef,
+        runtimeRoot,
+        clients: opts.client ?? [],
+        ...(opts.projectName === undefined ? {} : { projectName: opts.projectName }),
+        ...(Object.keys(core).length ? { core } : {}),
+        ...(opts.specPath === undefined ? {} : { specPath: opts.specPath }),
+        ...(opts.includeObservedRuntime === undefined
+          ? {}
+          : { includeObservedRuntime: opts.includeObservedRuntime }),
+      });
+      output.emit(result, result.data ? specText(result.data) : "");
+    });
+
+  bmad
+    .command("plan <projectRoot> <specPath>")
+    .description(
+      "Validate a specification against a project and emit the desired-state graph without writing.",
+    )
+    .action(async (projectRoot: string, specPath: string, _local, command: Command) => {
+      const result = await materializeBmadProject({
+        ...registryOptions(command),
+        projectRoot,
+        specPath,
+        dryRun: true,
+        ...stateOptions(command),
+      });
+      output.emit(result, result.data ? materializeText(result.data) : "");
+    });
+
+  bmad
+    .command("apply <projectRoot> <specPath>")
+    .description(
+      "Materialize a validated specification into a project (runtime support + canonical activation).",
+    )
+    .action(async (projectRoot: string, specPath: string, _local, command: Command) => {
+      const result = await materializeBmadProject({
+        ...registryOptions(command),
+        projectRoot,
+        specPath,
+        dryRun: false,
+        ...stateOptions(command),
+      });
+      output.emit(result, result.data ? materializeText(result.data) : "");
+    });
+}
+
+function stateOptions(command: Command): { stateHome?: string; timeoutMs?: number } {
+  const { stateHome, timeoutMs } = command.optsWithGlobals<Options>();
+  const timeout = timeoutMs === undefined ? undefined : Number(timeoutMs);
+  return {
+    ...(stateHome === undefined ? {} : { stateHome }),
+    ...(timeoutMs === undefined || timeout === undefined || !Number.isFinite(timeout)
+      ? {}
+      : { timeoutMs: timeout }),
+  };
+}
+
+function specText(data: import("../index.js").BmadSpecBuildData): string {
+  const { spec } = data;
+  const lines = [
+    `BMAD specification ${spec.sources.pack.name}@${spec.sources.pack.version}`,
+    `Digest: ${spec.digest}`,
+    `Inputs digest: ${spec.sources.inputsDigest}`,
+    `Members pinned: ${spec.sources.members.length}`,
+    `Clients: ${spec.clients.map((client) => client.client).join(", ")}`,
+    `Project name: ${spec.projectConfig.projectName ?? "(default)"}`,
+    `Runtime: ${spec.sources.runtime.digest.slice(0, 19)} (${spec.sources.runtimeDeps.length} declared deps)`,
+  ];
+  if (data.specPath) lines.push(`Written: ${data.specPath}`);
+  return `${lines.join("\n")}\n`;
+}
+
+function materializeText(data: import("../index.js").BmadMaterializeData): string {
+  const lines = [
+    `${data.dryRun ? "Plan" : "Apply"} ${data.spec.sources.pack.name}@${data.spec.sources.pack.version} at ${data.projectRoot}`,
+    `Nodes: ${data.nodes.length} (create ${data.creates.length}, update ${data.updates.length}, unchanged ${data.unchanged.length})`,
+    `Receipt: ${data.receiptPath}`,
+  ];
+  if (!data.dryRun) lines.push(`Changes written: ${data.changesWritten}`);
+  return `${lines.join("\n")}\n`;
 }

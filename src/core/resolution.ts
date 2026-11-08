@@ -236,7 +236,14 @@ export async function resolveSelection(
   return resolveSelectionWithManifests(options);
 }
 
-/** Internal read-only preview: substitute only named manifests in discovered scopes. */
+/**
+ * Internal read-only preview: substitute only named manifests in discovered scopes.
+ *
+ * A `proposed` entry for a scope whose manifest is PHYSICALLY ABSENT is a planning
+ * projection: discovery allows the absent scope through, but the returned
+ * `ResolvedScope.location.exists` remains false so every later writer still treats
+ * the scope as unwritten (the existing public selection writer owns creation).
+ */
 export async function resolveSelectionWithManifests(
   options: ResolveOptions = {},
   proposed: ReadonlyMap<string, unknown> = new Map(),
@@ -248,7 +255,7 @@ export async function resolveSelectionWithManifests(
       fail("E_MANIFEST", "inheritGlobal must be boolean.", {
         fix: "Supply a boolean inheritance override or omit it to use the manifest.",
       });
-    const locations = await discoverScopes(options);
+    const locations = await discoverScopes(options, new Set(proposed.keys()));
     const read = async (path: string): Promise<SkillsManifest> => {
       const manifest = proposed.has(path)
         ? parseManifest(proposed.get(path), path)
