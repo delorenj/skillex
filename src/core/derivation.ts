@@ -11,6 +11,7 @@ import {
   newPlan,
   planDirectory,
   planLink,
+  planOwnedDeclaration,
   planUnlink,
 } from "./composition-mutation.js";
 import type {
@@ -251,6 +252,7 @@ async function buildDerivedPlan(
     };
     plan.changes.push({ action: "write-origin", path: originPath });
   }
+  await planOwnedDeclaration(plan);
   const preview: DerivationPreview = {
     registry,
     owner,

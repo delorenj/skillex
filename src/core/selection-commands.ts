@@ -593,7 +593,10 @@ async function prepare(
         ...preview.changes.map(
           (change): SelectionChange => ({
             scope: target.scope,
-            action: change.action === "write-origin" ? "derive-set" : change.action,
+            action:
+              change.action === "write-origin" || change.action === "write-owned-declaration"
+                ? "derive-set"
+                : change.action,
             path: change.path,
             ...(change.target === undefined ? {} : { target: change.target }),
           }),

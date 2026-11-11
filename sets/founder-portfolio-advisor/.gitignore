@@ -1,0 +1,4 @@
+# Managed by skillex: repo-owned set members (ADR-0002).
+# Each /<name> line declares a member whose link points into a machine-local
+# checkout. The link is generated per machine; recreate it with `skillex set add`.
+/product-engineering

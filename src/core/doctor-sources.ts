@@ -1,7 +1,13 @@
 import { readdir, readFile, realpath } from "node:fs/promises";
 import { basename, dirname, join, relative, sep } from "node:path";
 import { parse as parseToml } from "smol-toml";
-import { canonicalSkill, packInventory, setMembers, setMemberTarget } from "./composition.js";
+import {
+  canonicalSkill,
+  ownedSetDeclarations,
+  packInventory,
+  setMembers,
+  setMemberTarget,
+} from "./composition.js";
 import { isWithin } from "./content.js";
 import type { DoctorSourceInspection } from "./doctor-types.js";
 import { fail, SkillexError } from "./error.js";
@@ -9,7 +15,7 @@ import { inspectPath, requireDirectory } from "./filesystem.js";
 import { hubLintExit, lintOwnedSkill } from "./hub-lint.js";
 import { isSkillName, isVersionComponent } from "./manifest.js";
 import { readSkillMetadata } from "./metadata.js";
-import { ownedCheckout, ownedSkills } from "./owned-sources.js";
+import { ownedCheckout, ownedSkills, ownedSource } from "./owned-sources.js";
 import { verifyPack } from "./packs.js";
 import { type Diagnostic, ExitCode } from "./result.js";
 import type { RegistrySelection } from "./selection.js";
@@ -380,9 +386,17 @@ export async function inspectDoctorSources(registry: RegistrySelection): Promise
             (await inspectPath(target))?.isDirectory() &&
             (await inspectPath(join(target, "SKILL.md")))
           ) {
-            if (dirname(target) !== catalog)
+            if (dirname(target) === catalog) await canonicalSkill(registry.root, basename(target));
+            else if (
+              // A declared repo-owned set member links into its owning checkout (ADR-0002);
+              // setMemberTarget verifies the declaration and the exact owned target below.
+              !(
+                basename(dirname(dirname(path))) === "sets" &&
+                (await ownedSource(registry, name)) &&
+                (await ownedSetDeclarations(directory)).has(name)
+              )
+            )
               invariant(path, "Composition skill reference points outside the canonical catalog.");
-            else await canonicalSkill(registry.root, basename(target));
           }
         } else if (name === "SKILL.md") {
           invariant(path, "Composition contains a real skill definition.");
@@ -419,6 +433,18 @@ export async function inspectDoctorSources(registry: RegistrySelection): Promise
             .map((item) => item.name);
         for (const member of names)
           await attempt(join(path, member), () => setMemberTarget(registry.root, path, member));
+        for (const declared of await ownedSetDeclarations(path)) {
+          if (names.includes(declared)) continue;
+          findings.push({
+            code: "W_SET_OWNED_MEMBER_UNLINKED",
+            severity: "warning",
+            message: `Set ${name} declares repo-owned member ${declared}, but it has no link on this machine.`,
+            name: declared,
+            path: join(path, declared),
+            fix: `Clone and map its checkout, then run skillex set add ${name} ${declared} to generate the link.`,
+          });
+          exits.push(ExitCode.PARTIAL);
+        }
       }
     });
   }

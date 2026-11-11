@@ -9,6 +9,7 @@ import {
   realpathSync,
   rmSync,
   symlinkSync,
+  unlinkSync,
   writeFileSync,
 } from "node:fs";
 import { dirname, join, relative } from "node:path";
@@ -18,10 +19,13 @@ import {
   addSetSkills,
   createPack,
   createSet,
+  doctor,
   explainSkill,
   inspectVendorStatus,
   listSkills,
   listVendorSources,
+  removeSetSkills,
+  showSet,
   showSkill,
   sync,
   syncVendorSources,
@@ -441,14 +445,97 @@ it("refuses a vendor source that claims a linked name", async (t) => {
   failure(await syncVendorSources(f.options), "E_SOURCES_MANIFEST_INVALID", 2);
 });
 
-it("sets and packs refuse repo-owned members", async (t) => {
+it("packs still refuse repo-owned members", async (t) => {
   const f = fixture(t);
   f.hub();
   f.sources([
     { name: "heyma", repo: SSH_REPO, checkout: "HeyMa", mode: "link", skills: ["heyma"] },
   ]);
-  ok(await createSet("daily", f.options));
-  failure(await addSetSkills("daily", ["heyma"], f.options), "E_OWNED_SKILL_IN_COMPOSITION", 3);
   ok(await createPack("daily", "1.0.0", f.options));
   failure(await addPackSkills("daily", ["heyma"], f.options), "E_OWNED_SKILL_IN_COMPOSITION", 3);
+});
+
+function linkFixture(t) {
+  const f = fixture(t);
+  const owned = f.hub();
+  f.directory(join(f.registry, "all-skills", "wild"));
+  f.file(
+    join(f.registry, "all-skills", "wild", "SKILL.md"),
+    "---\nname: wild\ndescription: Wild\n---\n",
+  );
+  f.sources([
+    { name: "heyma", repo: SSH_REPO, checkout: "HeyMa", mode: "link", skills: ["heyma"] },
+  ]);
+  return { f, owned, set: join(f.registry, "sets", "daily") };
+}
+
+it("a set admits a repo-owned hub through a declared, gitignored member link", async (t) => {
+  const { f, owned, set } = linkFixture(t);
+  ok(await createSet("daily", f.options));
+  ok(await addSetSkills("daily", ["wild", "heyma"], f.options));
+  assert.equal(realpathSync(join(set, "heyma")), realpathSync(owned.hub));
+  assert.equal(readlinkSync(join(set, "wild")), "../../all-skills/wild");
+  const ignore = readFileSync(join(set, ".gitignore"), "utf8");
+  assert.match(ignore, /^\/heyma$/m);
+  assert.doesNotMatch(ignore, /wild/);
+  const shown = ok(await showSet("daily", f.options));
+  assert.deepEqual(
+    shown.set.skills.map((skill) => [skill.name, skill.path]),
+    [
+      ["heyma", realpathSync(owned.hub)],
+      ["wild", realpathSync(join(f.registry, "all-skills", "wild"))],
+    ],
+  );
+  // Idempotent: a repeated add plans nothing.
+  assert.deepEqual(ok(await addSetSkills("daily", ["heyma"], f.options)).changes, []);
+  // Doctor accepts the declared link into the owning checkout.
+  const checked = await doctor({ ...f.options, sourcesOnly: true });
+  assert.ok(
+    !checked.findings.some((item) => item.path?.startsWith(set) && item.severity === "error"),
+    JSON.stringify(checked.findings, null, 2),
+  );
+});
+
+it("a set selection activates its repo-owned member", async (t) => {
+  const { f, owned } = linkFixture(t);
+  ok(await createSet("daily", f.options));
+  ok(await addSetSkills("daily", ["heyma", "wild"], f.options));
+  f.manifest(f.project, { inherit_global: false, set: "daily" });
+  ok(await sync({ ...f.options, scope: "project" }));
+  const activation = join(f.project, ".agents", "skills");
+  assert.equal(realpathSync(join(activation, "heyma")), realpathSync(owned.hub));
+  assert.ok(existsSync(join(activation, "wild", "SKILL.md")));
+});
+
+it("removing a repo-owned set member drops its declaration", async (t) => {
+  const { f, set } = linkFixture(t);
+  ok(await createSet("daily", f.options));
+  ok(await addSetSkills("daily", ["heyma", "wild"], f.options));
+  ok(await removeSetSkills("daily", ["heyma"], f.options));
+  assert.equal(existsSync(join(set, "heyma")), false);
+  assert.doesNotMatch(readFileSync(join(set, ".gitignore"), "utf8"), /^\/heyma$/m);
+});
+
+it("refuses an undeclared link into an owning checkout", async (t) => {
+  const { f, owned, set } = linkFixture(t);
+  ok(await createSet("daily", f.options));
+  symlinkSync(relative(set, owned.hub), join(set, "heyma"));
+  failure(await showSet("daily", f.options), "E_OWNED_MEMBER_UNDECLARED", 3);
+});
+
+it("a declared member unlinked on this machine keeps its declaration and is regenerated", async (t) => {
+  const { f, owned, set } = linkFixture(t);
+  ok(await createSet("daily", f.options));
+  ok(await addSetSkills("daily", ["heyma"], f.options));
+  // Another machine: the committed declaration arrives, the gitignored link does not.
+  unlinkSync(join(set, "heyma"));
+  ok(await addSetSkills("daily", ["wild"], f.options));
+  assert.match(readFileSync(join(set, ".gitignore"), "utf8"), /^\/heyma$/m);
+  const checked = await doctor({ ...f.options, sourcesOnly: true });
+  assert.ok(
+    checked.findings.some((item) => item.code === "W_SET_OWNED_MEMBER_UNLINKED"),
+    JSON.stringify(checked.findings, null, 2),
+  );
+  ok(await addSetSkills("daily", ["heyma"], f.options));
+  assert.equal(realpathSync(join(set, "heyma")), realpathSync(owned.hub));
 });

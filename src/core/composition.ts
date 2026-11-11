@@ -1,5 +1,5 @@
 import { readdir, readFile, realpath } from "node:fs/promises";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { rcompare, valid } from "semver";
 import { parse as parseToml } from "smol-toml";
 import { fail } from "./error.js";
@@ -11,11 +11,14 @@ import { ExitCode } from "./result.js";
 import type { PackSelection, ResolvedPack } from "./selection.js";
 
 export interface CanonicalOptions {
-  /** Resolving a set or pack member: repo-owned names are refused in phase 1 (ADR-0002 §4). */
+  /**
+   * Resolving a set or pack member. Sets admit repo-owned hubs through a per-machine,
+   * gitignored member link (ADR-0002 phase 2 for sets); packs still refuse them.
+   */
   readonly composition?: "set" | "pack";
 }
 
-/** Phase 1: committed set and pack link farms cannot reference a machine-local checkout. */
+/** Packs: committed pack link farms cannot reference a machine-local checkout. */
 export function refuseOwnedMember(name: string, kind: "set" | "pack", path?: string): never {
   fail(
     "E_OWNED_SKILL_IN_COMPOSITION",
@@ -23,10 +26,70 @@ export function refuseOwnedMember(name: string, kind: "set" | "pack", path?: str
     {
       name,
       ...(path === undefined ? {} : { path }),
-      fix: `Select ${name} through a manifest's skills list; sets and packs reference all-skills/ definitions only until ADR-0002 phase 2.`,
+      fix: `Select ${name} through a manifest's skills list or a set; packs reference all-skills/ definitions only.`,
     },
     ExitCode.REFUSED,
   );
+}
+
+/**
+ * A set's repo-owned members are declared in the set's own `.gitignore`, one `/<name>` line
+ * each. The committed line is the membership record; the link it ignores points into a
+ * machine-local checkout, so it is generated per machine and never committed.
+ */
+export const OWNED_SET_DECLARATION_FILE = ".gitignore";
+const OWNED_SET_HEADER = [
+  "# Managed by skillex: repo-owned set members (ADR-0002).",
+  "# Each /<name> line declares a member whose link points into a machine-local",
+  "# checkout. The link is generated per machine; recreate it with `skillex set add`.",
+];
+
+function declarationLine(line: string): string | undefined {
+  const match = /^\/([^/\s]+)$/.exec(line.trim());
+  return match && isSkillName(match[1]) ? match[1] : undefined;
+}
+
+/** Repo-owned member names a set declares. Absence declares none. */
+export async function ownedSetDeclarations(setPath: string): Promise<Set<string>> {
+  const path = join(setPath, OWNED_SET_DECLARATION_FILE);
+  const info = await inspectPath(path);
+  if (!info) return new Set();
+  if (!info.isFile()) {
+    fail(
+      "E_NONCANONICAL_REFERENCE",
+      `Set owned-member declaration must be a real file: ${path}`,
+      { path, fix: "Replace it with the regular file skillex set add writes." },
+      ExitCode.REFUSED,
+    );
+  }
+  const names = new Set<string>();
+  for (const line of (await readFile(path, "utf8")).split("\n")) {
+    const name = declarationLine(line);
+    if (name) names.add(name);
+  }
+  return names;
+}
+
+/**
+ * The declaration file a set needs for exactly `owned`, or undefined when the current file
+ * already says that. Lines that are not member declarations are preserved verbatim.
+ */
+export async function ownedSetDeclarationBytes(
+  setPath: string,
+  owned: readonly string[],
+): Promise<string | undefined> {
+  const path = join(setPath, OWNED_SET_DECLARATION_FILE);
+  const info = await inspectPath(path);
+  const current = info?.isFile() ? await readFile(path, "utf8") : undefined;
+  const declared = current === undefined ? new Set<string>() : await ownedSetDeclarations(setPath);
+  const wanted = [...new Set(owned)].sort();
+  if (wanted.length === declared.size && wanted.every((name) => declared.has(name)))
+    return undefined;
+  const foreign = (current ?? "")
+    .split("\n")
+    .filter((line) => line.trim() !== "" && !declarationLine(line))
+    .filter((line) => !OWNED_SET_HEADER.includes(line));
+  return `${[...OWNED_SET_HEADER, ...foreign, ...wanted.map((name) => `/${name}`)].join("\n")}\n`;
 }
 
 /**
@@ -48,7 +111,7 @@ export async function canonicalSkill(
   await requireDirectory(join(root, "all-skills"), "E_NO_REGISTRY");
   const owner = await ownedSource(registry, name);
   if (owner) {
-    if (options.composition) refuseOwnedMember(name, options.composition);
+    if (options.composition === "pack") refuseOwnedMember(name, options.composition);
     if (await inspectPath(join(root, "all-skills", name)))
       fail(
         "E_DIVERGENT_CANONICAL_NAME",
@@ -139,10 +202,24 @@ export async function setMemberTarget(
       {
         path,
         name,
-        fix: "Repair the link to the matching all-skills directory, or exclude it from this set.",
+        fix: "Repair the link to the matching all-skills directory or owning checkout, or exclude it from this set.",
       },
       ExitCode.REFUSED,
     );
+  }
+  if (target === expected && (await ownedSource(registry, name))) {
+    if (!(await ownedSetDeclarations(setPath)).has(name)) {
+      fail(
+        "E_OWNED_MEMBER_UNDECLARED",
+        `Repo-owned set member ${name} is not declared in the set's ${OWNED_SET_DECLARATION_FILE}.`,
+        {
+          path,
+          name,
+          fix: `Add /${name} to ${join(setPath, OWNED_SET_DECLARATION_FILE)} or remove the link, then rerun skillex set add ${basename(setPath)} ${name}; an undeclared link into a machine-local checkout would be committed.`,
+        },
+        ExitCode.REFUSED,
+      );
+    }
   }
   if (target !== expected) {
     fail(

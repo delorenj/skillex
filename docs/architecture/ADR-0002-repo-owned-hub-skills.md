@@ -131,6 +131,11 @@ skills = ["heyma"]     # the hub; directory name must equal the skill name
   committed and a committed link into another repo is machine-specific.
   **Phase 2:** packs list member names in `pack.toml` and generate their link
   farms per machine (gitignored), so a pack can mix hubs and wild skills.
+  **Phase 2 for sets (implemented 2026-11-10):** a set declares each owned member
+  as a `/<name>` line in its own committed `.gitignore`; the member link into the
+  checkout is generated per machine and ignored by that same line, so membership
+  is committed and the machine path never is. See
+  [link sources](../implementation/link-sources.md). Packs remain phase 1.
 
 ### 5. Answering ADR-0001's objection to Option C
 

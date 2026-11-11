@@ -78,9 +78,22 @@ receipt is rewritten for a link change. The owning repo's checkout root is a
 forbidden receipt root like the catalog itself; a project that is the owning
 repository still activates its own hub through an ordinary relative link.
 
-Sets and packs refuse repo-owned members with
-`E_OWNED_SKILL_IN_COMPOSITION` (phase 1; phase 2 generates their link farms per
-machine). Select hubs through a manifest's `skills:` list.
+Sets admit repo-owned hubs (ADR-0002 phase 2 for sets, 2026-11-10).
+`skillex set add <set> <hub>` writes two things: a `/<hub>` line in the set's
+own `.gitignore`, which is the committed membership record, and a relative link
+into the resolved checkout, which is machine-local and therefore ignored by
+that line. The declaration is written before the link, so git never sees the
+link as committable content. Every set read verifies that an owned member's
+link is declared (`E_OWNED_MEMBER_UNDECLARED` otherwise) and resolves to the
+owner's exact hub. A declared member with no link on this machine (its checkout
+is absent, or the link was never generated after a clone) keeps its
+declaration through unrelated set edits; `doctor --sources-only` reports
+`W_SET_OWNED_MEMBER_UNLINKED`, and re-running `skillex set add <set> <hub>`
+generates the link. `skillex set remove` drops both. Derived sets follow the
+same rule.
+
+Packs still refuse repo-owned members with `E_OWNED_SKILL_IN_COMPOSITION`:
+`pack.toml` member names plus a per-machine link farm remain future work.
 
 ## Vendor commands and link sources
 

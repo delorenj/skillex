@@ -22,7 +22,8 @@ export interface CompositionChange {
     | "create-link"
     | "remove-link"
     | "write-manifest"
-    | "write-origin";
+    | "write-origin"
+    | "write-owned-declaration";
   readonly path: string;
   readonly target?: string;
 }

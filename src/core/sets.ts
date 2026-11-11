@@ -11,6 +11,7 @@ import {
   newPlan,
   planDirectory,
   planLink,
+  planOwnedDeclaration,
   planUnlink,
   requestedSkills,
 } from "./composition-mutation.js";
@@ -201,6 +202,7 @@ async function prepareSet(
       await planLink(plan, join(path, member), target);
     else if (operation === "remove") await planUnlink(plan, join(path, member), target);
   }
+  await planOwnedDeclaration(plan, operation === "remove" ? names : []);
   return plan;
 }
 

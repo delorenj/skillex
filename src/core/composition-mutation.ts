@@ -13,7 +13,12 @@ import {
   unlink,
 } from "node:fs/promises";
 import { basename, dirname, join, relative } from "node:path";
-import { canonicalSkill } from "./composition.js";
+import {
+  canonicalSkill,
+  OWNED_SET_DECLARATION_FILE,
+  ownedSetDeclarationBytes,
+  ownedSetDeclarations,
+} from "./composition.js";
 import type {
   CompositionChange,
   CompositionDetails,
@@ -24,6 +29,7 @@ import { fail, SkillexError } from "./error.js";
 import { inspectPath } from "./filesystem.js";
 import { withLock } from "./lock.js";
 import { parseManifest } from "./manifest.js";
+import { ownedSource } from "./owned-sources.js";
 import { type Diagnostic, ExitCode, makeResult, type ResultEnvelope } from "./result.js";
 import type { RegistrySelection } from "./selection.js";
 
@@ -48,6 +54,7 @@ export interface CompositionPlan {
   readonly links: Map<string, LinkIdentity>;
   manifest?: CompositionDocument;
   origin?: CompositionDocument;
+  ownedDeclaration?: CompositionDocument;
 }
 
 export function compositionError<T>(command: string, error: unknown): ResultEnvelope<T | null> {
@@ -160,6 +167,36 @@ export async function planLink(plan: CompositionPlan, path: string, target: stri
     plan.changes.push({ action: "create-link", path, target });
 }
 
+/**
+ * Sets: plan the `.gitignore` that declares exactly the repo-owned members of the planned
+ * composition. Call after the composition's desired skills are final.
+ */
+export async function planOwnedDeclaration(
+  plan: CompositionPlan,
+  dropped: readonly string[] = [],
+): Promise<void> {
+  if (plan.composition.kind !== "set") return;
+  const owned: string[] = [];
+  for (const skill of plan.composition.skills)
+    if (await ownedSource(plan.registry, skill.name)) owned.push(skill.name);
+  // A declared member whose link is absent on this machine (no checkout here, or the link not
+  // yet generated) stays declared: one machine's gap never erases the committed membership.
+  for (const name of await ownedSetDeclarations(plan.composition.path))
+    if (!dropped.includes(name) && !(await inspectPath(join(plan.composition.path, name))))
+      owned.push(name);
+  const text = await ownedSetDeclarationBytes(plan.composition.path, owned);
+  if (text === undefined) return;
+  const path = join(plan.composition.path, OWNED_SET_DECLARATION_FILE);
+  const info = await inspectPath(path);
+  if (info && !info.isFile()) conflict(path, "Set owned-member declaration must be a real file.");
+  plan.ownedDeclaration = {
+    path,
+    bytes: Buffer.from(text),
+    ...(info ? { before: { bytes: await readFile(path), info } } : {}),
+  };
+  plan.changes.push({ action: "write-owned-declaration", path });
+}
+
 export async function planUnlink(
   plan: CompositionPlan,
   path: string,
@@ -257,6 +294,12 @@ async function saveManifest(plan: CompositionPlan, changed: () => void): Promise
   await saveDocument(plan, manifest, "pack declaration", changed);
 }
 
+async function saveOwnedDeclaration(plan: CompositionPlan, changed: () => void): Promise<void> {
+  const declaration = plan.ownedDeclaration;
+  if (!declaration) return;
+  await saveDocument(plan, declaration, "set owned-member declaration", changed);
+}
+
 async function saveOrigin(plan: CompositionPlan, changed: () => void): Promise<void> {
   const origin = plan.origin;
   if (!origin) return;
@@ -292,6 +335,11 @@ async function apply(
       wrote = true;
     });
     await saveOrigin(plan, () => {
+      wrote = true;
+    });
+    // Declare repo-owned members before their links exist, so a generated link into a
+    // machine-local checkout is never visible to git as committable content.
+    await saveOwnedDeclaration(plan, () => {
       wrote = true;
     });
     for (const change of plan.changes.filter((change) => change.action === "create-link")) {
