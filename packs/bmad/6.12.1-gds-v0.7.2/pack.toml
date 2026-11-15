@@ -1,0 +1,59 @@
+[pack]
+name = "bmad"
+version = "6.12.1-gds-v0.7.2"
+description = "BMAD 6.12.1-gds-v0.7.2 legacy skills/commands frozen from /home/delorenj/.hermes/profiles/tolt-pm/cache/scratch/tolt-120-gds-freeze-stage (reference-only pack; canonical bytes live in all-skills/)."
+
+[freeform]
+skills = [ "gds-agent-game-architect", "gds-agent-game-designer", "gds-agent-game-dev", "gds-agent-game-solo-dev", "gds-agent-tech-writer", "gds-brainstorm-game", "gds-create-game-brief", "gds-domain-research", "gds-create-narrative", "gds-gdd", "gds-prd", "gds-ux", "gds-check-implementation-readiness", "gds-create-epics-and-stories", "gds-game-architecture", "gds-generate-project-context", "gds-code-review", "gds-correct-course", "gds-create-story", "gds-dev-story", "gds-investigate", "gds-retrospective", "gds-sprint-planning", "gds-sprint-status", "gds-e2e-scaffold", "gds-performance-test", "gds-playtest-plan", "gds-test-automate", "gds-test-design", "gds-test-framework", "gds-test-review", "gds-document-project", "gds-quick-dev" ]
+
+[source]
+type = "bmad-freeze"
+bmad_version = "6.12.1"
+source_root = "/home/delorenj/.hermes/profiles/tolt-pm/cache/scratch/tolt-120-gds-freeze-stage"
+installation_version = "6.12.1"
+install_date = "2026-10-01T23:29:23.906Z"
+last_updated = "2026-10-05T20:34:02.052Z"
+skill_manifest_sha256 = "sha256:e71df5043b42779e96b22b5b03f125dcd688a5c1066ad6a49f888aa2c181d7a2"
+files_manifest_sha256 = "sha256:267ff6c26c7e835f6be3367c1dbe142e49410baf7a642a858093892f0ceee6e7"
+files_manifest_declared = 660
+files_manifest_missing = 659
+commands = []
+prerequisites = [ "Project runtime assets under {project-root}/_bmad (scripts, _config, config.toml, custom/) are NOT carried by this pack.", "Several frozen skills and commands reference {project-root}/_bmad at runtime; install or restore the matching BMAD tree in the consuming project." ]
+
+[[source.modules]]
+name = "bmad-loop"
+version = "v0.13.1"
+source = "external"
+repo_url = "https://github.com/bmad-code-org/bmad-loop"
+sha = "4ea247f46610821bdb5b7dcccf42d09c81e66625"
+
+[[source.modules]]
+name = "bmb"
+version = "v2.2.2"
+source = "external"
+repo_url = "https://github.com/bmad-code-org/bmad-builder"
+sha = "4a1422274a2acb0fb0ec0511753da6263948f072"
+
+[[source.modules]]
+name = "bmm"
+version = "6.12.1"
+source = "built-in"
+
+[[source.modules]]
+name = "cis"
+version = "v0.3.2"
+source = "external"
+repo_url = "https://github.com/bmad-code-org/bmad-module-creative-intelligence-suite"
+sha = "97298b22fee1c7e482710d3a8414adb5cfccccd9"
+
+[[source.modules]]
+name = "core"
+version = "6.12.1"
+source = "built-in"
+
+[[source.modules]]
+name = "gds"
+version = "v0.7.2"
+source = "external"
+repo_url = "https://github.com/bmad-code-org/bmad-module-game-dev-studio.git"
+sha = "2486f5f5f3b8870baa6cee4615a870c0330f441c"

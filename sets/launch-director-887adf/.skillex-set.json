@@ -1,0 +1,24 @@
+{
+  "schema": 1,
+  "derived": {
+    "owner": {
+      "scope": "project",
+      "root": "/home/delorenj/.hermes/profiles/tolt-launch-director/.skillex-selection"
+    },
+    "base": "launch-director",
+    "packs": [],
+    "skills": [
+      "gds-create-game-brief",
+      "gds-gdd",
+      "gds-create-epics-and-stories",
+      "gds-create-story",
+      "gds-sprint-status",
+      "gds-check-implementation-readiness",
+      "gds-correct-course",
+      "gds-retrospective",
+      "gds-game-architecture",
+      "gds-playtest-plan"
+    ],
+    "removed": []
+  }
+}
