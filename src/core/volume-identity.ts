@@ -39,7 +39,12 @@ function runCommand(command: string, args: readonly string[]): string | null {
 }
 
 function darwin(path: string, run: VolumeSources["run"]): string | undefined {
-  const plist = run("/usr/sbin/diskutil", ["info", "-plist", path]);
+  // `diskutil info` takes a device node or a mount point, not an arbitrary path
+  // ("Could not find disk"), so ask `df` which volume holds the path first.
+  const df = run("/bin/df", ["-P", path]);
+  const device = df?.split("\n")[1]?.split(/\s+/u)[0];
+  if (!device?.startsWith("/dev/")) return undefined;
+  const plist = run("/usr/sbin/diskutil", ["info", "-plist", device]);
   const value = /<key>VolumeUUID<\/key>\s*<string>([^<]+)<\/string>/u.exec(plist ?? "")?.[1];
   return value !== undefined && UUID.test(value) ? value.toUpperCase() : undefined;
 }

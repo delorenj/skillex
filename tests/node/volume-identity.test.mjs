@@ -26,21 +26,30 @@ const plist = (uuid) =>
 
 afterEach(() => setVolumeResolver(undefined));
 
-it("macOS: reads the APFS VolumeUUID from diskutil, upper-cased", () => {
+it("macOS: df names the device, diskutil reads its APFS VolumeUUID, upper-cased", () => {
   const calls = [];
   const run = (command, args) => {
     calls.push([command, ...args]);
-    return plist(APFS.toLowerCase());
+    return command === "/bin/df"
+      ? "Filesystem 512-blocks Used Available Capacity Mounted on\n/dev/disk3s5 1942700360 897724248 996205024 48% /System/Volumes/Data\n"
+      : plist(APFS.toLowerCase());
   };
   assert.equal(resolveVolumeUuid("/Users/x/.agents", { platform: "darwin", run }), APFS);
-  assert.deepEqual(calls[0], ["/usr/sbin/diskutil", "info", "-plist", "/Users/x/.agents"]);
+  assert.deepEqual(calls, [
+    ["/bin/df", "-P", "/Users/x/.agents"],
+    ["/usr/sbin/diskutil", "info", "-plist", "/dev/disk3s5"],
+  ]);
+  for (const bad of [() => null, () => "Filesystem\nmap auto_home 0 0 0 0% /home\n"])
+    assert.equal(
+      resolveVolumeUuid("/x", { platform: "darwin", run: bad }),
+      undefined,
+      "an unreadable volume falls back to st_dev",
+    );
   assert.equal(
-    resolveVolumeUuid("/x", { platform: "darwin", run: () => null }),
-    undefined,
-    "a failed diskutil falls back to st_dev",
-  );
-  assert.equal(
-    resolveVolumeUuid("/x", { platform: "darwin", run: () => "<dict></dict>" }),
+    resolveVolumeUuid("/x", {
+      platform: "darwin",
+      run: (command) => (command === "/bin/df" ? "h\n/dev/disk1s1 1 1 1 1% /\n" : "<dict></dict>"),
+    }),
     undefined,
   );
 });
