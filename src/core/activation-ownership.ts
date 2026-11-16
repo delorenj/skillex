@@ -104,20 +104,36 @@ export function matches(item: Entry | undefined, expected: EntryIdentity): boole
   );
 }
 
+function stripKeys<T>(value: T, keys: ReadonlySet<string>): T {
+  if (Array.isArray(value)) return value.map((item) => stripKeys(item, keys)) as T;
+  if (typeof value === "object" && value !== null)
+    return Object.fromEntries(
+      Object.entries(value)
+        .filter(([key]) => !keys.has(key))
+        .map(([key, item]) => [key, stripKeys(item, keys)]),
+    ) as T;
+  return value;
+}
+const VOLUME_KEYS: ReadonlySet<string> = new Set(["volumeUuid"]);
+const DEVICE_KEYS: ReadonlySet<string> = new Set(["volumeUuid", "dev"]);
+
 /**
  * Structural copy of receipt data without `volumeUuid`. Migration and cutover compare receipt
  * ownership against identities captured without a volume id; the id is a refinement of `dev`,
  * not a different claim, so those comparisons ignore it.
  */
 export function sansVolume<T>(value: T): T {
-  if (Array.isArray(value)) return value.map((item) => sansVolume(item)) as T;
-  if (typeof value === "object" && value !== null)
-    return Object.fromEntries(
-      Object.entries(value)
-        .filter(([key]) => key !== "volumeUuid")
-        .map(([key, item]) => [key, sansVolume(item)]),
-    ) as T;
-  return value;
+  return stripKeys(value, VOLUME_KEYS);
+}
+
+/**
+ * Structural copy of receipt data without `volumeUuid` and `dev`: the device hints that a
+ * renumbering or a legacy record makes stale. Plans compare with this so a stale hint alone is
+ * not drift (read-only commands stay clean); when a write happens for any real reason it carries
+ * the refreshed identities, which is how a legacy receipt is upgraded.
+ */
+export function sansDevice<T>(value: T): T {
+  return stripKeys(value, DEVICE_KEYS);
 }
 
 /** True when a matching entry's receipt record is stale (renumbered device or no volume id yet). */

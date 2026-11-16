@@ -14,6 +14,7 @@ import {
   refuse,
   replaceOwnership,
   requireIdentity,
+  sansDevice,
   validateData,
   within,
 } from "./activation-ownership.js";
@@ -448,8 +449,9 @@ async function buildScope(
       refuse(path, "The activation receipt does not own the current entry.", "E_OWNERSHIP_CHANGED");
     else if (needsUpgrade(actual, expected)) {
       // Same inode on the same volume under a renumbered device (or a legacy dev-only record):
-      // carry the fresh volume-keyed identity so this plan's receipt write upgrades it.
-      // Read-only commands never reach a write, so `status`/`show` leave the receipt alone.
+      // carry the fresh volume-keyed identity so the next receipt write upgrades it. A stale
+      // hint alone is not drift (see sansDevice), so nothing is written just for this, and
+      // read-only commands never write.
       if (expected.kind === "directory") directories[path] = recordIdentity(actual);
       else links[path] = recordIdentity(actual);
     }
@@ -616,14 +618,16 @@ async function buildScope(
   if (
     changes.length ||
     (snapshot.document &&
-      JSON.stringify({
-        ...currentData,
-        sources: settledRevisions(
-          sources,
-          rawData.sources,
-          new Set(registries.map((registry) => join(registry.root, "all-skills"))),
-        ),
-      }) !== JSON.stringify(withoutPending(rawData)))
+      JSON.stringify(
+        sansDevice({
+          ...currentData,
+          sources: settledRevisions(
+            sources,
+            rawData.sources,
+            new Set(registries.map((registry) => join(registry.root, "all-skills"))),
+          ),
+        }),
+      ) !== JSON.stringify(sansDevice(withoutPending(rawData))))
   )
     changes.push(change(scope.scope, "write-receipt", snapshot.path));
   return {

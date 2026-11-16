@@ -107,7 +107,7 @@ function fixture(t) {
   const profile = directory(join(hermesRoot, "profiles", "work"));
   directory(join(profile, "skills"));
   directory(join(project, ".git"));
-  for (const name of ["alpha", "beta"])
+  for (const name of ["alpha", "beta", "gamma"])
     file(join(registry, "all-skills", name, "SKILL.md"), `# ${name}\n`);
   file(join(home, ".agents", "skills.json"), JSON.stringify({ skills: ["alpha"] }));
   file(
@@ -155,7 +155,15 @@ it("a new profile receipt records volumeUuid next to dev and ino", async (t) => 
   assert.equal((await showProfile("work", f.options)).exit, 0);
 });
 
-it("renumbered dev on the same volume UUID is accepted, then the receipt is refreshed on apply only", async (t) => {
+/** A real selection change, so the next sync has a reason to write the receipt. */
+function selectGamma(f) {
+  writeFileSync(
+    join(f.project, ".agents", "skills.json"),
+    JSON.stringify({ inherit_global: true, skills: ["beta", "gamma"] }),
+  );
+}
+
+it("renumbered dev on the same volume UUID is accepted and is not drift; a real write refreshes it", async (t) => {
   const f = fixture(t);
   setVolumeResolver(() => APFS);
   ok(await syncProfile("work", f.options));
@@ -166,17 +174,22 @@ it("renumbered dev on the same volume UUID is accepted, then the receipt is refr
     if (identity) identity.dev = renumbered;
   });
   const before = readFileSync(path, "utf8");
-  // Read-only: no refusal and no write.
+  // Read-only and idle: no refusal, no drift, no write.
   const shown = await showProfile("work", f.options);
-  assert.notEqual(shown.exit, 3, JSON.stringify(shown.findings));
+  assert.equal(shown.exit, 0, JSON.stringify(shown.findings));
   assert.equal(readFileSync(path, "utf8"), before, "show must not upgrade the receipt");
+  assert.deepEqual(ok(await syncProfile("work", { ...f.options, dryRun: true })).changes, []);
+  assert.equal(readFileSync(path, "utf8"), before, "dry run must not upgrade the receipt");
+  // A real change writes the receipt with the refreshed identities for every entry.
+  selectGamma(f);
   const preview = ok(await syncProfile("work", { ...f.options, dryRun: true }));
   assert.ok(preview.changes.some((c) => c.action === "write-receipt"));
-  assert.equal(readFileSync(path, "utf8"), before, "dry run must not upgrade the receipt");
+  assert.equal(readFileSync(path, "utf8"), before, "preview never writes");
   ok(await syncProfile("work", f.options));
   const doc = JSON.parse(readFileSync(path, "utf8"));
   assert.equal(doc.data.root.dev, real);
   assert.equal(doc.data.root.volumeUuid, APFS);
+  for (const link of Object.values(doc.data.links)) assert.equal(link.dev, real);
   assert.deepEqual(ok(await syncProfile("work", { ...f.options, dryRun: true })).changes, []);
   assert.equal((await showProfile("work", f.options)).exit, 0);
 });
@@ -199,7 +212,7 @@ it("a different volume UUID is a genuine ownership change and is refused", async
   assert.equal((await syncProfile("work", f.options)).exit, 0, "receipt UUID now matches again");
 });
 
-it("a legacy dev-only receipt with a stale dev is accepted and upgraded to carry volumeUuid", async (t) => {
+it("a legacy dev-only receipt with a stale dev is accepted and upgraded to carry volumeUuid on the next write", async (t) => {
   const f = fixture(t);
   setVolumeResolver(() => APFS);
   ok(await syncProfile("work", f.options));
@@ -211,12 +224,15 @@ it("a legacy dev-only receipt with a stale dev is accepted and upgraded to carry
     delete identity.volumeUuid;
   });
   const before = readFileSync(path, "utf8");
-  assert.notEqual((await showProfile("work", f.options)).exit, 3);
+  assert.equal((await showProfile("work", f.options)).exit, 0);
   assert.equal(readFileSync(path, "utf8"), before, "show never upgrades");
+  assert.deepEqual(ok(await syncProfile("work", { ...f.options, dryRun: true })).changes, []);
+  selectGamma(f);
   ok(await syncProfile("work", f.options));
   const doc = JSON.parse(readFileSync(path, "utf8"));
   assert.equal(doc.data.root.volumeUuid, APFS);
   assert.equal(doc.data.root.dev, real);
+  for (const link of Object.values(doc.data.links)) assert.equal(link.volumeUuid, APFS);
   assert.equal((await showProfile("work", f.options)).exit, 0);
 });
 
@@ -252,19 +268,32 @@ it("global activation receipts renumber the same way (sync and planSync)", async
   const first = ok(await sync(f.options));
   const receiptPath = first.scopes.find((item) => item.scope === "global").receiptPath;
   const doc = JSON.parse(readFileSync(receiptPath, "utf8"));
-  for (const record of [...Object.values(doc.data.links), ...Object.values(doc.data.directories)]) {
+  const records = [...Object.values(doc.data.links), ...Object.values(doc.data.directories)];
+  assert.ok(records.length > 0);
+  for (const record of records) {
     assert.equal(record.volumeUuid, APFS);
     record.dev = String(BigInt(record.dev) + 7n);
   }
   writeFileSync(receiptPath, `${JSON.stringify(doc)}\n`);
   const before = readFileSync(receiptPath, "utf8");
-  const plan = ok(await planSync(f.options));
-  assert.ok(plan.changes.some((c) => c.action === "write-receipt"));
-  assert.equal(readFileSync(receiptPath, "utf8"), before, "planning never writes");
+  assert.deepEqual(ok(await planSync(f.options)).changes, [], "a stale dev alone is not drift");
+  assert.deepEqual(ok(await sync(f.options)).changes, []);
+  assert.equal(readFileSync(receiptPath, "utf8"), before, "an idle sync stays write-free");
+  // A real change writes the receipt, carrying every refreshed identity.
+  writeFileSync(
+    join(f.home, ".agents", "skills.json"),
+    JSON.stringify({ skills: ["alpha", "gamma"] }),
+  );
   ok(await sync(f.options));
-  assert.notEqual(readFileSync(receiptPath, "utf8"), before);
+  const after = JSON.parse(readFileSync(receiptPath, "utf8"));
+  for (const record of [
+    ...Object.values(after.data.links),
+    ...Object.values(after.data.directories),
+  ])
+    assert.equal(record.dev, devOf(join(f.home, ".agents")), "dev refreshed");
+  assert.notEqual(JSON.stringify(after.data.links), JSON.stringify(doc.data.links));
   assert.deepEqual(ok(await planSync(f.options)).changes, []);
-  // Different volume: refused, receipt untouched.
+  // Different volume: refused.
   setVolumeResolver(() => OTHER);
   const refused = await planSync(f.options);
   assert.equal(refused.exit, 3, JSON.stringify(refused.findings));

@@ -11,6 +11,7 @@ import {
   needsUpgrade,
   recordIdentity,
   requireIdentity,
+  sansDevice,
   within,
 } from "./activation-ownership.js";
 import type { ReceiptOptions } from "./activation-state.js";
@@ -369,7 +370,7 @@ export async function buildWork(
     ...next,
     sources: settledRevisions(next.sources, state.data.sources, catalogRoots),
   };
-  if (changes.length || !isDeepStrictEqual(comparable, state.data))
+  if (changes.length || !isDeepStrictEqual(sansDevice(comparable), sansDevice(state.data)))
     changes.push({ action: "write-receipt", path: state.snapshot.path });
   const result: ProfileShowResult = {
     profile,

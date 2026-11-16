@@ -54,7 +54,7 @@ do not grant deletion authority. Correct preexisting references can satisfy a
 selection while remaining unmanaged. A replaced object remains foreign even
 when it points to the same canonical definition as the old owned link.
 
-### Volume identity (0.4.5)
+### Volume identity (0.4.7)
 
 `st_dev` is a boot-time device number, not a durable identity: after one macOS
 restart the Data volume went `16777233` to `16777234` and every receipt read
@@ -70,9 +70,12 @@ field is omitted and `dev` is compared as before.
 - Legacy receipt (`dev` only): a differing `dev` is accepted as a renumbering
   when `ino`, kind and link target still match. A different inode is refused.
 - Upgrade: a matching entry whose record is stale (new `dev`, or no
-  `volumeUuid` yet) is rewritten with the fresh identity, which plans a
-  `write-receipt`. Only `sync` / `profile sync` apply it; `status`, `show` and
-  dry runs never write. The strict-desk resync heals every pending desk.
+  `volumeUuid` yet) is carried forward with the fresh identity. A stale hint
+  alone is not drift: `status`, `show`, previews and an idle `sync` report
+  nothing and write nothing. The next receipt write for any real reason
+  (a selection change, a catalog commit resynced by the strict-desk resync)
+  stores the refreshed `dev` and `volumeUuid` for every entry. Only `sync` and
+  `profile sync` ever write.
 
 The persistence layer validates receipt format, scope, host, user, and paths,
 then compares the prior file's identity and bytes before an atomic update.
