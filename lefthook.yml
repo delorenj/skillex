@@ -16,15 +16,11 @@ pre-commit:
       run: uv run ruff format --force-exclude {staged_files}
       stage_fixed: true
 
-# Slower, repo-wide checks on push.
+# Slower, repo-wide checks on push. One serialized job: scripts/pre-push-checks.sh takes a
+# per-checkout lock and runs node-check, ruff, mypy, pytest in order. Separate lefthook jobs
+# cannot hold a lock across steps, and overlapping gates raced on the shared dist/.
 pre-push:
   parallel: false
   jobs:
-    - name: node-check
-      run: npm run check
-    - name: lint
-      run: uv run ruff check .
-    - name: typecheck
-      run: uv run mypy src/skillex
-    - name: test
-      run: uv run pytest -q
+    - name: serialized-checks
+      run: scripts/pre-push-checks.sh

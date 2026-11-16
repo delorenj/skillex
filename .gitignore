@@ -43,3 +43,5 @@ agents/hermes/pm/runtime/
 
 # Hermes runtime output (plans, command payloads) written by the skillex-pm desk.
 .hermes/
+.build-stage-*/
+.build.lock/
