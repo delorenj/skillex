@@ -611,7 +611,8 @@ def _never_touch_the_real_machine() -> Iterator[None]:
         "this test mutated the REAL machine state, not its sandbox:\n"
         f"  before {before}\n  after  {after}\n"
         "Request the `sandbox` fixture, and never call monkeypatch.undo() on a "
-        "MonkeyPatch that something else is also using."
+        "MonkeyPatch that something else is also using. (Another process syncing "
+        "the live global root during the run trips this too; rerun with --lf.)"
     )
 
 

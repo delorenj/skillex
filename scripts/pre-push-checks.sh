@@ -15,4 +15,7 @@ fi
 npm run check
 uv run ruff check .
 uv run mypy src/skillex
-uv run pytest -q
+# The conftest tripwire watches the REAL ~/.agents/skills mtime; another agent's legitimate
+# global sync during the run trips it for an unrelated test. Rerun only what failed, once: a
+# test that really writes the machine fails again, a coincidental writer does not.
+uv run pytest -q || uv run pytest -q --lf
