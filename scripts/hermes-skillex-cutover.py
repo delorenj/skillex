@@ -222,6 +222,15 @@ def configure(profile, renderer, apply=False):
             if p.is_symlink() or not p.is_file():
                 raise RuntimeError(f"regular generated config/delta required: {p}")
         if "GENERATED FILE" not in cfg.read_text()[:1000]:
+            # A hand-maintained config cannot be re-rendered without changing the desk's effective
+            # config (a render of the team-inbox desk flipped memory.provider and dropped a
+            # 1Password binary path). The cutover owns skills.external_dirs and nothing else, so
+            # when that is already empty in both files there is nothing to change: leave them be.
+            if all(
+                not ((renderer.load_yaml(path) or {}).get("skills") or {}).get("external_dirs")
+                for path in (cfg, delta_path)
+            ):
+                return False
             raise RuntimeError(
                 f"non-generated config needs explicit config migration: {profile.name}"
             )

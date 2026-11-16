@@ -210,6 +210,31 @@ def test_configure_expects_and_preserves_renderer_pins(tmp_path, monkeypatch):
     assert cfg.read_bytes() == before
 
 
+def test_hand_maintained_config_with_empty_external_dirs_is_left_untouched(tmp_path, monkeypatch):
+    import yaml
+
+    fleet = tmp_path / "fleet"
+    profile = fleet / "profiles" / "x-pm"
+    profile.mkdir(parents=True)
+    (fleet / "config.yaml").write_text(yaml.safe_dump({"skills": {"external_dirs": ["legacy"]}}))
+    (fleet / "agents-registry.yaml").write_text(yaml.safe_dump({"agents": {}}))
+    cfg, delta = profile / "config.yaml", profile / "config.delta.yaml"
+    cfg.write_text("memory:\n  provider: ''\nskills:\n  external_dirs: []\n")
+    delta.write_text("skills:\n  external_dirs: []\n")
+    monkeypatch.setenv("HERMES_FLEET_HOME", str(fleet))
+    monkeypatch.delenv("HERMES_AGENTS_REGISTRY", raising=False)
+    module = helper()
+    renderer = module.load_renderer(RENDERER, fleet)
+    before = (cfg.read_bytes(), delta.read_bytes())
+    assert module.configure(profile, renderer, apply=True) is False
+    assert (cfg.read_bytes(), delta.read_bytes()) == before
+
+    # An external dir still declared in a hand-maintained config needs an explicit migration.
+    cfg.write_text("skills:\n  external_dirs: [legacy]\n")
+    with pytest.raises(RuntimeError, match="non-generated config"):
+        module.configure(profile, renderer, apply=True)
+
+
 def _fake_skillex(path, version="0.4.2"):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(f'#!/bin/sh\necho "{version}"\n')
