@@ -342,4 +342,10 @@ export type {
   VendorSyncOptions,
   VendorSyncResult,
 } from "./core/vendor-types.js";
+export {
+  resolveVolumeUuid,
+  setVolumeResolver,
+  type VolumeSources,
+  volumeUuid,
+} from "./core/volume-identity.js";
 export { VERSION } from "./version.js";

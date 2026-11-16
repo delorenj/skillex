@@ -54,6 +54,26 @@ do not grant deletion authority. Correct preexisting references can satisfy a
 selection while remaining unmanaged. A replaced object remains foreign even
 when it points to the same canonical definition as the old owned link.
 
+### Volume identity (0.4.5)
+
+`st_dev` is a boot-time device number, not a durable identity: after one macOS
+restart the Data volume went `16777233` to `16777234` and every receipt read
+`E_OWNERSHIP_CHANGED`. Activation and profile receipts therefore record a
+`volumeUuid` next to `ino` (macOS: the APFS `VolumeUUID` from `diskutil info
+-plist`; Linux: `findmnt -no UUID -T`, then `blkid` on the mount source). The
+lookup is cached per device number for the process; when no id can be read the
+field is omitted and `dev` is compared as before.
+
+- Receipt has `volumeUuid`: the id decides. Same id under a new `dev` is a
+  renumbering and is accepted; a different id is a genuine ownership change
+  and is refused, even if the device number was reused.
+- Legacy receipt (`dev` only): a differing `dev` is accepted as a renumbering
+  when `ino`, kind and link target still match. A different inode is refused.
+- Upgrade: a matching entry whose record is stale (new `dev`, or no
+  `volumeUuid` yet) is rewritten with the fresh identity, which plans a
+  `write-receipt`. Only `sync` / `profile sync` apply it; `status`, `show` and
+  dry runs never write. The strict-desk resync heals every pending desk.
+
 The persistence layer validates receipt format, scope, host, user, and paths,
 then compares the prior file's identity and bytes before an atomic update.
 Receipt state must remain outside source repositories. Reads and previews do

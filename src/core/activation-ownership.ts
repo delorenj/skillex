@@ -5,6 +5,7 @@ import type { ActivationData, EntryIdentity, OwnedNode } from "./activation-type
 import { fail } from "./error.js";
 import { isSkillName } from "./manifest.js";
 import { ExitCode } from "./result.js";
+import { volumeUuid } from "./volume-identity.js";
 
 export interface Entry {
   readonly path: string;
@@ -65,15 +66,64 @@ export function identity(item: Entry): EntryIdentity {
   refuse(item.path, "Only recorded directories and symbolic links can be managed.");
 }
 
+/**
+ * The identity written into a receipt: `identity()` plus the durable volume id.
+ * Journals and transient guards keep the plain `identity()` shape.
+ */
+export function recordIdentity(item: Entry): EntryIdentity {
+  const base = identity(item);
+  const uuid = volumeUuid(item.path, item.info.dev, item.info.isSymbolicLink());
+  return uuid === undefined ? base : { ...base, volumeUuid: uuid };
+}
+
+/**
+ * Is `item` on the volume the receipt recorded?
+ *
+ * With a recorded volume id the id decides: the same id under a different
+ * device number is a renumbering of the same volume (ok), a different id is a
+ * genuine ownership change (refused) even if the device number happens to be
+ * reused. A legacy identity (`dev` only) cannot name its volume, so a device
+ * number that differs is accepted as a renumbering provided `ino`, kind and
+ * link target still match; the next apply upgrades the receipt.
+ */
+function sameVolume(item: Entry, expected: EntryIdentity): boolean {
+  const devSame = String(item.info.dev) === expected.dev;
+  if (expected.volumeUuid === undefined) return true;
+  const current = volumeUuid(item.path, item.info.dev, item.info.isSymbolicLink());
+  return current === undefined ? devSame : current === expected.volumeUuid;
+}
+
 export function matches(item: Entry | undefined, expected: EntryIdentity): boolean {
   return (
     !!item &&
-    String(item.info.dev) === expected.dev &&
     String(item.info.ino) === expected.ino &&
     (expected.kind === "directory"
       ? item.info.isDirectory()
-      : item.info.isSymbolicLink() && item.raw === expected.raw)
+      : item.info.isSymbolicLink() && item.raw === expected.raw) &&
+    sameVolume(item, expected)
   );
+}
+
+/**
+ * Structural copy of receipt data without `volumeUuid`. Migration and cutover compare receipt
+ * ownership against identities captured without a volume id; the id is a refinement of `dev`,
+ * not a different claim, so those comparisons ignore it.
+ */
+export function sansVolume<T>(value: T): T {
+  if (Array.isArray(value)) return value.map((item) => sansVolume(item)) as T;
+  if (typeof value === "object" && value !== null)
+    return Object.fromEntries(
+      Object.entries(value)
+        .filter(([key]) => key !== "volumeUuid")
+        .map(([key, item]) => [key, sansVolume(item)]),
+    ) as T;
+  return value;
+}
+
+/** True when a matching entry's receipt record is stale (renumbered device or no volume id yet). */
+export function needsUpgrade(item: Entry, expected: EntryIdentity): boolean {
+  const fresh = recordIdentity(item);
+  return fresh.dev !== expected.dev || fresh.volumeUuid !== expected.volumeUuid;
 }
 
 function equalIdentity(left: unknown, right: EntryIdentity): boolean {
@@ -82,7 +132,8 @@ function equalIdentity(left: unknown, right: EntryIdentity): boolean {
     left.kind === right.kind &&
     left.dev === right.dev &&
     left.ino === right.ino &&
-    left.raw === right.raw
+    left.raw === right.raw &&
+    left.volumeUuid === right.volumeUuid
   );
 }
 
@@ -132,7 +183,9 @@ function exact(value: Record<string, unknown>, keys: readonly string[]): boolean
 function validIdentity(value: unknown): value is EntryIdentity {
   return (
     record(value) &&
-    exact(value, ["kind", "dev", "ino", "raw"]) &&
+    exact(value, ["kind", "dev", "ino", "raw", "volumeUuid"]) &&
+    (value.volumeUuid === undefined ||
+      (typeof value.volumeUuid === "string" && /^[0-9A-Za-z-]{4,64}$/.test(value.volumeUuid))) &&
     ["directory", "link"].includes(String(value.kind)) &&
     typeof value.dev === "string" &&
     /^\d+$/.test(value.dev) &&

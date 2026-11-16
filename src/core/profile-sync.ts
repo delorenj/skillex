@@ -6,9 +6,10 @@ import { isDeepStrictEqual } from "node:util";
 import {
   type Entry,
   entry,
-  identity,
   lexicalTarget,
   matches,
+  needsUpgrade,
+  recordIdentity,
   requireIdentity,
   within,
 } from "./activation-ownership.js";
@@ -245,7 +246,7 @@ export async function observations(
         shadows: false,
       });
     }
-  if (root) await requireIdentity(profile.skillsRoot, identity(root));
+  if (root) await requireIdentity(profile.skillsRoot, recordIdentity(root));
   return { root, entries, local };
 }
 
@@ -320,11 +321,13 @@ export async function buildWork(
   const links = { ...state.data.links };
   const changes: ProfileChange[] = [];
   if (!observed.root) changes.push({ action: "mkdir", path: profile.skillsRoot });
-  for (const [name, claim] of Object.entries(links))
-    if (!owned(observed.entries.get(name), claim)) {
+  for (const [name, claim] of Object.entries(links)) {
+    const actual = observed.entries.get(name);
+    if (!owned(actual, claim)) {
       delete links[name];
       changes.push({ action: "release", name, path: join(profile.skillsRoot, name) });
-    }
+    } else if (actual && needsUpgrade(actual, claim)) links[name] = recordIdentity(actual);
+  }
   const candidates: ProfileCandidate[] = [];
   const desiredNames = new Set(projection.desired.map((desired) => desired.name));
   for (const desired of projection.desired) {
@@ -354,7 +357,7 @@ export async function buildWork(
       changes.push({ action: "prune", name, path: join(profile.skillsRoot, name) });
   const next: ProfileData = {
     version: 1,
-    root: observed.root ? identity(observed.root) : null,
+    root: observed.root ? recordIdentity(observed.root) : null,
     project: projection.project,
     sources: projection.sources,
     links,
@@ -590,7 +593,7 @@ async function verifyIntent(work: ProfileWork): Promise<void> {
       "Retry profile sync to prepare the current declarations before writing any profile entry.",
     );
   await assertProfileIdentity(work.profile);
-  if (work.root) await rootGuard(work.profile, identity(work.root));
+  if (work.root) await rootGuard(work.profile, recordIdentity(work.root));
   else await absent(work.profile.skillsRoot);
 }
 
@@ -615,7 +618,7 @@ async function apply(
         profile.skillsRoot,
         "Inspect the profile skills root and retry.",
       );
-    data = { ...data, root: identity(created) };
+    data = { ...data, root: recordIdentity(created) };
     await assertProfileIdentity(profile);
     const parent = await entry(profile.root);
     if (!parent?.info.isDirectory())
@@ -625,7 +628,7 @@ async function apply(
         profile.root,
         "Restore the profile root before retrying.",
       );
-    await flush(profile.root, identity(parent));
+    await flush(profile.root, recordIdentity(parent));
   }
   const root = data.root;
   if (!root) throw new Error("Profile mutation requires a real skills directory.");
@@ -679,7 +682,7 @@ async function apply(
             stage,
             "Preserve this entry and retry after inspecting the profile.",
           );
-        next = identity(staged);
+        next = recordIdentity(staged);
         unpublishedStage = { path: stage, identity: next };
       }
       const pending: ProfileJournal = {

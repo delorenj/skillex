@@ -57,7 +57,9 @@ function exact(value: Record<string, unknown>, fields: readonly string[]): boole
 function validIdentity(value: unknown, kind: EntryIdentity["kind"]): value is EntryIdentity {
   return (
     record(value) &&
-    exact(value, ["kind", "dev", "ino", "raw"]) &&
+    exact(value, ["kind", "dev", "ino", "raw", "volumeUuid"]) &&
+    (value.volumeUuid === undefined ||
+      (typeof value.volumeUuid === "string" && /^[0-9A-Za-z-]{4,64}$/.test(value.volumeUuid))) &&
     value.kind === kind &&
     typeof value.dev === "string" &&
     /^\d+$/.test(value.dev) &&
@@ -74,7 +76,8 @@ function same(left: EntryIdentity | undefined, right: EntryIdentity): boolean {
     left.kind === right.kind &&
     left.dev === right.dev &&
     left.ino === right.ino &&
-    left.raw === right.raw
+    left.raw === right.raw &&
+    left.volumeUuid === right.volumeUuid
   );
 }
 

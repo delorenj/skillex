@@ -12,6 +12,7 @@ import {
   matches,
   replaceOwnership,
   requireIdentity,
+  sansVolume,
   validateData,
   within,
 } from "./activation-ownership.js";
@@ -921,7 +922,10 @@ async function prepare(context: Context): Promise<Plan> {
   const complete =
     !findings.length &&
     !replace &&
-    isDeepStrictEqual(replaceOwnership(owner.data, context.root, owned(original)), owner.data);
+    isDeepStrictEqual(
+      sansVolume(replaceOwnership(owner.data, context.root, owned(original))),
+      sansVolume(owner.data),
+    );
   return {
     original,
     owner: owner.snapshot,
@@ -1038,7 +1042,12 @@ async function completedOwnership(
       context.root,
       "New real content appeared after adoption; it remains unowned and unchanged.",
     );
-  if (!isDeepStrictEqual(replaceOwnership(owner.data, context.root, owned(root)), owner.data))
+  if (
+    !isDeepStrictEqual(
+      sansVolume(replaceOwnership(owner.data, context.root, owned(root))),
+      sansVolume(owner.data),
+    )
+  )
     refuse(
       context.root,
       "New unowned entries appeared after completed adoption; old intent will not be replayed.",

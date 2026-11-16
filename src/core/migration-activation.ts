@@ -9,6 +9,7 @@ import {
   lexicalTarget,
   matches,
   requireIdentity,
+  sansVolume,
   validateData,
   within,
 } from "./activation-ownership.js";
@@ -327,7 +328,7 @@ async function recordOwnership(
           !(
             node.identity.kind === "directory" &&
             observed?.identity.kind === "link" &&
-            isDeepStrictEqual(links[child], ownEntry(observed))
+            isDeepStrictEqual(sansVolume(links[child]), ownEntry(observed))
           )
         )
           delete links[child];
@@ -719,7 +720,7 @@ async function prepare(target: Target): Promise<Prepared> {
       lexicalTarget(target.root, root.identity.raw as string) === legacy.aliasTarget
     ) {
       const claimed = existingClaim(owner, target, target.root);
-      const ready = !claimed || !isDeepStrictEqual(claimed, ownEntry(root));
+      const ready = !claimed || !isDeepStrictEqual(sansVolume(claimed), ownEntry(root));
       const current = item(
         target,
         "adopt-root",

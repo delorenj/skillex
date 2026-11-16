@@ -6,10 +6,11 @@ import { isDeepStrictEqual, promisify } from "node:util";
 import {
   emptyData,
   entry,
-  identity,
   inspectOwnedNode,
   lexicalTarget,
   matches,
+  needsUpgrade,
+  recordIdentity,
   refuse,
   replaceOwnership,
   requireIdentity,
@@ -310,7 +311,7 @@ async function destinationParents(scope: ResolvedScope, paths: readonly string[]
   const root = await entry(scope.root);
   if (!root?.info.isDirectory())
     refuse(scope.root, "The selected scope root must remain a real directory.");
-  directories.set(scope.root, identity(root));
+  directories.set(scope.root, recordIdentity(root));
   for (const path of paths) {
     const parent = dirname(path);
     if (!within(parent, scope.root))
@@ -326,7 +327,7 @@ async function destinationParents(scope: ResolvedScope, paths: readonly string[]
             current,
             "Activation parents must be real directories; redirected or foreign parents are preserved.",
           );
-        directories.set(current, identity(found));
+        directories.set(current, recordIdentity(found));
       } else missing.add(current);
     }
   }
@@ -424,7 +425,7 @@ async function buildScope(
   const parents = await destinationParents(scope, [root, ...aliases]);
   const read = (path: string) => entry(physicalPath(path, recovery));
   const rootEntry = await read(root);
-  if (rootEntry?.info.isDirectory()) parents.directories.set(root, identity(rootEntry));
+  if (rootEntry?.info.isDirectory()) parents.directories.set(root, recordIdentity(rootEntry));
   if (rootEntry && !rootEntry.info.isDirectory() && !rootEntry.info.isSymbolicLink())
     refuse(root, "Activation root collides with a real file or special entry.");
   if (
@@ -445,6 +446,13 @@ async function buildScope(
       delete directories[path];
     } else if (!matches(actual, expected))
       refuse(path, "The activation receipt does not own the current entry.", "E_OWNERSHIP_CHANGED");
+    else if (needsUpgrade(actual, expected)) {
+      // Same inode on the same volume under a renumbered device (or a legacy dev-only record):
+      // carry the fresh volume-keyed identity so this plan's receipt write upgrades it.
+      // Read-only commands never reach a write, so `status`/`show` leave the receipt alone.
+      if (expected.kind === "directory") directories[path] = recordIdentity(actual);
+      else links[path] = recordIdentity(actual);
+    }
   }
   const currentData: ActivationData = { version: 1, links, directories, sources: data.sources };
   const selected = new Map(scope.bindings.map((binding) => [binding.name, binding.path]));
@@ -923,11 +931,11 @@ async function stageNode(
       await symlink(relative(dirname(destination), target), child);
       const found = await entry(child);
       if (!found) refuse(child, "Prepared activation link disappeared.");
-      children[name] = identity(found);
+      children[name] = recordIdentity(found);
     }
     const found = await entry(path);
     if (!found) refuse(path, "Prepared activation directory disappeared.");
-    return { identity: identity(found), children };
+    return { identity: recordIdentity(found), children };
   }
   if (operation.target !== undefined) {
     if (
@@ -940,7 +948,7 @@ async function stageNode(
     await symlink(relative(dirname(operation.path), operation.target), path);
     const found = await entry(path);
     if (!found) refuse(path, "Prepared activation link disappeared.");
-    return { identity: identity(found) };
+    return { identity: recordIdentity(found) };
   }
   return undefined;
 }
@@ -981,7 +989,7 @@ async function executeScope(
     const found = await entry(path);
     if (!found?.info.isDirectory())
       refuse(path, "A created activation parent was replaced.", "E_OWNERSHIP_CHANGED");
-    directories.set(path, identity(found));
+    directories.set(path, recordIdentity(found));
   }
   const intent = createHash("sha256")
     .update(

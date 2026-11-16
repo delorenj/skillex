@@ -3,6 +3,12 @@ export interface EntryIdentity {
   readonly dev: string;
   readonly ino: string;
   readonly raw?: string;
+  /**
+   * Durable volume id (APFS volume UUID / filesystem UUID) recorded next to `ino`.
+   * `dev` is only a hint: it is renumbered across restarts. Absent in legacy
+   * receipts and where the platform cannot name the volume.
+   */
+  readonly volumeUuid?: string;
 }
 
 export interface OwnedNode {
