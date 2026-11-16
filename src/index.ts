@@ -220,6 +220,18 @@ export type {
   ProfileSyncResult,
 } from "./core/profile-types.js";
 export { listProfiles, showProfile, syncProfile } from "./core/profiles.js";
+export {
+  listReceipts,
+  type ReceiptListOptions,
+  type ReceiptListResult,
+  type ReceiptNamespace,
+  type ReceiptRecord,
+  type ReceiptRetireEntry,
+  type ReceiptRetireOptions,
+  type ReceiptRetireResult,
+  type ReceiptState,
+  retireReceipts,
+} from "./core/receipt-retire.js";
 export { planSync, sync } from "./core/reconciliation.js";
 export type {
   SyncChange,

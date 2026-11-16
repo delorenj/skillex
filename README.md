@@ -200,6 +200,36 @@ unrelated behavior. This command does not change skill roots or run mise.
 File-task scripts and externally included config sources are not yet scanned;
 inspect those separately and extend the command before claiming their retirement.
 
+## Retire inert receipts
+
+A receipt records what Skillex owns under one skill root. When the root is
+recreated (a different inode) every later sync refuses with `E_OWNERSHIP_CHANGED`,
+and when the project is deleted or moved the receipt is left behind. Neither
+receipt protects anything. `receipt retire` removes them without touching a skill
+root.
+
+```sh
+skillex receipt list                       # valid / stale / orphan per receipt
+skillex receipt list --state orphan
+skillex receipt retire --all-stale         # preview (default)
+skillex receipt retire --all-stale --apply
+skillex receipt retire /workspace/example --apply          # by project, skill root or id
+skillex receipt retire 3f9a1c2e --apply --backup-dir /safe/place
+```
+
+- **stale**: the skill root exists but is not the object the receipt recorded.
+- **orphan**: the recorded scope or skill root path no longer exists.
+- **valid**: the root still matches. A named valid receipt is refused unless
+  `--force`; `--all-stale` never selects one. A receipt carrying an interrupted
+  operation journal is also kept unless forced; another host's receipt is never
+  retired from here.
+- `--apply` copies each receipt's JSON to the backup directory (default
+  `<state>/skillex/retired-receipts/<UTC ts>-receipt-retire/`, plus a
+  `receipt-retire.json` manifest), reads the copy back, then removes the original
+  under the same lock sync uses. A refused named receipt stops the whole apply
+  with nothing retired.
+- Skill roots and their contents are never read, written, moved, or deleted.
+
 ## Automation and development
 
 Use `--json` for a schema-2 envelope with `schema`, `command`, `ok`, `exit`, `data`, and `findings`. Diagnostic output does not contaminate JSON stdout. Mutating commands support `--dry-run`; `migrate` previews by default and requires `--apply`. `sync --dry-run --exit-code` returns 6 for drift.

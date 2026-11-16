@@ -8,6 +8,7 @@ import { registerDiagnosticCommands } from "./commands/diagnostics.js";
 import { registerIntegrationCommands } from "./commands/integrations.js";
 import { registerMigrationCommand } from "./commands/migrate.js";
 import { registerProfileCommands } from "./commands/profiles.js";
+import { registerReceiptCommands } from "./commands/receipts.js";
 import { registerRootCommands } from "./commands/roots.js";
 import { registerSelectionCommands } from "./commands/selections.js";
 import { registerSyncCommand } from "./commands/sync.js";
@@ -274,6 +275,7 @@ registerMigrationCommand(program, { emit });
 registerIntegrationCommands(program, { emit, help });
 registerClientCommands(program, { emit, help });
 registerRootCommands(program, { emit, help });
+registerReceiptCommands(program, { emit, help });
 
 // Stop each parser at its subcommand so a parent cannot consume a local flag
 // such as pack create --version. Repeat shared flags at each level to retain
