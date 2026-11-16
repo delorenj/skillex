@@ -1,7 +1,7 @@
 # Converge every Skillex-only Hermes desk with the all-skills catalog.
 #
 # Type=oneshot, started by skillex-hermes-resync.path (the catalog HEAD moved) and
-# skillex-hermes-resync.timer (fallback). Deliberately NOT a daemon: a crash is
+# the Candybar skillex-hermes-resync schedule (fallback). Deliberately NOT a daemon: a crash is
 # repaired by the next trigger, so there is no restart policy to get wrong. Exit 1
 # (a desk needs a human) shows up as a failed unit on purpose; the JSON lines in
 # ~/.local/state/skillex/hermes-resync.jsonl say which desk and why.

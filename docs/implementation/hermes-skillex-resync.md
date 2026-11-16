@@ -20,15 +20,15 @@ per desk. Nothing did it automatically.
 | Candybar `skillex-hermes-resync` | Fallback schedule (the single clock): at :07 :22 :37 :52 America/New_York, `systemd` runner starting the `.service`. Manifest: `~/code/33GOD/candybar/deploy/migration/manifests/skillex-hermes-resync/candybar.toml`. Check it with `cd ~/code/33GOD/candybar && uv run candybar show skillex-hermes-resync`. |
 | `skillex-hermes-resync.service` | `Type=oneshot`, `Nice=10`, `TimeoutStartSec=15min`, `Restart=no`. Runs `scripts/hermes-skillex-resync.py --settle 4`. |
 
-`skillex-hermes-resync.timer` is **retired** (Candybar migration wave 7.8,
-2026-10; ledger `33GOD/candybar/deploy/migration/ledger.yaml`). Its unit file
-stays in `systemd/` as the reversible-cutover record only: never enable it, since
-that would double-schedule the resync.
+There is no `.timer`. Candybar took over the schedule in migration wave 7.8
+(2026-10; ledger `33GOD/candybar/deploy/migration/ledger.yaml`) and the retired
+unit file was deleted on 2026-11-16. `install` and `uninstall` remove a leftover
+timer link from an older install; `status` reports one as unhealthy.
 
 Install, inspect and remove (units are symlinked from `systemd/`):
 
 ```sh
-scripts/install-hermes-resync.sh install     # link, daemon-reload, enable --now the .path only (warns if the retired .timer is enabled)
+scripts/install-hermes-resync.sh install     # link, daemon-reload, enable --now the .path, remove any leftover .timer link
 scripts/install-hermes-resync.sh status      # units, last run, catalog freshness; exit 1 if unhealthy
 scripts/install-hermes-resync.sh uninstall
 skillex profile sync <name> --project <selection-project> --skillex-only --dry-run
@@ -56,8 +56,8 @@ HEAD's reflog is append-only. Measured on a scratch repo with real path units:
 
 `PathChanged` on `HEAD` also covers `git symbolic-ref`, which moves HEAD with no
 reflog entry. systemd's `$TRIGGER_UNIT` is no evidence of which unit started a
-run (when the retired timer and the path unit shared the service it named the
-timer for a path-started run), so the record carries `previous_catalog_commit`,
+run (when a timer and the path unit shared the service it named the timer for a
+path-started run), so the record carries `previous_catalog_commit`,
 `catalog_commit` and `catalog_moved_at` instead: a run that started seconds after
 `catalog_moved_at`, with a different `previous_catalog_commit`, was the path unit.
 

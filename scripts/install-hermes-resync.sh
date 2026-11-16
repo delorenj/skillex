@@ -7,16 +7,15 @@
 #   Darwin  one LaunchAgent, io.33god.skillex-hermes-resync, generated at install
 #           (it needs absolute paths and a real python3): WatchPaths on the same two
 #           catalog files the .path unit watches, StartInterval 900 and RunAtLoad
-#           (macOS has no candybar, so launchd also owns the schedule the retired
-#           .timer used to). Same install | uninstall | status. See
+#           (macOS has no candybar, so launchd also owns the fallback schedule). Same install | uninstall | status. See
 #           docs/implementation/hermes-skillex-resync.md "macOS".
 #           SKILLEX_BIN=/abs/path/skillex at install pins the npm CLI into the agent
 #           (for a host whose PATH `skillex` is another program); it persists in the
 #           plist until a later install sets SKILLEX_BIN= (empty).
 #
 #   install-hermes-resync.sh install     link the units, daemon-reload, enable --now the .path
-#                                        (the .timer is RETIRED: candybar owns the schedule —
-#                                        33GOD/candybar deploy/migration/ledger.yaml, story 7.8)
+#                                        (Candybar owns the fallback schedule; install also removes
+#                                        a leftover skillex-hermes-resync.timer from older installs)
 #   install-hermes-resync.sh uninstall   disable --now, unlink the units and drop-ins
 #   install-hermes-resync.sh status      units, last run and catalog freshness; exit 1 if unhealthy
 #
@@ -35,11 +34,12 @@ STATE="${XDG_STATE_HOME:-$HOME/.local/state}/skillex"
 CTL="${SYSTEMCTL:-systemctl}"
 DEFAULT_REPO="$HOME/code/skillex"
 SERVICE=skillex-hermes-resync.service
-TIMER=skillex-hermes-resync.timer
 PATHU=skillex-hermes-resync.path
-UNITS=("$SERVICE" "$TIMER" "$PATHU")
-# The .timer is retired (candybar schedules the resync); only the .path trigger is enabled.
+UNITS=("$SERVICE" "$PATHU")
 ENABLED=("$PATHU")
+# Deleted 2026-11-16: Candybar is the single clock for the fallback resync. Older installs may
+# still carry its link in $DEST; install and uninstall remove it, status flags it.
+TIMER=skillex-hermes-resync.timer
 
 ctl() { "$CTL" --user "$@"; }
 die() { echo "install-hermes-resync: $*" >&2; exit 1; }
@@ -125,15 +125,28 @@ Environment=PJ_SKILLS_REGISTRY_ROOT=$REPO"
 
   ctl daemon-reload
   ctl reset-failed "${UNITS[@]}" 2>/dev/null || true
+  remove_old_timer
   ctl enable --now "${ENABLED[@]}"
-  if ctl is-enabled "$TIMER" >/dev/null 2>&1; then
-    echo "WARNING: $TIMER is retired — disable it: systemctl --user disable --now $TIMER" >&2
+  echo "enabled  $PATHU (catalog HEAD: $gitdir); Candybar owns the fallback schedule"
+}
+
+# remove_old_timer: disable and unlink a timer left by an install from before its deletion.
+# Only a link into this repo (now dangling) is removed; a real file is left with a warning.
+remove_old_timer() {
+  local dst="$DEST/$TIMER"
+  if [[ -L "$dst" && ( "$(readlink "$dst")" == "$SRC/$TIMER" || ! -e "$dst" ) ]]; then
+    ctl disable --now "$TIMER" 2>/dev/null || true
+    rm -f "$dst"
+    ctl daemon-reload
+    echo "removed  $dst (deleted unit: Candybar owns the schedule)"
+  elif [[ -e "$dst" || -L "$dst" ]]; then
+    echo "WARNING: $dst is not this repo's link; remove it by hand (Candybar owns the schedule)" >&2
   fi
-  echo "enabled  $PATHU (catalog HEAD: $gitdir); $TIMER stays retired (candybar owns the schedule)"
 }
 
 do_uninstall_systemd() {
-  ctl disable --now "$TIMER" "${ENABLED[@]}" 2>&1 || true
+  ctl disable --now "${ENABLED[@]}" 2>&1 || true
+  remove_old_timer
   ctl stop "$SERVICE" 2>/dev/null || true
   for unit in "${UNITS[@]}"; do
     local dst="$DEST/$unit"
@@ -206,7 +219,10 @@ do_status_systemd() {
     fi
   done
   ctl show "$SERVICE" -p Result -p ExecMainStatus -p ExecMainExitTimestamp --no-pager 2>/dev/null | sed 's/^/service   /' || true
-  ctl list-timers "$TIMER" --no-pager 2>/dev/null | sed -n '1,2p' || true
+  if [[ -e "$DEST/$TIMER" || -L "$DEST/$TIMER" ]]; then
+    echo "LEFTOVER $DEST/$TIMER: deleted unit, run install to remove it"
+    bad=1
+  fi
 
   report_last_run || bad=1
   if [[ "$bad" -eq 0 ]]; then echo "healthy"; else echo "NOT HEALTHY"; fi

@@ -22,9 +22,9 @@ primary_checkout = pytest.mark.skipif(
 )
 UNITS = [
     "skillex-hermes-resync.service",
-    "skillex-hermes-resync.timer",
     "skillex-hermes-resync.path",
 ]
+OLD_TIMER = "skillex-hermes-resync.timer"  # deleted: Candybar owns the schedule
 
 FAKE_SYSTEMCTL = """#!/bin/sh
 echo "$@" >> "$FAKE_CTL_LOG"
@@ -85,15 +85,13 @@ def test_install_links_the_tracked_units_and_enables_only_the_path(box):
     for unit in UNITS:
         link = box.user / unit
         assert link.is_symlink() and link.resolve() == (REPO / "systemd" / unit).resolve()
-    # The .timer is retired (candybar owns the schedule, 33GOD/candybar story 7.8):
-    # install enables only the .path trigger and warns if the timer is still enabled.
+    # There is no .timer (Candybar owns the schedule): install enables only the .path trigger.
     assert box.calls() == [
         "--user daemon-reload",
         "--user reset-failed " + " ".join(UNITS),
         "--user enable --now skillex-hermes-resync.path",
-        "--user is-enabled skillex-hermes-resync.timer",
     ]
-    assert "is retired" in done.stderr  # the fake systemctl answers is-enabled=enabled
+    assert not (box.user / OLD_TIMER).exists()
     # the default layout needs no drop-in: the tracked units already say ~/code/skillex
     assert not list(box.user.glob("*.d"))
 
@@ -104,17 +102,17 @@ def test_install_twice_changes_nothing(box):
     before = sorted(str(p) for p in box.user.rglob("*"))
     again = box.run("install")
     assert again.returncode == 0
-    assert again.stdout.count("ok       ") == 3 and "linked" not in again.stdout
+    assert again.stdout.count("ok       ") == 2 and "linked" not in again.stdout
     assert sorted(str(p) for p in box.user.rglob("*")) == before
 
 
 def test_a_stale_symlink_is_repointed_and_a_real_file_is_refused(box):
     box.user.mkdir(parents=True)
     (box.user / UNITS[0]).symlink_to("/nowhere/skillex-hermes-resync.service")
-    (box.user / UNITS[1]).write_text("[Timer]\n")
+    (box.user / UNITS[1]).write_text("[Path]\n")
     refused = box.run("install")
     assert refused.returncode == 1 and "is not a symlink" in refused.stderr
-    assert (box.user / UNITS[1]).read_text() == "[Timer]\n"  # never clobbered
+    assert (box.user / UNITS[1]).read_text() == "[Path]\n"  # never clobbered
     (box.user / UNITS[1]).unlink()
     assert box.run("install").returncode == 0
     assert (box.user / UNITS[0]).resolve() == (REPO / "systemd" / UNITS[0]).resolve()
@@ -175,16 +173,13 @@ def test_uninstall_removes_its_own_links_and_nothing_else(box):
     assert done.returncode == 0, done.stderr
     assert not any((box.user / unit).exists() or (box.user / unit).is_symlink() for unit in UNITS)
     assert stranger.is_symlink()
-    assert (
-        box.calls()[0]
-        == "--user disable --now skillex-hermes-resync.timer skillex-hermes-resync.path"
-    )
+    assert box.calls()[0] == "--user disable --now skillex-hermes-resync.path"
     assert box.run("uninstall").returncode == 0  # and again
 
 
 def test_uninstall_leaves_a_link_that_points_somewhere_else(box):
     box.user.mkdir(parents=True)
-    foreign = box.user / UNITS[2]
+    foreign = box.user / UNITS[1]
     foreign.symlink_to(box.root)  # exists, but is not this repo's unit
     done = box.run("uninstall")
     assert done.returncode == 0 and foreign.is_symlink() and "left" in done.stdout
@@ -443,3 +438,24 @@ def test_darwin_status_names_the_desks_that_need_a_human(mac):
 def test_an_unsupported_os_is_refused(mac):
     done = mac.run("status", SKILLEX_RESYNC_OS="Plan9")
     assert done.returncode == 1 and "unsupported OS" in done.stderr
+
+
+@primary_checkout
+def test_install_removes_a_leftover_timer_link_and_status_flags_one(box):
+    box.user.mkdir(parents=True)
+    old = box.user / OLD_TIMER
+    old.symlink_to(REPO / "systemd" / OLD_TIMER)  # an older install's link, now dangling
+    status = box.run("status")
+    assert "LEFTOVER" in status.stdout and status.returncode == 1
+    done = box.run("install")
+    assert done.returncode == 0, done.stderr
+    assert not old.is_symlink() and f"--user disable --now {OLD_TIMER}" in box.calls()
+    assert "LEFTOVER" not in box.run("status").stdout
+
+
+def test_install_leaves_a_timer_file_it_does_not_own(box):
+    box.user.mkdir(parents=True)
+    (box.user / OLD_TIMER).write_text("[Timer]\n")
+    done = box.run("install")
+    assert "not this repo's link" in done.stderr
+    assert (box.user / OLD_TIMER).read_text() == "[Timer]\n"
