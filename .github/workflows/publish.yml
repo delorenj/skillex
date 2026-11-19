@@ -50,6 +50,9 @@ jobs:
           else
             echo "new=true" >> "$GITHUB_OUTPUT"; echo "Publishing $name@$version."
           fi
+      - name: npm new enough for trusted publishing (11.5.1+)
+        if: steps.version.outputs.new == 'true'
+        run: npm install -g npm@^11.21.0 && npm --version
       - if: steps.version.outputs.new == 'true'
         run: npm ci
       - if: steps.version.outputs.new == 'true'
