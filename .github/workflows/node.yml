@@ -11,7 +11,9 @@ permissions:
 jobs:
   check:
     name: Node ${{ matrix.node }} / Linux
-    runs-on: [self-hosted, Linux, delonet]
+    # Public repo: hosted runners are free, and this personal-account repo has no self-hosted runner
+    # (org runners cannot see it), so a self-hosted label queued every run forever and Publish never fired.
+    runs-on: ubuntu-latest
     timeout-minutes: 10
     strategy:
       fail-fast: false

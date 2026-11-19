@@ -9,7 +9,7 @@ name: Publish
 # npm which repo and workflow is publishing, and signs the provenance attestation. npm matches the
 # trusted publisher on this FILE NAME (publish.yml), so renaming it breaks publishing with
 # ENEEDAUTH. Trusted publishing only works on GitHub-hosted runners, which are free here because
-# the repository is public; the test matrix stays on the self-hosted runner (node.yml).
+# the repository is public; the test matrix (node.yml) runs on hosted runners too.
 
 on:
   workflow_run:
