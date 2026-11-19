@@ -1,0 +1,64 @@
+name: Publish
+
+# Publishes @delorenj/skillex to npm when main is green and package.json names a version npm
+# does not have yet. The release step is: bump the version in package.json (npm version X
+# --no-git-tag-version), commit, push main. Nothing else — never `npm publish` from a laptop or an
+# agent, and never an OTP.
+#
+# Auth is npm trusted publishing (OIDC): there is no npm token here. The job's id-token proves to
+# npm which repo and workflow is publishing, and signs the provenance attestation. npm matches the
+# trusted publisher on this FILE NAME (publish.yml), so renaming it breaks publishing with
+# ENEEDAUTH. Trusted publishing only works on GitHub-hosted runners, which are free here because
+# the repository is public; the test matrix stays on the self-hosted runner (node.yml).
+
+on:
+  workflow_run:
+    workflows: ["Node package"]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: publish
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+      - name: Is this version new?
+        id: version
+        run: |
+          set -euo pipefail
+          name=$(node -p 'require("./package.json").name')
+          version=$(node -p 'require("./package.json").version')
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          if npm view "$name@$version" version >/dev/null 2>&1; then
+            echo "new=false" >> "$GITHUB_OUTPUT"; echo "$name@$version is already on npm; nothing to publish."
+          else
+            echo "new=true" >> "$GITHUB_OUTPUT"; echo "Publishing $name@$version."
+          fi
+      - if: steps.version.outputs.new == 'true'
+        run: npm ci
+      - if: steps.version.outputs.new == 'true'
+        run: npm run build
+      - if: steps.version.outputs.new == 'true'
+        run: npm publish --provenance --access public
+      - name: Tag the release
+        if: steps.version.outputs.new == 'true'
+        run: |
+          tag="v${{ steps.version.outputs.version }}"
+          if git ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null; then exit 0; fi
+          git tag "$tag" && git push origin "$tag"

@@ -245,6 +245,8 @@ npm pack
 node dist/cli.js --help
 ```
 
+Releases publish from CI: bump `package.json` (`npm version X --no-git-tag-version`), commit, push main. When `Node package` is green, `.github/workflows/publish.yml` publishes the new version to npm through trusted publishing (OIDC, `--provenance`, no token) and tags `vX`. Never `npm publish` locally.
+
 Checks cover the installed npm package, Node 24/26, Linux/macOS behavior, offline resolution, content preservation, ownership, concurrency, and recovery. Python characterization checks remain in the development workflow until retirement is complete.
 
 See the [command specification](docs/plan/cli-revamp.md), [ownership ADR](docs/architecture/ADR-0001-reference-only-skill-topology.md), and [result schema](schemas/result.schema.json). PJangler consumes the same public core exported by `@delorenj/skillex`.
