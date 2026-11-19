@@ -335,6 +335,19 @@ export {
   type SourceLocation,
   type TreeResolution,
 } from "./core/skill-acquisition.js";
+export {
+  graphHealth,
+  type SkillGraphData,
+  type SkillGraphEdge,
+  type SkillGraphEdgeKind,
+  type SkillGraphHealth,
+  type SkillGraphNode,
+  type SkillGraphNodeKind,
+  type SkillGraphOptions,
+  type SkillGraphSummary,
+  skillGraph,
+} from "./core/skill-graph.js";
+export { renderSkillGraphHtml } from "./core/skill-graph-html.js";
 export { inspectVendorStatus, listVendorSources, showVendorSource } from "./core/vendor-inspect.js";
 export { syncVendorSources } from "./core/vendor-sync.js";
 export type {

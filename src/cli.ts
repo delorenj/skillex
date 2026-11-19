@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { writeFile } from "node:fs/promises";
 import { Command, CommanderError } from "commander";
 import { registerAcquisitionCommands } from "./commands/acquisition.js";
 import { registerBmadCommands } from "./commands/bmad.js";
@@ -13,6 +14,7 @@ import { registerRootCommands } from "./commands/roots.js";
 import { registerSelectionCommands } from "./commands/selections.js";
 import { registerSyncCommand } from "./commands/sync.js";
 import { registerVendorCommands } from "./commands/vendor.js";
+import { renderSkillGraphHtml } from "./core/skill-graph-html.js";
 import {
   createSkill,
   ExitCode,
@@ -25,6 +27,7 @@ import {
   type SkillDetails,
   SkillexError,
   showSkill,
+  skillGraph,
   VERSION,
 } from "./index.js";
 
@@ -76,6 +79,9 @@ interface CliOptions {
   name?: string;
   path?: string;
   maxLines?: string;
+  lint?: boolean;
+  lintWild?: boolean;
+  html?: string;
 }
 
 function registryOptions(command: Command): RegistryOptions {
@@ -244,6 +250,45 @@ skill
         ? `${data.name}: ${data.path}\n  ${data.lines ?? 0} SKILL.md lines; ${data.files} Markdown files; ${data.links} relative links${data.source ? `; source ${data.source}` : ""}\n  ${result.findings.length ? `${result.findings.length} findings` : "clean"}\n`
         : "",
     );
+  });
+
+program
+  .command("graph")
+  .description(
+    "Map every skill: repo-owned hubs, vendored and wild skills, sub-skills, sets, packs and sources, with what each routes to and its hub lint.",
+  )
+  .option("--no-lint", "Skip per-node hub lint (structure only).")
+  .option("--lint-wild", "Also lint wild skills (default: hubs and vendored skills only).")
+  .option(
+    "--html <file>",
+    "Also write a self-contained interactive page of the graph to this file.",
+  )
+  .action(async (_local, command: Command) => {
+    const { lint, lintWild, html } = command.optsWithGlobals<CliOptions>();
+    const result = await skillGraph({
+      ...registryOptions(command),
+      ...(lint === false ? { lint: false } : {}),
+      ...(lintWild === true ? { lintWild: true } : {}),
+    });
+    const data = result.data;
+    if (data && html !== undefined) await writeFile(html, renderSkillGraphHtml(data), "utf8");
+    if (!data) {
+      emit(result);
+      return;
+    }
+    const n = data.summary.nodes;
+    const h = data.summary.health;
+    const lines = [
+      `${n.hub} hubs, ${n.vendored} vendored, ${n.wild} wild, ${n.subskill} sub-skills; ${n.set} sets, ${n.pack} packs, ${n.source} sources`,
+      `${data.edges.length} edges; health ${h.ok} ok, ${h.warning} warning, ${h.error} error`,
+    ];
+    for (const node of data.nodes)
+      if ((node.kind === "hub" || node.kind === "source") && node.health !== "ok")
+        lines.push(
+          `  ${node.health === "error" ? "ERROR" : "WARN "} ${node.kind} ${node.name}: ${[...new Set(node.findings.map((f) => f.code))].join(", ")}`,
+        );
+    if (html !== undefined) lines.push(`Wrote ${html}`);
+    emit(result, `${lines.join("\n")}\n`);
   });
 
 function mutationText(

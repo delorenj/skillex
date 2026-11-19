@@ -144,6 +144,8 @@ skillex set list
 skillex pack list
 skillex pack verify hermes-base@0.18.2
 skillex doctor --sources-only
+skillex graph                       # every hub, sub-skill, source and composition, with hub health
+skillex graph --json --html graph.html
 ```
 
 `all-skills/` owns real definitions. Sets and packs contain canonical references; packs may also own hooks, commands, and support assets. Ordinary CLI skill roots alias one `.agents/skills` activation root. Catalog and composition edits take effect for a consumer when that consumer explicitly syncs.

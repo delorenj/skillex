@@ -145,6 +145,10 @@ Follow the currently authorized pilot/rollout boundary, not an unbounded sweep.
    repeat the preview: the second run should plan no managed changes.
 6. Validate source topology separately from consumer topology. Commit and push
    the catalog first, then compositions and the parent catalog revision.
+7. To see every hub at once (which repo owns it, its sub-skills, what it loads,
+   who loads it, and its lint), run `skillex graph` (text), `--json`, or
+   `--html <file>` for the interactive page. A red repository there is a
+   one-hub violation (`E_HUB_COUNT`); fix it in that repository's hub.
 
 Do not republish host-provided system skills as top-level catalog selections.
 Disable or migrate a competing import through its owning configuration; deleting

@@ -105,6 +105,40 @@ under `--upstream`. `doctor --sources-only` does not flag link sources as
 digest drift; it counts them under `repoOwnedSkills` and lints each available
 hub instead.
 
+## Skill graph (`skillex graph`)
+
+`skillex graph` maps the whole registry as nodes and edges and attaches hub
+lint to every node, so a violation shows where it lives. `--json` emits the
+envelope; `--html <file>` also writes a self-contained interactive page
+(repository table, hub cards, force graph; `#hub=<name>` deep-links a card).
+`--no-lint` skips lint; `--lint-wild` also lints wild skills (off by default,
+because the hub standard governs hubs).
+
+| Node | Meaning |
+|---|---|
+| `hub` | repo-owned skill (link source) |
+| `vendored` | catalog copy whose `.source.yaml` names an upstream source |
+| `wild` | catalog skill no repository owns |
+| `subskill` | `subskills/<name>/SUBSKILL.md` inside any skill |
+| `set`, `pack` | compositions that reference skills |
+| `source` | a `sources.toml` repository, with `hubs` (skill directories on disk under its skills root) |
+
+| Edge | Meaning |
+|---|---|
+| `owns` / `vendors` | source to hub (link) or to vendored copy (provenance `origin.source`) |
+| `routes` | skill to its sub-skill |
+| `member` | set or pack to skill |
+| `loads` | the explicit "load the \`x\` hub/skill" phrase |
+| `mentions` | a backticked span that is exactly a known skill name (a `loads` edge supersedes it) |
+
+Every skill and source node carries `root`: the repository directory that holds
+the skills root (`<checkout>/<subdir>` minus a trailing `skills/` and
+`.agents/`). Consumers join on it; the 33GOD Atlas matches it to each
+component's `repo` to show that component's hub and health. A source whose
+skills root holds more than one skill is `E_HUB_COUNT` (link) or
+`W_SOURCE_HUB_COUNT` (vendor); an unmapped checkout is
+`W_SOURCE_CHECKOUT_ABSENT` (map it in `~/.config/skillex/sources.local.toml`).
+
 ## Hub lint (`skillex skill lint`)
 
 `skillex skill lint <name>` lints a declared repo-owned hub in its owning
