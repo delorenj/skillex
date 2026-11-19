@@ -239,7 +239,7 @@ def resolve_skillex(environ, registry_root):
     else:
         tried.append("mise: not found on PATH or at ~/.local/bin/mise")
     raise SkillexUnavailableError(
-        "no usable skillex CLI (set SKILLEX_BIN or install @delorenj/skillex with mise): "
+        "no usable skillex CLI (set SKILLEX_BIN or run ~/code/33GOD/33god-platform/scripts/cli-launchers.py upgrade skillex): "
         + "; ".join(tried)
     )
 
