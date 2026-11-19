@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from collections.abc import Iterable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -41,6 +42,19 @@ from typing import Any
 
 import pytest
 from typer.testing import CliRunner
+
+# A git hook (pre-push runs this suite) exports GIT_DIR/GIT_INDEX_FILE/... pointing at the
+# REAL repository. Fixtures that spawn `git init`/`add`/`commit` in tmp dirs inherit them and
+# write into the real repo instead (2026-11-19: core.bare=true + 20 fixture commits on a real
+# branch). Strip the repository-locating variables before any fixture runs; identity and
+# GIT_CONFIG_GLOBAL/NOSYSTEM are left alone.
+_GIT_REPO_ENV = re.compile(
+    r"GIT_(DIR|WORK_TREE|INDEX_FILE|PREFIX|COMMON_DIR|OBJECT_DIRECTORY|"
+    r"ALTERNATE_OBJECT_DIRECTORIES|NAMESPACE|CONFIG_PARAMETERS|CONFIG_COUNT|"
+    r"CONFIG_KEY_\d+|CONFIG_VALUE_\d+)"
+)
+for _key in [k for k in os.environ if _GIT_REPO_ENV.fullmatch(k)]:
+    del os.environ[_key]
 
 # ---------------------------------------------------------------------------
 # original fixtures - existing tests depend on these

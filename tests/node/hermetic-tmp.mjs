@@ -21,6 +21,16 @@ function insideRepository(path) {
   }
 }
 
+// A git hook (pre-push runs this suite) exports GIT_DIR/GIT_INDEX_FILE/... pointing at the REAL
+// repository, and fixtures that spawnSync("git", ...) without an env inherit them: on
+// 2026-11-19 a pre-push run committed fixture trees onto main and repointed HEAD at a
+// `fixture` branch. Strip the repository-locating variables before any suite loads.
+const GIT_REPO_ENV =
+  /^GIT_(DIR|WORK_TREE|INDEX_FILE|PREFIX|COMMON_DIR|OBJECT_DIRECTORY|ALTERNATE_OBJECT_DIRECTORIES|NAMESPACE|CONFIG_PARAMETERS|CONFIG_COUNT|CONFIG_KEY_\d+|CONFIG_VALUE_\d+)$/;
+for (const key of Object.keys(process.env)) {
+  if (GIT_REPO_ENV.test(key)) delete process.env[key];
+}
+
 if (process.platform !== "win32") {
   const configured = process.env.TMPDIR;
   if (configured !== undefined && configured !== "" && insideRepository(configured)) {

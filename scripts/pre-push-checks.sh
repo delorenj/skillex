@@ -6,7 +6,14 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-lock="$(git rev-parse --git-dir)/skillex-pre-push.lock"
+lock="$(git rev-parse --absolute-git-dir)/skillex-pre-push.lock"
+# git exports GIT_DIR (and GIT_INDEX_FILE etc.) to hooks; from a linked worktree it points at
+# <main>/.git/worktrees/<name>. Every test fixture that runs `git init`/`commit` in a temp dir
+# inherited it and wrote into THIS repo: on 2026-11-19 that set core.bare=true, committed 20
+# fixture trees onto skillex-retire-mise and two onto main. Nothing below needs it: cwd is the
+# checkout, so plain discovery finds the right repo.
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_PREFIX GIT_COMMON_DIR GIT_OBJECT_DIRECTORY \
+  GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_NAMESPACE GIT_CONFIG_PARAMETERS GIT_CONFIG_COUNT
 if [ -z "${SKILLEX_PRE_PUSH_LOCKED:-}" ]; then
   export SKILLEX_PRE_PUSH_LOCKED=1
   exec flock -w 3600 "$lock" "$0" "$@"
