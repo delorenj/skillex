@@ -11,7 +11,10 @@ _.file = [".env"]
 # every link skillex wrote, exiting 0. Nothing invokes any script here by bare name
 # (every task uses an absolute '{{config_root}}/.mise/scripts/...' path, and the two
 # scripts find each other via Path(__file__).resolve().parent), so this costs nothing.
-_.path = ["agents/hermes/pm", "agents/hermes/pm/hermes", ".mise/scripts"]
+#
+# The PM launcher (agents/hermes/pm/hermes) is deliberately NOT on PATH either: it
+# shadowed the global hermes (Story 7.1 AC4). Talk to skillex-pm with `hermes-pm`.
+_.path = [".mise/scripts"]
 
 # This block will handle the linking of
 # agent files to the main AGENTS.md file.
