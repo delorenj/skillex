@@ -14,7 +14,9 @@ import { registerRootCommands } from "./commands/roots.js";
 import { registerSelectionCommands } from "./commands/selections.js";
 import { registerSyncCommand } from "./commands/sync.js";
 import { registerVendorCommands } from "./commands/vendor.js";
+import { contextSkillGraph } from "./core/skill-graph-context.js";
 import { renderSkillGraphHtml } from "./core/skill-graph-html.js";
+import { parseDepth, parseFocus, startSkillGraphServer } from "./core/skill-graph-serve.js";
 import {
   createSkill,
   ExitCode,
@@ -27,7 +29,6 @@ import {
   type SkillDetails,
   SkillexError,
   showSkill,
-  skillGraph,
   VERSION,
 } from "./index.js";
 import { usageSpec } from "./usage.js";
@@ -85,6 +86,13 @@ interface CliOptions {
   lint?: boolean;
   lintWild?: boolean;
   html?: string;
+  context?: string;
+  focus?: string[];
+  depth?: string;
+  serve?: boolean;
+  listen?: string;
+  hermesRoot?: string;
+  hermesAgent?: string;
 }
 
 function registryOptions(command: Command): RegistryOptions {
@@ -258,41 +266,124 @@ skill
 program
   .command("graph")
   .description(
-    "Map every skill: repo-owned hubs, vendored and wild skills, sub-skills, sets, packs and sources, with what each routes to and its hub lint.",
+    "Map the skills a context can load, read from disk now: in a project, its bound PM's view (Hermes' own resolver); elsewhere, the global roots. Shows hubs, vendored, wild and local skills, sub-skills, sets, packs and sources, what each routes to, and hub lint.",
   )
+  .option(
+    "--context <context>",
+    "auto (default: a Hermes session's profile, else the project's bound PM, else the project manifest, else global), catalog, global, project:<dir> or profile:<name>.",
+  )
+  .option(
+    "--focus <names...>",
+    "Only these skills, hubs, sets or packs (comma-separated or repeated; * globs) and their neighbourhood.",
+  )
+  .option("--depth <n>", "Hops around --focus (default 1; 0 or all = unbounded).")
   .option("--no-lint", "Skip per-node hub lint (structure only).")
   .option("--lint-wild", "Also lint wild skills (default: hubs and vendored skills only).")
   .option(
     "--html <file>",
-    "Also write a self-contained interactive page of the graph to this file.",
+    "Also write a self-contained interactive snapshot of the graph to this file.",
   )
+  .option(
+    "--serve",
+    "Serve the live graph: every page load reads the skill roots again (?context=&focus=&depth=).",
+  )
+  .option("--listen <host:port>", "Address for --serve (default 127.0.0.1:18799).")
+  .option("--hermes-root <path>", "Hermes installation root for profile contexts.")
+  .option("--hermes-agent <path>", "hermes-agent checkout whose resolver reads profile contexts.")
   .action(async (_local, command: Command) => {
-    const { lint, lintWild, html } = command.optsWithGlobals<CliOptions>();
-    const result = await skillGraph({
+    const { lint, lintWild, html, context, focus, depth, serve, listen, hermesRoot, hermesAgent } =
+      command.optsWithGlobals<CliOptions>();
+    const parsedDepth = parseDepth(depth);
+    if (depth !== undefined && parsedDepth === null) {
+      emit(graphUsage("--depth must be a whole number of hops (0 or all = unbounded)."));
+      return;
+    }
+    const focusNames = parseFocus(focus);
+    const options = {
       ...registryOptions(command),
       ...(lint === false ? { lint: false } : {}),
       ...(lintWild === true ? { lintWild: true } : {}),
-    });
+      ...(context === undefined ? {} : { context }),
+      ...(focusNames.length ? { focus: focusNames } : {}),
+      ...(parsedDepth === null ? {} : { depth: parsedDepth }),
+      ...(hermesRoot === undefined ? {} : { hermesRoot }),
+      ...(hermesAgent === undefined ? {} : { hermesAgent }),
+    };
+    if (serve) {
+      const address = parseListen(listen ?? "127.0.0.1:18799");
+      if (!address) {
+        emit(graphUsage("--listen must be host:port, e.g. 127.0.0.1:18799."));
+        return;
+      }
+      handled = true;
+      const server = await startSkillGraphServer({
+        ...options,
+        ...address,
+        log: (line) => process.stderr.write(`${line}\n`),
+      });
+      process.stderr.write(`skillex graph: serving ${server.url}\n`);
+      const stop = () => {
+        void server.close().then(() => process.exit(0));
+      };
+      process.once("SIGINT", stop);
+      process.once("SIGTERM", stop);
+      await new Promise(() => {});
+      return;
+    }
+    const result = await contextSkillGraph(options);
     const data = result.data;
-    if (data && html !== undefined) await writeFile(html, renderSkillGraphHtml(data), "utf8");
+    if (data && html !== undefined)
+      await writeFile(
+        html,
+        renderSkillGraphHtml(data, new Date(), { findings: result.findings }),
+        "utf8",
+      );
     if (!data) {
       emit(result);
       return;
     }
     const n = data.summary.nodes;
     const h = data.summary.health;
+    const ctx = data.context;
     const lines = [
-      `${n.hub} hubs, ${n.vendored} vendored, ${n.wild} wild, ${n.subskill} sub-skills; ${n.set} sets, ${n.pack} packs, ${n.source} sources`,
+      `${ctx ? `${ctx.label}${ctx.detectedFrom ? ` (from ${ctx.detectedFrom})` : ""}` : "catalog"}${data.focus ? `; focus ${data.focus.names.join(", ")} depth ${data.focus.depth || "all"}` : ""}`,
+      `${n.hub} hubs, ${n.vendored} vendored, ${n.wild} wild, ${n.local} local, ${n.subskill} sub-skills; ${n.set} sets, ${n.pack} packs, ${n.source} sources`,
       `${data.edges.length} edges; health ${h.ok} ok, ${h.warning} warning, ${h.error} error`,
     ];
+    if (ctx && ctx.kind !== "catalog") {
+      const c = ctx.counts;
+      lines.push(
+        `context: ${c.loaded} loaded, ${c.shadowed} shadowed, ${c.disabled} disabled, ${c.quarantined} quarantined, ${c.broken} broken, ${c.missing} missing, ${c.ambiguous} ambiguous; ${c.unavailable} pointed at but unavailable`,
+      );
+    }
     for (const node of data.nodes)
-      if ((node.kind === "hub" || node.kind === "source") && node.health !== "ok")
+      if (
+        (node.kind === "hub" ||
+          node.kind === "source" ||
+          (node.context !== undefined && node.context.status !== "unavailable")) &&
+        node.health !== "ok"
+      )
         lines.push(
-          `  ${node.health === "error" ? "ERROR" : "WARN "} ${node.kind} ${node.name}: ${[...new Set(node.findings.map((f) => f.code))].join(", ")}`,
+          `  ${node.health === "error" ? "ERROR" : "WARN "} ${node.kind} ${node.name}: ${[...new Set(node.findings.filter((f) => f.severity !== "info").map((f) => f.code))].join(", ")}`,
         );
     if (html !== undefined) lines.push(`Wrote ${html}`);
     emit(result, `${lines.join("\n")}\n`);
   });
+
+function graphUsage(message: string): ResultEnvelope<null> {
+  return makeResult("graph", null, {
+    exit: ExitCode.CONFIG,
+    findings: [{ code: "E_USAGE", severity: "error", message }],
+  });
+}
+
+function parseListen(value: string): { host: string; port: number } | null {
+  const match = /^(.*):(\d{1,5})$/.exec(value);
+  if (!match) return null;
+  const port = Number(match[2]);
+  const host = (match[1] ?? "").replace(/^\[(.*)\]$/, "$1") || "127.0.0.1";
+  return port > 0 && port < 65536 ? { host, port } : null;
+}
 
 function mutationText(
   data: {

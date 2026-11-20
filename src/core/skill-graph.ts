@@ -23,8 +23,12 @@ import type { VendorSource } from "./vendor-types.js";
  * - `vendored`  catalog copy whose provenance names an upstream source
  * - `wild`      catalog skill no repository owns
  * - `subskill`  `subskills/<name>/SUBSKILL.md` inside any skill
+ * - `local`     (context views only) a skill an agent can load that has no catalog definition
  * - `set`, `pack` compositions that reference skills
  * - `source`    a sources.toml repository (link or vendor), with the hubs its skills root holds
+ *
+ * The catalog graph is every definition. A context graph (skill-graph-context.ts) is the same
+ * graph restricted to what one agent context can load right now, read from disk on every call.
  *
  * Edges
  * - `owns`      source -> hub (link mode)
@@ -39,6 +43,7 @@ export type SkillGraphNodeKind =
   | "hub"
   | "vendored"
   | "wild"
+  | "local"
   | "subskill"
   | "set"
   | "pack"
@@ -68,6 +73,44 @@ export interface SkillGraphNode {
   readonly mode?: "link" | "vendor";
   readonly health: SkillGraphHealth;
   readonly findings: readonly Diagnostic[];
+  /** Context views: how the context sees this node (absent in the catalog view). */
+  readonly context?: SkillContextState;
+}
+
+/**
+ * How one context sees a skill node.
+ * - `loaded`      the agent can load it by name
+ * - `shadowed`    present, but a higher-precedence copy owns the name
+ * - `ambiguous`   two different same-tier skills share the name; the agent refuses both
+ * - `disabled`    present but switched off by the context's config
+ * - `quarantined` present, but the runtime's scanner refused it
+ * - `broken`      the entry is a dangling link or has no readable SKILL.md
+ * - `missing`     the context's manifest selects it, but nothing is on disk
+ * - `unavailable` not in this context; drawn only because a visible skill points at it
+ */
+export type SkillContextStatus =
+  | "loaded"
+  | "shadowed"
+  | "ambiguous"
+  | "disabled"
+  | "quarantined"
+  | "broken"
+  | "missing"
+  | "unavailable";
+
+export interface SkillContextEntry {
+  /** The name the agent loads it by (Hermes may use a relative path for a same-tier duplicate). */
+  readonly name: string;
+  readonly status: SkillContextStatus;
+  /** The root tier that holds it, e.g. project, profile, external, global. */
+  readonly tier: string | null;
+  /** Where the agent finds it (the link or directory inside the root). */
+  readonly entry: string | null;
+}
+
+export interface SkillContextState {
+  readonly status: SkillContextStatus;
+  readonly entries: readonly SkillContextEntry[];
 }
 
 export interface SkillGraphEdge {
@@ -88,6 +131,35 @@ export interface SkillGraphData {
   readonly summary: SkillGraphSummary;
   readonly nodes: readonly SkillGraphNode[];
   readonly edges: readonly SkillGraphEdge[];
+  /** The context this graph was read for; absent (or kind `catalog`) for the whole catalog. */
+  readonly context?: SkillGraphContextInfo;
+  /** The focus applied to this graph, if any. */
+  readonly focus?: SkillGraphFocus;
+}
+
+export type SkillGraphContextKind = "catalog" | "global" | "project" | "profile";
+
+export interface SkillGraphContextInfo {
+  readonly kind: SkillGraphContextKind;
+  /** Canonical spelling, accepted back by --context and ?context= (e.g. profile:skillex-pm). */
+  readonly id: string;
+  readonly label: string;
+  readonly profile: string | null;
+  readonly project: string | null;
+  /** How the context was chosen: an explicit --context, or auto-detected from a directory. */
+  readonly detectedFrom: string | null;
+  /** The reader that produced the visible set (the runtime's own resolver where one exists). */
+  readonly resolver: string;
+  /** Skill roots in precedence order. */
+  readonly roots: readonly { readonly tier: string; readonly path: string }[];
+  readonly counts: Readonly<Record<SkillContextStatus, number>>;
+}
+
+export interface SkillGraphFocus {
+  readonly names: readonly string[];
+  /** Hops from the focused skills; 0 means unbounded. */
+  readonly depth: number;
+  readonly seeds: readonly string[];
 }
 
 export interface SkillGraphOptions extends RegistryOptions {
@@ -344,89 +416,164 @@ export async function skillGraph(
       edge(compositionId, id, "member");
     }
 
-    // Text edges, attributed to the skill or to the sub-skill whose directory holds the file.
-    for (const file of await markdownFiles(skill.path)) {
-      const parts = relative(skill.path, file).split(sep);
-      let owner = id;
-      if (parts[0] === "subskills" && parts.length >= 3 && parts[1]) {
-        const subName = parts[1];
-        owner = `subskill:${skill.name}/${subName}`;
-        if (!nodes.has(owner)) {
-          const subPath = join(skill.path, "subskills", subName);
-          let description: string | null = null;
-          try {
-            const text = await readFile(join(subPath, "SUBSKILL.md"), "utf8");
-            const meta = parseSkillMetadata(text, join(subPath, "SUBSKILL.md"));
-            description = typeof meta.description === "string" ? meta.description : null;
-          } catch {
-            description = null;
-          }
-          nodes.set(owner, {
-            id: owner,
-            kind: "subskill",
-            name: `${skill.name}/${subName}`,
-            path: subPath,
-            description,
-            source: sourceName,
-            repo: null,
-            root: null,
-            origin: null,
-            health: graphHealth(findings.filter((item) => item.path?.startsWith(subPath + sep))),
-            findings: findings.filter((item) => item.path?.startsWith(subPath + sep)),
-          });
-          edge(id, owner, "routes");
+    const scanned = await scanSkillText(skill.path, skill.name, id, known);
+    for (const sub of scanned.subskills) {
+      if (nodes.has(sub.id)) continue;
+      const subFindings = findings.filter((item) => item.path?.startsWith(sub.path + sep));
+      nodes.set(sub.id, {
+        id: sub.id,
+        kind: "subskill",
+        name: sub.name,
+        path: sub.path,
+        description: sub.description,
+        source: sourceName,
+        repo: null,
+        root: null,
+        origin: null,
+        health: graphHealth(subFindings),
+        findings: subFindings,
+      });
+    }
+    for (const scannedEdge of scanned.edges)
+      edge(scannedEdge.from, scannedEdge.to, scannedEdge.kind);
+  }
+  const finalEdges = finishEdges(edges);
+  const finalNodes = [...nodes.values()].sort((a, b) => compare(a.id, b.id));
+  const findings = [...listed.findings, ...sourceFindings];
+  return makeResult(
+    "graph",
+    {
+      registry,
+      summary: summarizeGraph(finalNodes, finalEdges),
+      nodes: finalNodes,
+      edges: finalEdges,
+    },
+    { exit: findings.length ? ExitCode.PARTIAL : ExitCode.SUCCESS, findings },
+  );
+}
+
+export interface ScannedSubskill {
+  readonly id: string;
+  readonly name: string;
+  readonly path: string;
+  readonly description: string | null;
+}
+
+/**
+ * Text edges of one skill directory, attributed to the skill or to the sub-skill whose
+ * directory holds the file: `routes` to each sub-skill, `loads` for the explicit load phrase,
+ * `mentions` for a backticked span that is exactly a name in `known`.
+ */
+export async function scanSkillText(
+  skillPath: string,
+  skillName: string,
+  id: string,
+  known: ReadonlySet<string>,
+): Promise<{ edges: SkillGraphEdge[]; subskills: ScannedSubskill[] }> {
+  const edges: SkillGraphEdge[] = [];
+  const subskills = new Map<string, ScannedSubskill>();
+  for (const file of await markdownFiles(skillPath)) {
+    const parts = relative(skillPath, file).split(sep);
+    let owner = id;
+    if (parts[0] === "subskills" && parts.length >= 3 && parts[1]) {
+      const subName = parts[1];
+      owner = `subskill:${skillName}/${subName}`;
+      if (!subskills.has(owner)) {
+        const subPath = join(skillPath, "subskills", subName);
+        let description: string | null = null;
+        try {
+          const text = await readFile(join(subPath, "SUBSKILL.md"), "utf8");
+          const meta = parseSkillMetadata(text, join(subPath, "SUBSKILL.md"));
+          description = typeof meta.description === "string" ? meta.description : null;
+        } catch {
+          description = null;
         }
-      }
-      let text: string;
-      try {
-        text = await readFile(file, "utf8");
-      } catch {
-        continue;
-      }
-      for (const line of markdownLines(text)) {
-        for (const match of line.raw.matchAll(loadPhrase)) {
-          const target = match[1];
-          if (target && target !== skill.name && known.has(target))
-            edge(owner, `skill:${target}`, "loads");
-        }
-        for (const span of line.spans)
-          if (span !== skill.name && isSkillName(span) && known.has(span))
-            edge(owner, `skill:${span}`, "mentions");
+        subskills.set(owner, {
+          id: owner,
+          name: `${skillName}/${subName}`,
+          path: subPath,
+          description,
+        });
+        edges.push({ from: id, to: owner, kind: "routes" });
       }
     }
+    let text: string;
+    try {
+      text = await readFile(file, "utf8");
+    } catch {
+      continue;
+    }
+    for (const line of markdownLines(text)) {
+      for (const match of line.raw.matchAll(loadPhrase)) {
+        const target = match[1];
+        if (target && target !== skillName && known.has(target))
+          edges.push({ from: owner, to: `skill:${target}`, kind: "loads" });
+      }
+      for (const span of line.spans)
+        if (span !== skillName && isSkillName(span) && known.has(span))
+          edges.push({ from: owner, to: `skill:${span}`, kind: "mentions" });
+    }
   }
-  // A loads edge supersedes a mentions edge between the same pair.
+  return { edges, subskills: [...subskills.values()] };
+}
+
+/** Dedupe, drop a mentions edge that a loads edge between the same pair supersedes, and sort. */
+export function finishEdges(edges: readonly SkillGraphEdge[]): SkillGraphEdge[] {
+  const seen = new Set<string>();
+  const unique = edges.filter((e) => {
+    const key = `${e.from}\u0000${e.to}\u0000${e.kind}`;
+    if (e.from === e.to || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
   const loads = new Set(
-    edges.filter((e) => e.kind === "loads").map((e) => `${e.from}\u0000${e.to}`),
+    unique.filter((e) => e.kind === "loads").map((e) => `${e.from}\u0000${e.to}`),
   );
-  const finalEdges = edges
+  return unique
     .filter((e) => e.kind !== "mentions" || !loads.has(`${e.from}\u0000${e.to}`))
     .sort((a, b) => compare(`${a.from}|${a.to}|${a.kind}`, `${b.from}|${b.to}|${b.kind}`));
-  const finalNodes = [...nodes.values()].sort((a, b) => compare(a.id, b.id));
+}
 
+export const nodeKinds: readonly SkillGraphNodeKind[] = [
+  "hub",
+  "vendored",
+  "wild",
+  "local",
+  "subskill",
+  "set",
+  "pack",
+  "source",
+];
+export const edgeKinds: readonly SkillGraphEdgeKind[] = [
+  "owns",
+  "vendors",
+  "routes",
+  "member",
+  "loads",
+  "mentions",
+];
+
+export function summarizeGraph(
+  nodes: readonly SkillGraphNode[],
+  edges: readonly SkillGraphEdge[],
+): SkillGraphSummary {
   const count = <K extends string>(keys: readonly K[], values: readonly K[]) => {
     const totals = Object.fromEntries(keys.map((key) => [key, 0])) as Record<K, number>;
     for (const value of values) totals[value] += 1;
     return totals;
   };
-  const summary: SkillGraphSummary = {
+  return {
     nodes: count(
-      ["hub", "vendored", "wild", "subskill", "set", "pack", "source"] as const,
-      finalNodes.map((node) => node.kind),
+      nodeKinds,
+      nodes.map((node) => node.kind),
     ),
     edges: count(
-      ["owns", "vendors", "routes", "member", "loads", "mentions"] as const,
-      finalEdges.map((e) => e.kind),
+      edgeKinds,
+      edges.map((e) => e.kind),
     ),
     health: count(
       ["ok", "warning", "error"] as const,
-      finalNodes.map((node) => node.health),
+      nodes.map((node) => node.health),
     ),
   };
-  const findings = [...listed.findings, ...sourceFindings];
-  return makeResult(
-    "graph",
-    { registry, summary, nodes: finalNodes, edges: finalEdges },
-    { exit: findings.length ? ExitCode.PARTIAL : ExitCode.SUCCESS, findings },
-  );
 }

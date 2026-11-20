@@ -337,9 +337,15 @@ export {
 } from "./core/skill-acquisition.js";
 export {
   graphHealth,
+  type SkillContextEntry,
+  type SkillContextState,
+  type SkillContextStatus,
+  type SkillGraphContextInfo,
+  type SkillGraphContextKind,
   type SkillGraphData,
   type SkillGraphEdge,
   type SkillGraphEdgeKind,
+  type SkillGraphFocus,
   type SkillGraphHealth,
   type SkillGraphNode,
   type SkillGraphNodeKind,
@@ -347,7 +353,18 @@ export {
   type SkillGraphSummary,
   skillGraph,
 } from "./core/skill-graph.js";
-export { renderSkillGraphHtml } from "./core/skill-graph-html.js";
+export {
+  contextSkillGraph,
+  focusGraph,
+  listGraphContexts,
+  parseContextSpec,
+  type SkillGraphContextOptions,
+} from "./core/skill-graph-context.js";
+export { renderSkillGraphHtml, type SkillGraphHtmlOptions } from "./core/skill-graph-html.js";
+export {
+  type SkillGraphServeOptions,
+  startSkillGraphServer,
+} from "./core/skill-graph-serve.js";
 export { inspectVendorStatus, listVendorSources, showVendorSource } from "./core/vendor-inspect.js";
 export { syncVendorSources } from "./core/vendor-sync.js";
 export type {
