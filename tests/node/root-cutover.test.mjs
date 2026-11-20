@@ -63,11 +63,13 @@ async function fixture(t) {
   symlinkSync(repository, join(base, "node_modules", "@delorenj", "skillex"));
   for (const dependency of Object.keys(
     JSON.parse(readFileSync(join(repository, "package.json"), "utf8")).dependencies,
-  ))
+  )) {
+    directory(dirname(join(base, "node_modules", dependency)));
     symlinkSync(
       join(repository, "node_modules", dependency),
       join(base, "node_modules", dependency),
     );
+  }
   const module = join(base, "root-cutover.mjs");
   await build({
     absWorkingDir: repository,

@@ -44,6 +44,7 @@
     "prepublishOnly": "npm run check"
   },
   "dependencies": {
+    "@usage-spec/commander": "^1.1.0",
     "ajv": "^8.20.0",
     "commander": "^15.0.0",
     "semver": "^7.8.5",

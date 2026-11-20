@@ -44,9 +44,7 @@ function snapshot(root) {
 
 test("root adopt Commander registration previews/applies before normalization without global manifest resolution", async (t) => {
   // Receipt state cannot be below ~/.claude (a Git checkout on this host).
-  const base = mkdtempSync(
-    join(process.platform === "linux" ? "/tmp" : tmpdir(), "skillex-root-cli-"),
-  );
+  const base = mkdtempSync(join(tmpdir(), "skillex-root-cli-"));
   t.after(() => rmSync(base, { recursive: true, force: true }));
   const file = (path, text) => {
     mkdirSync(dirname(path), { recursive: true });
@@ -68,11 +66,13 @@ test("root adopt Commander registration previews/applies before normalization wi
   symlinkSync(repository, join(base, "node_modules", "@delorenj", "skillex"));
   for (const dependency of Object.keys(
     JSON.parse(readFileSync(join(repository, "package.json"), "utf8")).dependencies,
-  ))
+  )) {
+    mkdirSync(dirname(join(base, "node_modules", dependency)), { recursive: true });
     symlinkSync(
       join(repository, "node_modules", dependency),
       join(base, "node_modules", dependency),
     );
+  }
   const cli = join(base, "cli.mjs");
   // Only this command is registered: coordinator owns src/cli.ts integration.
   await build({

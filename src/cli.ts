@@ -30,6 +30,7 @@ import {
   skillGraph,
   VERSION,
 } from "./index.js";
+import { usageSpec } from "./usage.js";
 
 const args = process.argv.slice(2);
 const terminator = args.indexOf("--");
@@ -40,10 +41,12 @@ const jsonOutput = flags.includes("--json");
 let output = "";
 let handled = false;
 
-const program = new Command()
+export { usageSpec } from "./usage.js";
+export const program = new Command()
   .name("skillex")
   .description("Manage the canonical skill catalog and agent activation roots.")
   .version(VERSION, "-V, --version", "Show the installed package version.")
+  .option("--usage-spec", "Print the usage specification.")
   .option("--json", "Emit a structured result on stdout.")
   .option("--registry-root <path>", "Use this local registry checkout for catalog operations.")
   .enablePositionalOptions()
@@ -376,6 +379,8 @@ try {
         ],
       }),
     );
+  } else if (flags.includes("--usage-spec")) {
+    process.stdout.write(usageSpec(program));
   } else {
     await program.parseAsync(parseSharedOptions(), { from: "user" });
     if (!handled) help(program);
