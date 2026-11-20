@@ -53,6 +53,14 @@ jobs:
       - name: npm new enough for trusted publishing (11.5.1+)
         if: steps.version.outputs.new == 'true'
         run: npm install -g npm@^11.21.0 && npm --version
+      # prepublishOnly runs `npm run check`; tests/node/usage.test.mjs needs the usage CLI (as node.yml).
+      - name: Install the usage CLI
+        if: steps.version.outputs.new == 'true'
+        run: |
+          curl -fsSL https://github.com/jdx/usage/releases/download/v7.4.0/usage-x86_64-unknown-linux-musl.tar.gz \
+            | tar -xz -C "$RUNNER_TEMP"
+          sudo install -m 755 "$RUNNER_TEMP/usage" /usr/local/bin/usage
+          usage --version
       - if: steps.version.outputs.new == 'true'
         run: npm ci
       - if: steps.version.outputs.new == 'true'

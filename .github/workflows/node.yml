@@ -30,7 +30,7 @@ jobs:
         run: |
           curl -fsSL https://github.com/jdx/usage/releases/download/v7.4.0/usage-x86_64-unknown-linux-musl.tar.gz \
             | tar -xz -C "$RUNNER_TEMP"
-          install -m 755 "$(find "$RUNNER_TEMP" -type f -name usage | head -1)" /usr/local/bin/usage
+          sudo install -m 755 "$RUNNER_TEMP/usage" /usr/local/bin/usage
           usage --version
       - run: npm ci
       - run: npm run check
