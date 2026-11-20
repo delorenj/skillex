@@ -1,6 +1,5 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import type { Diagnostic, ResultEnvelope } from "./result.js";
-import type { SkillGraphData } from "./skill-graph.js";
+import type { Diagnostic } from "./result.js";
 import {
   contextSkillGraph,
   listGraphContexts,
@@ -62,17 +61,8 @@ export function startSkillGraphServer(
   const host = options.host ?? "127.0.0.1";
   const port = options.port ?? 18799;
   const log = options.log ?? (() => {});
-  // Concurrent identical requests share one read; the next request reads again.
-  const inflight = new Map<string, Promise<ResultEnvelope<SkillGraphData | null>>>();
-  const read = (query: SkillGraphQuery) => {
-    const key = JSON.stringify(query);
-    let pending = inflight.get(key);
-    if (!pending) {
-      pending = contextSkillGraph({ ...options, ...query }).finally(() => inflight.delete(key));
-      inflight.set(key, pending);
-    }
-    return pending;
-  };
+  // No sharing and no cache: a request that arrives after a change on disk must see it.
+  const read = (query: SkillGraphQuery) => contextSkillGraph({ ...options, ...query });
   const send = (res: ServerResponse, status: number, type: string, body: string) => {
     res.writeHead(status, {
       "content-type": `${type}; charset=utf-8`,

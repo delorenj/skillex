@@ -117,6 +117,14 @@ async function exists(path: string): Promise<boolean> {
   }
 }
 
+async function isDirectory(path: string): Promise<boolean> {
+  try {
+    return (await stat(path)).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
 /** True when the path (following links) is a regular file. */
 async function isFile(path: string): Promise<boolean> {
   try {
@@ -218,6 +226,11 @@ async function concreteSpec(
   if (spec.kind !== "auto" && spec.kind !== "project") return { spec, detectedFrom: null };
   const home = resolve(options.home ?? homedir());
   const start = spec.kind === "project" ? spec.path : resolve(options.cwd ?? process.cwd());
+  if (spec.kind === "project" && !(await isDirectory(spec.path)))
+    usage(
+      `${spec.path} is not a directory.`,
+      "Point project:<dir> at an existing project directory.",
+    );
   if (spec.kind === "auto") {
     const session = sessionProfile(options.env ?? process.env);
     if (session && (await profileExists(session, options)))
@@ -396,12 +409,53 @@ roots, _ = st.skill_search_dirs()
 everything = st._skill_catalog(skip_disabled=True, include_hidden=True)
 shown = {str(s["path"]) for s in st._skill_catalog(skip_disabled=True)}
 enabled = {str(s["path"]) for s in st._skill_catalog(include_hidden=True)}
+# What skill_view(name) would do, without reading or rendering the skill: Hermes' own locate_skill
+# (precedence, same-tier refusal, identical-copy dedupe, quarantine gate).
+locate = getattr(st, "locate_skill", None)
+looked = {}
+# One probe reads one snapshot, so the loader's per-name rescans can share their reads (this keeps
+# a few hundred lookups under a second instead of re-parsing every SKILL.md for every name).
+_frontmatter, _fm_cache = st._safe_frontmatter, {}
+def _cached_frontmatter(path=None, *, content=None):
+    if content is not None:
+        return _frontmatter(content=content)
+    key = str(path)
+    if key not in _fm_cache:
+        _fm_cache[key] = _frontmatter(path)
+    return _fm_cache[key]
+_index, _index_cache = su.iter_skill_index_files, {}
+def _cached_index(*args):
+    key = tuple(str(a) for a in args)
+    if key not in _index_cache:
+        _index_cache[key] = list(_index(*args))
+    return iter(_index_cache[key])
+if locate is not None:
+    st._safe_frontmatter = _cached_frontmatter
+    su.iter_skill_index_files = _cached_index
+def lookup(name):
+    if locate is None:
+        return None
+    if name not in looked:
+        try:
+            error, _sd, md = locate(name, None, roots)
+            if error is None:
+                looked[name] = {"ok": True, "path": str(md), "error": None}
+            else:
+                try:
+                    message = json.loads(error).get("error") or str(error)
+                except Exception:
+                    message = str(error)
+                looked[name] = {"ok": False, "path": None, "error": str(message)}
+        except Exception as e:
+            looked[name] = {"ok": False, "path": None, "error": f"{type(e).__name__}: {e}"}
+    return looked[name]
 rows = []
 for s in everything:
     p = str(s["path"])
+    load = s.get("load_name") or str(s["name"])
     rows.append({"name": str(s["name"]), "load_name": s.get("load_name"), "status": s.get("status"),
                  "tier": int(s["tier"]), "root": str(s["root"]), "path": p,
-                 "hidden": p not in shown, "disabled": p not in enabled})
+                 "hidden": p not in shown, "disabled": p not in enabled, "lookup": lookup(load)})
 quarantined = []
 for tier, d in roots:
     if tier != su.TIER_PROJECT:
@@ -428,6 +482,8 @@ interface HermesProbe {
     path: string;
     hidden: boolean;
     disabled: boolean;
+    /** Hermes' locate_skill for the name an agent loads this row by; null on an older Hermes. */
+    lookup?: { ok: boolean; path: string | null; error: string | null } | null;
   }[];
   readonly quarantined: readonly { path: string; root: string; tier: number }[];
 }
@@ -507,30 +563,51 @@ async function profileView(
   const skills: ContextSkill[] = [];
   const loadable = new Set<string>();
   for (const row of probe.rows) {
-    const status: SkillContextStatus =
-      row.status === "shadowed"
-        ? "shadowed"
-        : row.disabled
-          ? "disabled"
-          : row.hidden
-            ? "disabled"
-            : row.status === "ambiguous"
-              ? "ambiguous"
-              : "loaded";
-    if (status === "loaded") loadable.add(row.name);
+    const loadName = row.load_name ?? row.name;
+    const dir = await canonical(dirname(row.path));
+    let status: SkillContextStatus;
+    let detail: string | undefined;
+    if (row.disabled || row.hidden) {
+      status = "disabled";
+      detail = row.hidden
+        ? "hidden by a platform, environment or app gate"
+        : "listed in skills.disabled";
+    } else if (row.lookup) {
+      // Loadable means Hermes' loader serves this very file for the name, nothing less.
+      // Compared as Hermes names it: an identical copy in another root is not the one it serves.
+      const served = row.lookup.ok && row.lookup.path ? resolve(dirname(row.lookup.path)) : null;
+      if (row.lookup.ok && served === resolve(dirname(row.path))) status = "loaded";
+      else if (row.lookup.ok) {
+        status = "shadowed";
+        detail = `${loadName} resolves to ${row.lookup.path}`;
+      } else if (/ambiguous|share this name/i.test(row.lookup.error ?? "")) {
+        status = "ambiguous";
+        detail = "another same-tier skill shares this name";
+      } else if (/quarantined/i.test(row.lookup.error ?? "")) {
+        status = "shadowed";
+        detail = `a quarantined project copy owns the name ${loadName}, so Hermes refuses it`;
+      } else {
+        status = "broken";
+        detail = row.lookup.error ?? "Hermes cannot load it";
+      }
+    } else {
+      // An older Hermes without locate_skill: its catalog status is the best evidence.
+      status =
+        row.status === "shadowed"
+          ? "shadowed"
+          : row.status === "ambiguous"
+            ? "ambiguous"
+            : "loaded";
+      if (status === "ambiguous") detail = "another same-tier skill shares this name";
+    }
+    if (status === "loaded") loadable.add(loadName);
     skills.push({
-      name: row.status === "ambiguous" && row.load_name ? row.load_name : row.name,
-      dir: await canonical(dirname(row.path)),
+      name: loadName,
+      dir,
       entry: dirname(row.path),
       tier: hermesTiers[row.tier] ?? String(row.tier),
       status,
-      ...(row.hidden
-        ? { detail: "hidden by a platform, environment or app gate" }
-        : row.disabled
-          ? { detail: "listed in skills.disabled" }
-          : row.status === "ambiguous"
-            ? { detail: "another same-tier skill shares this name" }
-            : {}),
+      ...(detail ? { detail } : {}),
     });
   }
   for (const item of probe.quarantined) {
@@ -788,6 +865,7 @@ export async function applyContext(
     if (id) return id;
     const node = catalogByName.get(name);
     if (!node) return null;
+    if (included.has(node.id)) return node.id;
     if (!ghosts.has(node.id))
       ghosts.set(node.id, {
         ...node,
@@ -800,15 +878,12 @@ export async function applyContext(
 
   const edges: SkillGraphEdge[] = [];
   const subskills = new Map<string, SkillGraphNode>();
+  const subOwner = new Map<string, string>();
+  for (const e of catalog.edges)
+    if (e.kind === "routes" && included.has(e.from)) subOwner.set(e.to, e.from);
   // Catalog edges out of included skills (and their sub-skills), retargeted by name.
-  const ownerOf = (id: string): string | null => {
-    if (included.has(id)) return id;
-    if (id.startsWith("subskill:")) {
-      const hub = `skill:${id.slice("subskill:".length).split("/")[0]}`;
-      return included.has(hub) ? hub : null;
-    }
-    return null;
-  };
+  const ownerOf = (id: string): string | null =>
+    included.has(id) ? id : (subOwner.get(id) ?? null);
   for (const e of catalog.edges) {
     const owner = ownerOf(e.from);
     if (!owner) continue;
@@ -826,9 +901,13 @@ export async function applyContext(
   for (const local of locals) {
     const building = included.get(local.id) as Building;
     const scanned = await scanSkillText(local.dir, building.node.name, local.id, known);
-    for (const sub of scanned.subskills)
-      subskills.set(sub.id, {
-        id: sub.id,
+    // Two copies of a name each own their sub-skills: key them by the owning node.
+    const subId = (id: string) =>
+      id.startsWith("subskill:") ? `subskill:${local.id}/${id.slice(id.indexOf("/") + 1)}` : id;
+    for (const sub of scanned.subskills) {
+      subOwner.set(subId(sub.id), local.id);
+      subskills.set(subId(sub.id), {
+        id: subId(sub.id),
         kind: "subskill",
         name: sub.name,
         path: sub.path,
@@ -840,36 +919,48 @@ export async function applyContext(
         health: "ok",
         findings: [],
       });
+    }
     for (const e of scanned.edges) {
-      if (e.kind === "routes") edges.push(e);
+      if (e.kind === "routes") edges.push({ ...e, to: subId(e.to) });
       else {
         const to = target(e.to.slice("skill:".length));
-        if (to) edges.push({ ...e, to });
+        if (to) edges.push({ ...e, from: subId(e.from), to });
       }
     }
   }
+  const statusOf = new Map<string, SkillContextStatus>();
+  for (const [id, building] of included)
+    statusOf.set(
+      id,
+      building.entries
+        .map((entry) => entry.status)
+        .sort((a, b) => statusRank(a) - statusRank(b))[0] as SkillContextStatus,
+    );
   // A loads edge to something this context cannot load is a routing hole.
+  const holes = new Set<string>();
   for (const e of edges) {
-    if (e.kind !== "loads" || !ghosts.has(e.to)) continue;
+    if (e.kind !== "loads") continue;
+    const status = ghosts.has(e.to) ? "unavailable" : statusOf.get(e.to);
+    if (!status || status === "loaded") continue;
     const owner = ownerOf(e.from) ?? e.from;
     const building = included.get(owner);
-    const name = (ghosts.get(e.to) as SkillGraphNode).name;
-    building?.findings.push({
+    if (!building || holes.has(`${owner}\u0000${e.to}`)) continue;
+    holes.add(`${owner}\u0000${e.to}`);
+    const name = (ghosts.get(e.to) ?? included.get(e.to)?.node)?.name ?? e.to;
+    building.findings.push({
       code: "W_CONTEXT_LOADS_UNAVAILABLE",
       severity: "warning",
-      message: `Loads ${name}, which this context cannot load.`,
+      message: `Loads ${name}, which this context cannot load (${status}).`,
       name: building.node.name,
       detail: [name],
-      fix: `Select ${name} for this context, or route around it.`,
+      fix: `Make ${name} loadable in this context, or route around it.`,
     });
   }
 
   // Ownership and composition context for what is included.
   const nodes = new Map<string, SkillGraphNode>();
   for (const [id, building] of included) {
-    const status = building.entries
-      .map((entry) => entry.status)
-      .sort((a, b) => statusRank(a) - statusRank(b))[0] as SkillContextStatus;
+    const status = statusOf.get(id) as SkillContextStatus;
     nodes.set(id, {
       ...building.node,
       findings: building.findings,
@@ -988,8 +1079,7 @@ export function focusGraph(
     frontier = next;
   }
   // Keep each kept skill's own sub-skills so a hub never appears gutted.
-  for (const e of data.edges)
-    if (e.kind === "routes" && keep.has(e.from) && seeds.has(e.from)) keep.add(e.to);
+  for (const e of data.edges) if (e.kind === "routes" && keep.has(e.from)) keep.add(e.to);
   const nodes = data.nodes.filter((node) => keep.has(node.id));
   const edges = data.edges.filter((e) => keep.has(e.from) && keep.has(e.to));
   return {
@@ -1018,7 +1108,10 @@ export async function contextSkillGraph(
     resolved = await concreteSpec(spec, options, findings);
   } catch (error) {
     if (!(error instanceof SkillexError)) throw error;
-    return makeResult("graph", null, { exit: error.exit, findings: error.findings });
+    return makeResult("graph", null, {
+      exit: error.exit,
+      findings: [...findings, ...error.findings],
+    });
   }
   const [catalog, view] = await Promise.all([
     skillGraph(options),

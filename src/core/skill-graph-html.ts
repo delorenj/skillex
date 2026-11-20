@@ -44,6 +44,7 @@ export function renderSkillGraphHtml(
     <a id="clearFocus" href="#" hidden>clear focus</a>
   </form>
   <p class="hint" id="snapshot" hidden>A snapshot written by <code>skillex graph --html</code>. The live view is <code>skillex graph --serve</code>.</p>
+  <ul class="notices" id="notices" hidden></ul>
   <div class="tiles" id="tiles"></div>
 </header>
 <main>
@@ -127,6 +128,8 @@ a{color:var(--hub)}
 #graph{position:relative;background:var(--panel);border:1px solid var(--line);border-radius:12px;height:70vh;min-height:420px;overflow:hidden}
 #graph svg{width:100%;height:100%}
 #tip{position:absolute;pointer-events:none;background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:6px 8px;font-size:13px;max-width:320px}
+.notices{list-style:none;margin:8px 0;padding:10px 14px;background:var(--panel);border:1px solid var(--line);border-left:4px solid var(--warn);border-radius:10px;font-size:14px}
+.notices li{margin:2px 0}
 .swatch{display:inline-block;width:10px;height:10px;border-radius:50%}
 @media (max-width:600px){.cards{grid-template-columns:1fr}input[type=search]{min-width:0;width:100%}}
 `;
@@ -159,6 +162,11 @@ if (data.live) {
   form.addEventListener("submit",function(ev){ev.preventDefault();location.search=viewUrl({context:select.value,focus:document.getElementById("focusInput").value.trim(),depth:document.getElementById("depthInput").value});});
 } else document.getElementById("snapshot").hidden=false;
 
+// What reading this view reported (catalog problems, unknown focus names), in every context.
+var notes=(data.readFindings||[]).filter(function(f){return f.severity!=="info";});
+if(notes.length){var ul=document.getElementById("notices");ul.hidden=false;
+  notes.forEach(function(f){var li=el("li");li.appendChild(el("b",{class:f.severity},f.code));li.appendChild(document.createTextNode(" "+(f.name?f.name+": ":"")+f.message));ul.appendChild(li);});}
+
 // Tiles.
 var s = data.summary, c = ctx.counts || {};
 var tiles = inContext
@@ -187,9 +195,6 @@ if (inContext) {
       var ft=el("td");fs.forEach(function(f){var p=el("div");p.appendChild(el("b",{class:f.severity},f.code));p.appendChild(document.createTextNode(" "+f.message));ft.appendChild(p);});
       tr.appendChild(ft);abody.appendChild(tr);rows++;
     });
-  (data.readFindings||[]).filter(function(f){return f.severity!=="info";}).forEach(function(f){
-    var tr=el("tr");tr.appendChild(el("td",null,f.name||"(catalog)"));var st=el("td");st.appendChild(pill(f.severity));tr.appendChild(st);tr.appendChild(el("td",null,""));
-    var ft=el("td");ft.appendChild(el("b",{class:f.severity},f.code));ft.appendChild(document.createTextNode(" "+f.message));tr.appendChild(ft);abody.appendChild(tr);rows++;});
   if(!rows){var tr=el("tr");var td=el("td",{colspan:"4"},"Nothing: every skill in this context loads cleanly.");tr.appendChild(td);abody.appendChild(tr);}
 }
 

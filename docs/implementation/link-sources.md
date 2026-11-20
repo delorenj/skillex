@@ -141,14 +141,16 @@ Each node a context sees carries `context.status`, and the envelope carries
 
 | Status | Meaning | Finding |
 |---|---|---|
-| `loaded` | the agent can load it by name | |
+| `loaded` | the agent can load it by name: for a profile, Hermes' own `locate_skill` serves this very file for the name (precedence, same-tier refusal, identical-copy dedupe and the quarantine gate all apply) | |
 | `shadowed` | a higher-precedence copy owns the name | info, only when no copy of this skill wins |
 | `ambiguous` | two different same-tier skills share the name; Hermes refuses both | `E_CONTEXT_AMBIGUOUS` |
 | `disabled` | present but switched off (`skills.disabled`, or a platform gate) | info |
-| `quarantined` | Hermes' scanner refused a project copy | `E_CONTEXT_QUARANTINED`, or info when another tier provides the name |
+| `quarantined` | Hermes' scanner refused a project copy; a quarantined project copy also blocks every lower-tier copy of the name (those are `shadowed`) | `E_CONTEXT_QUARANTINED`, or info when the name still loads |
 | `broken` | a dangling link in a root | `E_CONTEXT_BROKEN` |
 | `missing` | selected by a manifest but not on disk | `E_CONTEXT_MISSING` |
-| `unavailable` | not loadable here, but a visible skill points at it (drawn as a ghost) | `W_CONTEXT_LOADS_UNAVAILABLE` on the skill whose `loads` edge points at it |
+| `unavailable` | not in this context at all, but a visible skill points at it (drawn as a ghost) | |
+
+A `loads` edge to any skill that is not `loaded` here (unavailable, disabled, quarantined, ambiguous, broken) is `W_CONTEXT_LOADS_UNAVAILABLE` on the skill that routes there.
 
 A skill a context loads that no catalog definition matches (joined by real
 path) is a `local` node; a local copy of a catalog name is `I_CONTEXT_COPY`.

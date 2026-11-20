@@ -294,3 +294,113 @@ it("a snapshot page names its context and says it is a snapshot", async (t) => {
   assert.match(html, /"live":false/);
   assert.match(html, /"kind":"global"/);
 });
+
+it("profile: loadable means Hermes' loader serves that file for the name", async (t) => {
+  const f = fixture(t);
+  const skills = join(f.hermes, "profiles", "ops-pm", "skills");
+  const projectSkills = join(f.project, ".agents", "skills");
+  const served = (path) => ({ ok: true, path, error: null });
+  f.skill(skills, "guarded");
+  f.skill(projectSkills, "guarded");
+  mkdirSync(skills, { recursive: true });
+  symlinkSync(join(f.catalog, "wild-b"), join(skills, "wild-b"));
+  symlinkSync(join(f.catalog, "wild-c"), join(projectSkills, "wild-c"));
+  symlinkSync(join(f.catalog, "wild-c"), join(projectSkills, "see"));
+  f.profile(
+    "ops-pm",
+    [
+      f.row("wild-a", join(f.catalog, "wild-a", "SKILL.md"), {
+        lookup: served(join(f.catalog, "wild-a", "SKILL.md")),
+      }),
+      // wild-a loads wild-b, which is switched off here.
+      f.row("wild-b", join(skills, "wild-b", "SKILL.md"), { disabled: true }),
+      // A quarantined project copy owns the name, so the profile copy never loads.
+      f.row("guarded", join(skills, "guarded", "SKILL.md"), {
+        lookup: {
+          ok: false,
+          path: null,
+          error: "Project skill 'guarded' is quarantined: the security scan flagged it.",
+        },
+      }),
+      // One skill linked twice: the catalog calls it ambiguous, the loader serves both names.
+      f.row("wild-c", join(projectSkills, "wild-c", "SKILL.md"), {
+        status: "ambiguous",
+        tier: 0,
+        lookup: served(join(projectSkills, "wild-c", "SKILL.md")),
+      }),
+      f.row("wild-c", join(projectSkills, "see", "SKILL.md"), {
+        status: "ambiguous",
+        load_name: "see",
+        tier: 0,
+        lookup: served(join(projectSkills, "see", "SKILL.md")),
+      }),
+    ],
+    [{ path: join(projectSkills, "guarded", "SKILL.md"), root: projectSkills, tier: 0 }],
+  );
+  const result = await contextSkillGraph({ ...f.options, context: "profile:ops-pm" });
+  const data = result.data;
+  assert.ok(data, JSON.stringify(result.findings, null, 2));
+  const guarded = data.nodes.filter((n) => n.name === "guarded");
+  assert.ok(guarded.length >= 1);
+  assert.ok(
+    guarded.every((n) => n.context.status !== "loaded"),
+    "a name Hermes refuses is never drawn as loaded",
+  );
+  assert.ok(guarded.some((n) => n.findings.some((x) => x.code === "E_CONTEXT_QUARANTINED")));
+  const c = node(data, "skill:wild-c");
+  assert.equal(c.context.status, "loaded", "identical links are one skill, not ambiguous");
+  assert.deepEqual(c.context.entries.map((e) => e.name).sort(), ["see", "wild-c"]);
+  assert.equal(node(data, "skill:wild-b").context.status, "disabled");
+  assert.ok(
+    node(data, "skill:wild-a").findings.some(
+      (x) => x.code === "W_CONTEXT_LOADS_UNAVAILABLE" && /disabled/.test(x.message),
+    ),
+    "a load into a switched-off skill is a routing hole",
+  );
+  assert.equal(data.context.counts.loaded, 3);
+});
+
+it("global: an alias link still satisfies a load by the skill's own name", async (t) => {
+  const f = fixture(t);
+  symlinkSync(join(f.catalog, "wild-a"), join(f.globalRoot, "wild-a"));
+  symlinkSync(join(f.catalog, "wild-b"), join(f.globalRoot, "bee"));
+  const { data } = await contextSkillGraph({ ...f.options, context: "global" });
+  assert.equal(node(data, "skill:wild-b").context.status, "loaded");
+  assert.equal(data.context.counts.unavailable, 0);
+  assert.deepEqual(node(data, "skill:wild-a").findings, []);
+});
+
+it("project: each copy of a name owns its own sub-skills", async (t) => {
+  const f = fixture(t);
+  const projectSkills = join(f.project, ".agents", "skills");
+  f.file(join(f.project, ".agents", "skills.json"), '{"skills":[]}\n');
+  for (const [root, target] of [
+    [f.globalRoot, "wild-b"],
+    [projectSkills, "wild-c"],
+  ]) {
+    f.skill(root, "foo", "# foo\n\nSee [s1](subskills/s1/SUBSKILL.md).\n");
+    f.file(
+      join(root, "foo", "subskills", "s1", "SUBSKILL.md"),
+      `---\ndescription: s1 of ${target}\n---\nLoad the \`${target}\` skill.\n`,
+    );
+  }
+  const { data } = await contextSkillGraph({ ...f.options, context: `project:${f.project}` });
+  const foos = data.nodes.filter((n) => n.kind === "local" && n.name === "foo");
+  assert.equal(foos.length, 2);
+  const winner = foos.find((n) => n.context.status === "loaded");
+  const sub = data.edges.find((e) => e.from === winner.id && e.kind === "routes").to;
+  assert.equal(node(data, sub).description, "s1 of wild-c");
+  const loads = data.edges.filter((e) => e.from === sub && e.kind === "loads").map((e) => e.to);
+  assert.deepEqual(loads, ["skill:wild-c"]);
+});
+
+it("project:<dir> that does not exist is a usage error, not another project's graph", async (t) => {
+  const f = fixture(t);
+  const result = await contextSkillGraph({
+    ...f.options,
+    context: `project:${join(f.project, "typo")}`,
+  });
+  assert.equal(result.data, null);
+  assert.equal(result.exit, 2);
+  assert.ok(codes(result).includes("E_CONTEXT"));
+});
