@@ -1,0 +1,6 @@
+[Unit]
+Description=Restart the skill graph after a skillex upgrade
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/systemctl --user try-restart skillex-graph.service

@@ -145,10 +145,16 @@ Follow the currently authorized pilot/rollout boundary, not an unbounded sweep.
    repeat the preview: the second run should plan no managed changes.
 6. Validate source topology separately from consumer topology. Commit and push
    the catalog first, then compositions and the parent catalog revision.
-7. To see every hub at once (which repo owns it, its sub-skills, what it loads,
-   who loads it, and its lint), run `skillex graph` (text), `--json`, or
-   `--html <file>` for the interactive page. A red repository there is a
-   one-hub violation (`E_HUB_COUNT`); fix it in that repository's hub.
+7. To see skills as a graph (which repo owns each hub, its sub-skills, what it
+   loads, who loads it, its lint, and whether this context can load it), open
+   <https://skills.delo.sh/> or run `skillex graph`. It reads the roots live:
+   in a project it shows the bound PM's view through Hermes' resolver, elsewhere
+   the global roots. `--context catalog|global|project:<dir>|profile:<name>`
+   picks another view; `--focus <skill,...> [--depth n]` narrows to a
+   neighbourhood; `--json` for tools. A red repository is a one-hub violation
+   (`E_HUB_COUNT`); `ambiguous`, `quarantined`, `broken` and `missing` nodes
+   are skills this context cannot load. Never publish a dated copy of the graph:
+   link to the live page.
 
 Do not republish host-provided system skills as top-level catalog selections.
 Disable or migrate a competing import through its owning configuration; deleting

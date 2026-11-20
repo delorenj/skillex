@@ -1,0 +1,11 @@
+# Restart the live skill graph when the installed @delorenj/skillex package changes
+# (`cli-launchers.py upgrade @delorenj/skillex` rewrites its package.json).
+[Unit]
+Description=Restart the skill graph when skillex is upgraded
+
+[Path]
+PathChanged=%h/.local/lib/node_modules/@delorenj/skillex/package.json
+Unit=skillex-graph-upgrade.service
+
+[Install]
+WantedBy=default.target

@@ -107,18 +107,88 @@ hub instead.
 
 ## Skill graph (`skillex graph`)
 
-`skillex graph` maps the whole registry as nodes and edges and attaches hub
-lint to every node, so a violation shows where it lives. `--json` emits the
-envelope; `--html <file>` also writes a self-contained interactive page
-(repository table, hub cards, force graph; `#hub=<name>` deep-links a card).
-`--no-lint` skips lint; `--lint-wild` also lints wild skills (off by default,
-because the hub standard governs hubs).
+`skillex graph` maps skills as nodes and edges and attaches hub lint to every
+node, so a violation shows where it lives. It is read from disk on every call:
+there is no index, cache or published copy to keep in sync. `--json` emits the
+envelope; `--html <file>` writes a self-contained snapshot page (repository
+table, hub cards, force graph; `#hub=<name>` deep-links a card). `--no-lint`
+skips lint; `--lint-wild` also lints wild skills (off by default, because the
+hub standard governs hubs).
+
+### Context (`--context`)
+
+The graph shows what one **context** can load, not just what the catalog holds.
+
+| Context | Read by | Shows |
+|---|---|---|
+| `auto` (default) | first match below | |
+| `profile:<name>` | Hermes' own resolver (`hermes-agent/venv/bin/python`, `tools/skills_tool._skill_catalog`), with `HERMES_HOME` set to the profile and `TERMINAL_CWD` set to the project | that profile's tiers: project, profile, external |
+| `project:<dir>` | the project's bound PM if it has one, else `skillex status` for the project and global roots | |
+| `global` | `skillex status --scope global` | `~/.agents/skills` |
+| `catalog` | `skillex skill list` + `sources.toml` | every definition |
+
+`auto` picks, in order: the profile a Hermes session runs in (`HERMES_HOME=<root>/profiles/<name>`);
+the **bound PM** of the nearest `.project.json` (pjangler's rule: the agent with
+`role: "pm"`, preferring `<project_id>-pm`; never `$HOME`), when that Hermes
+profile exists; the project's `.agents/skills.json`; otherwise global. A bound
+PM without a profile is `W_CONTEXT_PM_PROFILE_MISSING` and falls through.
+`--hermes-root` and `--hermes-agent` (or `HERMES_AGENT_DIR`) select another
+installation; a profile is never guessed when its resolver is absent
+(`E_HERMES_AGENT`).
+
+Each node a context sees carries `context.status`, and the envelope carries
+`context` (`kind`, `label`, `detectedFrom`, `resolver`, `roots`, `counts`):
+
+| Status | Meaning | Finding |
+|---|---|---|
+| `loaded` | the agent can load it by name | |
+| `shadowed` | a higher-precedence copy owns the name | info, only when no copy of this skill wins |
+| `ambiguous` | two different same-tier skills share the name; Hermes refuses both | `E_CONTEXT_AMBIGUOUS` |
+| `disabled` | present but switched off (`skills.disabled`, or a platform gate) | info |
+| `quarantined` | Hermes' scanner refused a project copy | `E_CONTEXT_QUARANTINED`, or info when another tier provides the name |
+| `broken` | a dangling link in a root | `E_CONTEXT_BROKEN` |
+| `missing` | selected by a manifest but not on disk | `E_CONTEXT_MISSING` |
+| `unavailable` | not loadable here, but a visible skill points at it (drawn as a ghost) | `W_CONTEXT_LOADS_UNAVAILABLE` on the skill whose `loads` edge points at it |
+
+A skill a context loads that no catalog definition matches (joined by real
+path) is a `local` node; a local copy of a catalog name is `I_CONTEXT_COPY`.
+Set and pack `member` edges appear only for compositions this context selects.
+Node problems are health (`summary.health`), not a failed read: the exit code is
+non-zero only when reading the context itself reported a problem.
+
+### Focus (`--focus`, `--depth`)
+
+`--focus a,b` (comma-separated or repeated; `*` globs) keeps only the named
+skills, hubs, sets or packs and their neighbourhood. It matches node names,
+ids and the names a context loads them by. `--depth` counts hops in either edge
+direction (default 1; `0` or `all` is unbounded). Sets, packs, sources and
+unavailable skills are leaves, so a focus does not flood through a large set;
+a hub always brings its sub-skills. No match is `E_FOCUS_UNKNOWN` (exit 2).
+
+### Live (`--serve`)
+
+`skillex graph --serve [--listen host:port]` (default `127.0.0.1:18799`) serves
+the page. Each request computes the graph again; only identical concurrent
+requests share one read. `GET /?context=&focus=&depth=` is the page,
+`/graph.json` the envelope for the same query, `/contexts.json` the pickable
+contexts (global, catalog, every Hermes profile), `/healthz` a probe. The page
+has a context picker and focus box, and clicking a node refocuses on it.
+
+On this host it runs as `skillex-graph.service` on the docker0 gateway
+(`172.17.0.1:18799`), published at <https://skills.delo.sh/> by the Traefik
+route `dynamic/skills.yml` behind `google-auth-owner`. Install or check it with
+`scripts/install-graph-service.sh install|status`. `skillex-graph-upgrade.path`
+restarts it when `cli-launchers.py upgrade @delorenj/skillex` replaces the
+package, so the server always runs the installed release.
+
+### Nodes and edges
 
 | Node | Meaning |
 |---|---|
 | `hub` | repo-owned skill (link source) |
 | `vendored` | catalog copy whose `.source.yaml` names an upstream source |
 | `wild` | catalog skill no repository owns |
+| `local` | a skill a context loads that no catalog definition matches |
 | `subskill` | `subskills/<name>/SUBSKILL.md` inside any skill |
 | `set`, `pack` | compositions that reference skills |
 | `source` | a `sources.toml` repository, with `hubs` (skill directories on disk under its skills root) |

@@ -1,0 +1,28 @@
+# The live skill graph: `skillex graph --serve`, published at https://skills.delo.sh/
+# (Traefik: ~/docker/core/traefik/traefik-data/dynamic/skills.yml, google-auth-owner).
+#
+# Every page load reads the skill roots again, through Hermes' own resolver for profile
+# contexts, so there is no cache, snapshot or index to drift. This is a long-lived server,
+# not a schedule: nothing here runs on a clock.
+#
+# Bound to the docker0 gateway (172.17.0.1 = host.docker.internal from Traefik) so only
+# Traefik and this host reach it. Runs the installed CLI through its Node 24 launcher;
+# skillex-graph-upgrade.path restarts it when `cli-launchers.py upgrade @delorenj/skillex`
+# replaces the package.
+[Unit]
+Description=Skillex live skill graph (skills.delo.sh)
+Documentation=file:%h/code/skillex/docs/implementation/link-sources.md
+After=network-online.target docker.service
+
+[Service]
+Type=simple
+WorkingDirectory=/
+ExecStart=%h/.local/bin/skillex graph --serve --listen 172.17.0.1:18799
+Environment=PJ_SKILLS_REGISTRY_ROOT=%h/code/skillex
+Nice=10
+Restart=always
+RestartSec=3
+NoNewPrivileges=yes
+
+[Install]
+WantedBy=default.target

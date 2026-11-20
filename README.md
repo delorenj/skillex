@@ -144,9 +144,15 @@ skillex set list
 skillex pack list
 skillex pack verify hermes-base@0.18.2
 skillex doctor --sources-only
-skillex graph                       # every hub, sub-skill, source and composition, with hub health
-skillex graph --json --html graph.html
+skillex graph                       # what this context loads: the bound PM in a project, else global
+skillex graph --context catalog     # every definition, regardless of who loads it
+skillex graph --focus heyma,pjangler --depth 2
+skillex graph --serve               # live page; every load reads the roots again
 ```
+
+The live graph runs as a user service and is published at <https://skills.delo.sh/>
+(`scripts/install-graph-service.sh install`; see the
+[graph section](docs/implementation/link-sources.md#skill-graph-skillex-graph)).
 
 `all-skills/` owns real definitions. Sets and packs contain canonical references; packs may also own hooks, commands, and support assets. Ordinary CLI skill roots alias one `.agents/skills` activation root. Catalog and composition edits take effect for a consumer when that consumer explicitly syncs.
 
