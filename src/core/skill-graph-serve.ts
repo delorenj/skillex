@@ -131,8 +131,10 @@ export function startSkillGraphServer(
     server.once("error", failed);
     server.listen(port, host, () => {
       server.off("error", failed);
+      const address = server.address();
+      const bound = typeof address === "object" && address ? address.port : port;
       done({
-        url: `http://${host.includes(":") ? `[${host}]` : host}:${port}/`,
+        url: `http://${host.includes(":") ? `[${host}]` : host}:${bound}/`,
         close: () => new Promise((closed) => server.close(() => closed())),
       });
     });
