@@ -13,16 +13,18 @@ function run(args) {
   assert.equal(result.status, 0, result.stderr || result.stdout);
   return result.stdout;
 }
+// The usage CLI on PATH (CI installs the release binary), else through mise (this host).
+const direct = spawnSync("usage", ["--version"], { encoding: "utf8" }).status === 0;
+function usageCli(args, input) {
+  const [command, argv] = direct ? ["usage", args] : ["mise", ["exec", "--", "usage", ...args]];
+  const result = spawnSync(command, argv, { input, encoding: "utf8" });
+  assert.equal(result.error, undefined, `usage CLI not runnable: ${result.error?.message}`);
+  return result;
+}
 function parse(kdl) {
-  const lint = spawnSync("mise", ["exec", "--", "usage", "lint", "-"], {
-    input: kdl,
-    encoding: "utf8",
-  });
+  const lint = usageCli(["lint", "-"], kdl);
   assert.equal(lint.status, 0, lint.stdout + lint.stderr);
-  const result = spawnSync("mise", ["exec", "--", "usage", "generate", "json", "-f", "-"], {
-    input: kdl,
-    encoding: "utf8",
-  });
+  const result = usageCli(["generate", "json", "-f", "-"], kdl);
   assert.equal(result.status, 0, result.stderr);
   return JSON.parse(result.stdout);
 }
