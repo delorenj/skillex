@@ -100,10 +100,6 @@
       "relpath": "creative/songwriting-and-ai-music"
     },
     {
-      "name": "touchdesigner-mcp",
-      "relpath": "creative/touchdesigner-mcp"
-    },
-    {
       "name": "jupyter-live-kernel",
       "relpath": "data-science/jupyter-live-kernel"
     },
@@ -174,10 +170,6 @@
     {
       "name": "llama-cpp",
       "relpath": "mlops/inference/llama-cpp"
-    },
-    {
-      "name": "vllm",
-      "relpath": "mlops/inference/vllm"
     },
     {
       "name": "audiocraft",
@@ -290,10 +282,6 @@
     {
       "name": "test-driven-development",
       "relpath": "software-development/test-driven-development"
-    },
-    {
-      "name": "yuanbao",
-      "relpath": "yuanbao"
     }
   ],
   "version": "0.18.2"
