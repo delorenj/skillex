@@ -17,22 +17,29 @@ judgement.
 | `log/<night>.md` | one report per night |
 | `STATUS.md` | coverage, plus everything marked `needs-human` (the "Needs Jarad" list) |
 
+Cost: the first proving pass (5 skills, three of them large game-framework hubs) used 11.2M
+tokens, because it read whole repos. The contract now budgets about 40 tool calls per pass, and
+the job caps 45 iterations and 6M tokens a day. Check what a night cost with
+`candybar history skill-sweep`.
+
 Runtime state, not committed, lives in `~/.local/state/skillex/skill-sweep/`: `cohort.json`,
 the plans and `passes/`.
 
 ## The cohort
 
-The default size is 5 (`SKILL_SWEEP_COHORT`). Seats are filled in this order:
+The default size is 4 (`SKILL_SWEEP_COHORT`). Seats are filled in this order:
 
-1. Every skill Hermes' project-tier scanner calls `dangerous`, up to 10. These are regressions:
-   a quarantined project copy blocks the skill everywhere.
+1. Up to 2 skills Hermes' project-tier scanner calls `dangerous`. These are regressions: a
+   quarantined project copy blocks the skill everywhere. A dangerous skill already reviewed at its
+   current tree is waiting on its recorded `needs-human` item, so it doesn't take a seat again
+   until it changes.
 2. Then two queues take turns:
    - skills edited since their last review, oldest review first;
    - skills never reviewed, shuffled with the night as the seed, so the order is random but
      reproducible.
 3. Then the skills reviewed longest ago.
 
-At 5 a night, all ~490 skills get a first review in about three months. After that, a skill
+At 4 a night, all ~490 skills get a first review in about four months. After that, a skill
 comes back as soon as it changes.
 
 A skill holding someone else's uncommitted work is skipped that night, because the applier

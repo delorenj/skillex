@@ -46,8 +46,8 @@ STATE = Path(os.environ.get("SKILL_SWEEP_STATE", HOME / ".local/state/skillex/sk
 SCAN_CACHE = HOME / ".cache/skillex/skill-sweep/scan-cache"
 LEDGER = DESK / "ledger.json"
 CONTRACT = DESK / "CONTRACT.md"
-COHORT_SIZE = int(os.environ.get("SKILL_SWEEP_COHORT", "5"))
-MAX_DANGEROUS = 10
+COHORT_SIZE = int(os.environ.get("SKILL_SWEEP_COHORT", "4"))
+MAX_DANGEROUS = 2  # regressions jump the queue, but one broken repo must not eat every night
 TZ = __import__("zoneinfo").ZoneInfo("America/New_York")  # the night is named in ET
 
 
@@ -247,7 +247,13 @@ def load_json(p: Path, default):
 def select(skills: list[dict], ledger: dict, scans: dict, when: str) -> list[dict]:
     rng = random.Random(f"skill-sweep:{when}")
     by_name = {s["name"]: s for s in skills}
-    dangerous = sorted(n for n, r in scans.items() if r["verdict"] == "dangerous")[:MAX_DANGEROUS]
+    dangerous = sorted(
+        n
+        for n, r in scans.items()
+        if r["verdict"] == "dangerous"
+        # already reviewed at this exact tree: it waits on a recorded needs-human, not on us
+        and (ledger.get(n) or {}).get("tree") != (by_name.get(n) or {}).get("tree")
+    )[:MAX_DANGEROUS]
     changed, fresh, reviewed = [], [], []
     for s in skills:
         if s["name"] in dangerous:
@@ -477,9 +483,20 @@ def commit(repo: str, paths: list[str], message: str) -> str:
         return ""
     run(["git", "-C", repo, "commit", "-q", "-m", message, "--", *paths])
     sha = run(["git", "-C", repo, "rev-parse", "--short", "HEAD"]).strip()
-    run(["git", "-C", repo, "pull", "-q", "--rebase", "--autostash"], check=False)
-    run(["git", "-C", repo, "push", "-q"])
+    push(repo)
     return run(["git", "-C", repo, "rev-parse", "--short", "HEAD"]).strip() or sha
+
+
+def push(repo: str, tries: int = 3) -> None:
+    """Rebase onto upstream and push; a racing pusher or a slow pre-push hook gets retries."""
+    err = ""
+    for _ in range(tries):
+        run(["git", "-C", repo, "pull", "-q", "--rebase", "--autostash"], check=False)
+        out = subprocess.run(["git", "-C", repo, "push", "-q"], capture_output=True, text=True)
+        if out.returncode == 0:
+            return
+        err = out.stderr.strip()[-500:]
+    raise RuntimeError(f"push failed in {repo} after {tries} tries: {err}")
 
 
 TRAILER = "\n\nSkill-Sweep: nightly cohort review (.candybars/skill-sweep in skillex)"
@@ -574,11 +591,16 @@ def mode_apply(plan_path: str) -> None:
             notes = [f"applier failed, edits left uncommitted: {str(exc)[:300]}", *notes]
             lines.append(f"FAILED {name}: {str(exc).splitlines()[0][:200]}")
         after = scan(scan_fn, s["path"])
+        prev = ledger.get(name) or {}
+        if prev.get("reviewed") == when:  # a re-apply tonight keeps what the first one landed
+            commits = list(dict.fromkeys([*prev.get("commits", []), *commits]))
+            changes = list(dict.fromkeys([*prev.get("changes", []), *changes]))
         ledger[name] = {
             "reviewed": when,
             "tree": tree(s["repo"], s["rel"]),
             "outcome": outcome,
             "verdict": after["verdict"],
+            "changes": changes,
             "notes": notes,
             "commits": commits,
         }

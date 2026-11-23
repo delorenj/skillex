@@ -57,6 +57,22 @@ The driver (`sweep.py --apply`) commits and pushes your edits. Do not run git yo
 - **A clean skill is a fine result.** Don't edit for the sake of editing. Don't rewrite prose
   that is correct.
 
+## Budget
+
+The whole pass gets about 40 tool calls, so spend them evenly across the cohort. Each call
+resends everything read so far, which means reading wide is what makes a pass expensive. The
+first proving pass read whole repos and cost 11M tokens.
+
+- **Large files:** never read a file over ~300 lines whole. `grep -n` for what you need, then read
+  only that range.
+- **Tests:** run a skill's tests only if they finish in about two minutes. Never run builds,
+  deploys or live services.
+- **Tickets:** for a `needs-human` item that a repo's own board should carry, file at most one
+  ticket per owning repo, after checking that no open ticket already covers it. Otherwise,
+  `notes` is the channel.
+- **Running out:** if you can't finish a skill, mark it `needs-human` with the note
+  `not finished: <what is left>`. A later night picks it up.
+
 ## Finish
 
 Write the plan with `write_file` to `{PLAN}`. Its content is JSON:
