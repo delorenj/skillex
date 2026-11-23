@@ -195,6 +195,44 @@ requirements, not authority to change them. Confirm separately that both mains h
 zero ahead/behind. Remove only the two new delivery worktrees and the new detached
 pin worktree, then delete only their new merged branches. Do not bulk-prune.
 
+## Repository pre-push environment repair (no source changes)
+
+The first push attempt from the new isolated worktree stopped at Node build because
+local `node_modules/typescript/bin/tsc` was absent. `npm ci --ignore-scripts --cache
+"$TMPDIR/skrill55-npm-cache"` installed the exact lockfile dependencies only in that
+new worktree (no source/lockfile changes; npm reported two moderate audit findings,
+which were not repaired as unrelated scope).
+
+The next normal hook run passed Biome/typecheck, Node **1,351 passed / 1 skipped /
+0 failed**, Ruff, and mypy (42 source files), then Python returned **12 failed,
+961 passed, 9 skipped**; its automatic `--lf` rerun reproduced all 12 failures in
+`tests/unit/test_sync_aliases.py`. This is the unchanged origin/main guard
+`if alias.parts and any(part in NEVER_TOUCH for part in alias.parts)` skipping
+every path below the session's required `.hermes/.../scratch`. The source, tests,
+and guard are identical to origin/main; no unrelated fix was made.
+
+A private Bubblewrap mount aliases the **same required scratch storage** at
+`/run/skrill55-scratch` solely inside the child mount namespace. This is not system
+`/tmp`, a new host directory, activation, or a source change. A targeted real run
+with this alias returned **22 passed in 0.44s** for the complete alias test module:
+
+```bash
+bwrap --bind / / --dev-bind /dev /dev --tmpfs /run \
+  --bind "$TMPDIR" /run/skrill55-scratch \
+  --setenv TMPDIR /run/skrill55-scratch \
+  --chdir /home/delorenj/code/skillex/.worktrees/skrill55-delivery-package \
+  env -u PYTHONPATH uv run pytest -q tests/unit/test_sync_aliases.py \
+  --basetemp=/run/skrill55-scratch/skrill55-alias-namespace-probe
+```
+
+The ordinary root push must run with the same scratch-backed namespace so the
+configured complete pre-push hook executes without bypass. If `/run/user` holds an
+SSH-agent socket, bind it back after the private `/run` tmpfs. The initial namespace
+probe lacked `--dev-bind /dev /dev` and failed opening `/dev/null`; the corrected
+probe above passed. The landed main package suite was also run directly from
+`/home/delorenj/code/skillex/mcp-servers/codegraph-voyage-mcp`: **27 passed in 3.12s**,
+including five tools over stdio and SSE.
+
 ## Independent review reports
 
 The following are durable transcriptions of both independently supplied reports.
