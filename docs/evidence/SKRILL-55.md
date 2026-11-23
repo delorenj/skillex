@@ -225,13 +225,33 @@ bwrap --bind / / --dev-bind /dev /dev --tmpfs /run \
   --basetemp=/run/skrill55-scratch/skrill55-alias-namespace-probe
 ```
 
-The ordinary root push must run with the same scratch-backed namespace so the
-configured complete pre-push hook executes without bypass. If `/run/user` holds an
-SSH-agent socket, bind it back after the private `/run` tmpfs. The initial namespace
-probe lacked `--dev-bind /dev /dev` and failed opening `/dev/null`; the corrected
-probe above passed. The landed main package suite was also run directly from
-`/home/delorenj/code/skillex/mcp-servers/codegraph-voyage-mcp`: **27 passed in 3.12s**,
-including five tools over stdio and SSE.
+The initial namespace probe lacked `--dev-bind /dev /dev` and failed opening
+`/dev/null`; the corrected alias probe passed. Binding the host root into a user
+namespace exposed root-owned ancestors as unmapped UID 65534 and broke unrelated
+Node receipt ownership checks. An isolated tmpfs root preserves the executing UID;
+mounting the required scratch storage at `/scratch` and at the namespace's `/tmp`
+also redirects the existing Node tests that hardcode `/tmp` without touching the
+host's system temp directory. The corrected bounded probes passed: Node activation
+state **27 passed / 1 skipped / 0 failed** and Python aliases **22 passed in 0.29s**.
+The full ordinary push uses this tested namespace (no hook bypass):
+
+```bash
+bwrap --tmpfs / --ro-bind /usr /usr \
+  --symlink usr/bin /bin --symlink usr/sbin /sbin \
+  --symlink usr/lib /lib --symlink usr/lib64 /lib64 \
+  --ro-bind /etc /etc --bind /home /home --dev-bind /dev /dev \
+  --proc /proc --ro-bind /sys /sys --bind /run /run \
+  --bind "$TMPDIR" /scratch --bind "$TMPDIR" /tmp --setenv TMPDIR /scratch \
+  --chdir /home/delorenj/code/skillex/.worktrees/skrill55-delivery-package \
+  env -u PYTHONPATH git -c core.sshCommand='ssh -F /dev/null' push origin main
+```
+
+`ssh -F /dev/null` is a per-command adjustment: the namespace's unmapped root-owned
+system SSH include otherwise fails its ownership check. A real `ls-remote` with
+this setting succeeded, using the same GitHub host/user and default identity files;
+no SSH/repository configuration was changed. The landed main package suite was also
+run directly from `/home/delorenj/code/skillex/mcp-servers/codegraph-voyage-mcp`:
+**27 passed in 3.12s**, including five tools over stdio and SSE.
 
 ## Independent review reports
 
