@@ -1,0 +1,14 @@
+# Nightly skill sweep: an agent reviews a small cohort of skillex-managed skills in depth and
+# fixes what it finds. Desk, contract and ledger: .candybars/skill-sweep/ (README there).
+[candybar]
+name = "skill-sweep"
+schedule = "40 2 * * *"
+timezone = "America/New_York"
+enabled = false
+tags = ["hermes-agent", "skills", "maintenance"]
+
+[candybar.runner]
+kind = "hermes"
+profile = "skillex-pm"
+job_id = "d4edbba767c1"
+timeout_s = 3600
