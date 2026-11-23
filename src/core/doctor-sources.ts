@@ -328,10 +328,12 @@ export async function inspectDoctorSources(registry: RegistrySelection): Promise
       data.repoOwnedSkills++;
       if (owned.error) {
         const absent =
-          owned.source.optional && !(await ownedCheckout(registry, owned.source)).checkout.root;
+          owned.source.optional &&
+          owned.error.findings.some((item) => item.code === "E_SKILL_MISSING") &&
+          !(await ownedCheckout(registry, owned.source)).checkout.root;
         if (absent)
           findings.push({
-            code: "I_SOURCE_OPTIONAL_UNAVAILABLE",
+            code: "E_SKILL_MISSING",
             severity: "info",
             message: `Optional link source ${owned.source.name} has no checkout on this machine.`,
             name: owned.name,

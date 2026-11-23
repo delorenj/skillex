@@ -5,7 +5,7 @@ import { diagnosticExit } from "./diagnostics.js";
 import { SkillexError } from "./error.js";
 import { inspectPath } from "./filesystem.js";
 import { isSkillName } from "./manifest.js";
-import { ownedSkill } from "./owned-sources.js";
+import { ownedCheckout, ownedSkill } from "./owned-sources.js";
 import { type Diagnostic, ExitCode, makeResult, type ResultEnvelope } from "./result.js";
 import { resolveVendorPin } from "./vendor-git.js";
 import { digestVendorTree, readVendorProvenance } from "./vendor-provenance.js";
@@ -378,7 +378,24 @@ async function linkedSkills(
       try {
         path = (await ownedSkill(manifest.registry, name))?.path ?? path;
       } catch (error) {
-        observation.capture(error, path);
+        const absent =
+          source.optional &&
+          error instanceof SkillexError &&
+          error.findings.some((item) => item.code === "E_SKILL_MISSING") &&
+          !(await ownedCheckout(manifest.registry, source)).checkout.root;
+        if (absent)
+          observation.report(
+            {
+              code: "E_SKILL_MISSING",
+              severity: "info",
+              message: `Optional link source ${source.name} has no checkout on this machine.`,
+              name,
+              path: manifest.path,
+              fix: "Clone it and map its checkout ID to inspect its hub here.",
+            },
+            ExitCode.SUCCESS,
+          );
+        else observation.capture(error, path);
       }
     }
     skills.push({

@@ -23,7 +23,7 @@ import {
 const FRONTMATTER = "---\nname: alpha\ndescription: Hub fixture\n---\n";
 
 function hub(t, { name = "alpha", body = "# alpha\n", frontmatter = FRONTMATTER } = {}) {
-  const root = realpathSync(mkdtempSync("/tmp/skillex-hub-lint-"));
+  const root = realpathSync(mkdtempSync(join(process.env.TMPDIR, "skillex-hub-lint-")));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const parent = join(root, "skills");
   const directory = (path) => {
@@ -176,6 +176,59 @@ it("W_HUB_ORPHAN: unreferenced files under references and subskills", async (t) 
   const loose = hub(t, { body: "# alpha\n" });
   loose.file(join(loose.path, "notes.md"), "# Notes\n");
   assert.equal(has(await lintHub({ path: loose.path }), "W_HUB_ORPHAN"), false);
+});
+
+it("a router directory span does not cover unreferenced Markdown descendants", async (t) => {
+  const f = hub(t, { body: "# alpha\n\nBrowse `references/` for guides.\n" });
+  const forgotten = f.file(join(f.path, "references", "forgotten.md"), "# Forgotten\n");
+  const report = await lintSkill(undefined, { path: f.path, cwd: f.root });
+  assert.equal(report.exit, 6, JSON.stringify(report.findings));
+  assert.deepEqual(
+    report.findings.filter((item) => item.code === "W_HUB_ORPHAN").map((item) => item.path),
+    [forgotten],
+  );
+  f.file(join(f.path, "SKILL.md"), `${FRONTMATTER}# alpha\n\nRead \`references/forgotten.md\`.\n`);
+  const routed = await lintSkill(undefined, { path: f.path, cwd: f.root });
+  assert.equal(routed.exit, 0, JSON.stringify(routed.findings));
+});
+
+it("directory links do not recursively route Markdown descendants", async (t) => {
+  const f = hub(t, { body: "# alpha\n\n[references](references/)\n" });
+  const forgotten = f.file(join(f.path, "references", "forgotten.md"), "# Forgotten\n");
+  const report = await lintHub({ path: f.path });
+  assert.deepEqual(
+    report.findings.filter((item) => item.code === "W_HUB_ORPHAN").map((item) => item.path),
+    [forgotten],
+  );
+});
+
+it("balanced and escaped parentheses in inline destinations resolve exactly", async (t) => {
+  const f = hub(t, {
+    body: "# alpha\n\n[balanced](references/a(1).md) [escaped](references/b\\(2\\).md)\n",
+  });
+  f.file(join(f.path, "references", "a(1).md"), "# Balanced\n");
+  f.file(join(f.path, "references", "b(2).md"), "# Escaped\n");
+  const clean = await lintSkill(undefined, { path: f.path, cwd: f.root });
+  assert.equal(clean.exit, 0, JSON.stringify(clean.findings));
+  assert.equal(clean.data.links, 2);
+  f.file(
+    join(f.path, "SKILL.md"),
+    `${FRONTMATTER}# alpha\n\n[missing](references/absent(3).md) [missing escaped](references/absent\\(5\\).md) [escape](../outside(4).md) [escape escaped](../outside\\(6\\).md) [valid](references/a(1).md) [escaped](references/b\\(2\\).md)\n`,
+  );
+  const invalid = await lintSkill(undefined, { path: f.path, cwd: f.root });
+  assert.equal(invalid.exit, 3);
+  assert.deepEqual(
+    invalid.findings
+      .filter((item) => item.code === "E_HUB_REFERENCE_MISSING")
+      .map((item) => item.detail[1]),
+    ["target references/absent(3).md", "target references/absent\\(5\\).md"],
+  );
+  assert.deepEqual(
+    invalid.findings
+      .filter((item) => item.code === "E_HUB_REFERENCE_ESCAPE")
+      .map((item) => item.detail[1]),
+    ["target ../outside(4).md", "target ../outside\\(6\\).md"],
+  );
 });
 
 it("E_HUB_NESTED_SKILL: no SKILL.md below the hub root", async (t) => {

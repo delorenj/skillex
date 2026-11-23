@@ -35,7 +35,7 @@ const SSH_REPO = "git@github.com:delorenj/HeyMa.git";
 const HTTPS_REPO = "https://github.com/delorenj/HeyMa.git";
 
 function fixture(t) {
-  const root = realpathSync(mkdtempSync("/tmp/skillex-link-"));
+  const root = realpathSync(mkdtempSync(join(process.env.TMPDIR, "skillex-link-")));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const home = join(root, "home");
   const project = join(root, "project");
@@ -231,6 +231,99 @@ it("reports a skill missing when an optional link source has no checkout", async
   failure(await showSkill("heyma", f.options), "E_SKILL_MISSING", 3);
   // Listing simply omits an unavailable optional source.
   assert.deepEqual(ok(await listSkills(f.options)).skills, []);
+});
+
+it("doctor continues past an invalid optional checkout and lints a later hub", async (t) => {
+  const f = fixture(t);
+  const invalid = f.directory(join(f.root, "checkouts", "Bad"));
+  f.checkouts.Bad = invalid;
+  const later = f.hub({ name: "vinyl", checkout: "Good" });
+  f.file(
+    join(later.hub, "SKILL.md"),
+    "---\nname: vinyl\ndescription: Hub fixture\n---\n[missing](references/absent.md)\n",
+  );
+  f.sources([
+    {
+      name: "bad",
+      repo: SSH_REPO,
+      checkout: "Bad",
+      mode: "link",
+      optional: true,
+      skills: ["heyma"],
+    },
+    { name: "good", repo: SSH_REPO, checkout: "Good", mode: "link", skills: ["vinyl"] },
+  ]);
+  const result = await doctor({ ...f.options, sourcesOnly: true });
+  assert.equal(result.exit, 3, JSON.stringify(result.findings));
+  assert.equal(result.data.sources[0].repoOwnedSkills, 2);
+  assert.equal(result.data.sources[0].hubsLinted, 1);
+  assert.ok(
+    result.findings.some(
+      (item) => item.code === "E_SOURCE_CHECKOUT_INVALID" && item.severity === "error",
+    ),
+  );
+  assert.ok(
+    result.findings.some(
+      (item) =>
+        item.code === "E_HUB_REFERENCE_MISSING" && item.path === join(later.hub, "SKILL.md"),
+    ),
+  );
+});
+
+it("vendor upstream reports missing optional link skills as info without hiding invalid checkouts", async (t) => {
+  const f = fixture(t);
+  f.sources([
+    {
+      name: "heyma",
+      repo: SSH_REPO,
+      checkout: "HeyMa",
+      mode: "link",
+      optional: true,
+      skills: ["heyma"],
+    },
+  ]);
+  const unavailableDoctor = await doctor({ ...f.options, sourcesOnly: true });
+  const unavailable = await inspectVendorStatus({ ...f.options, upstream: true });
+  assert.equal(unavailableDoctor.exit, 0, JSON.stringify(unavailableDoctor.findings));
+  assert.equal(unavailable.exit, 0, JSON.stringify(unavailable.findings));
+  for (const result of [unavailableDoctor, unavailable]) {
+    assert.ok(
+      result.findings.some(
+        (item) =>
+          item.code === "E_SKILL_MISSING" && item.severity === "info" && item.name === "heyma",
+      ),
+    );
+  }
+  assert.equal(unavailable.data.skills[0].state, "linked");
+  assert.equal(unavailable.data.sources[0].checkout.root, null);
+  f.sources([
+    { name: "heyma", repo: SSH_REPO, checkout: "HeyMa", mode: "link", skills: ["heyma"] },
+  ]);
+  failure(
+    await inspectVendorStatus({ ...f.options, upstream: true }),
+    "E_SOURCE_CHECKOUT_MISSING",
+    3,
+  );
+  const owned = f.hub({ origin: "git@github.com:elsewhere/wrong.git" });
+  f.sources([
+    {
+      name: "heyma",
+      repo: SSH_REPO,
+      checkout: "HeyMa",
+      mode: "link",
+      optional: true,
+      skills: ["heyma"],
+    },
+  ]);
+  const mismatch = await inspectVendorStatus({ ...f.options, upstream: true });
+  failure(mismatch, "E_SOURCE_IDENTITY_MISMATCH", 3);
+  assert.equal(
+    mismatch.findings.some((item) => item.code === "E_SKILL_MISSING" && item.severity === "info"),
+    false,
+  );
+  const doctorMismatch = await doctor({ ...f.options, sourcesOnly: true });
+  failure(doctorMismatch, "E_SOURCE_IDENTITY_MISMATCH", 3);
+  assert.equal(owned.root, f.checkouts.HeyMa);
 });
 
 it("refuses a link skill whose directory differs from its name", async (t) => {

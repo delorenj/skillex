@@ -71,8 +71,7 @@ export const HUB_SIZE_LIMIT = 500;
 const scanLimit = 20_000;
 const unscanned = new Set(["examples", "templates", "assets"]);
 const loadPhrase = /\bload(?:s|ed|ing)?\s+(?:the\s+)?`([^`\s]+)`\s+(?:hub|skill)\b/gi;
-const inlineLink =
-  /!?\[(?:[^\]\\]|\\.)*\]\(\s*(<[^>\n]*>|[^\s)]+)(?:\s+(?:"[^"]*"|'[^']*'|\([^)]*\)))?\s*\)/g;
+const inlineLinkStart = /!?\[(?:[^\]\\]|\\.)*\]\(\s*/g;
 const referenceDefinition = /^\s{0,3}\[[^\]]+\]:\s*(<[^>\n]*>|\S+)/;
 
 interface Entry {
@@ -167,7 +166,37 @@ export function markdownLines(text: string): Line[] {
 /** Markdown link targets on one prose line. */
 export function linkTargets(line: string): string[] {
   const targets: string[] = [];
-  for (const match of line.matchAll(inlineLink)) if (match[1]) targets.push(match[1]);
+  for (const match of line.matchAll(inlineLinkStart)) {
+    let index = (match.index ?? 0) + match[0].length;
+    const start = index;
+    if (line[index] === "<") {
+      const end = line.indexOf(">", index + 1);
+      if (end < 0) continue;
+      index = end + 1;
+    } else {
+      let depth = 0;
+      while (index < line.length) {
+        const char = line[index];
+        if (char === "\\") {
+          index += 2;
+          continue;
+        }
+        if (char === "(") depth++;
+        if (char === ")") {
+          if (depth === 0) break;
+          depth--;
+        }
+        if (/\s/.test(char ?? "") && depth === 0) break;
+        index++;
+      }
+      if (depth !== 0) continue;
+    }
+    const target = line.slice(start, index);
+    if (!target) continue;
+    const rest = line.slice(index);
+    if (/^\s*\)/.test(rest) || /^\s+(?:"[^"]*"|'[^']*'|\([^)]*\))\s*\)/.test(rest))
+      targets.push(target);
+  }
   const definition = referenceDefinition.exec(line);
   if (definition?.[1]) targets.push(definition[1]);
   return targets;
@@ -181,6 +210,7 @@ export function localTarget(target: string): string | null {
   if (/^[A-Za-z][A-Za-z0-9+.-]*:/.test(value)) return null;
   value = value.replace(/[#?].*$/, "");
   if (!value) return null;
+  value = value.replace(/\\([()])/g, "$1");
   try {
     return decodeURIComponent(value);
   } catch {
@@ -427,15 +457,7 @@ export async function lintHub(
   for (const entry of markdown) {
     const top = entry.relative.split(sep)[0];
     if (top !== "references" && top !== "subskills") continue;
-    let covered = false;
-    for (let current = entry.path; isWithin(directory, current) && current !== directory; ) {
-      if (referenced.has(current)) {
-        covered = true;
-        break;
-      }
-      current = dirname(current);
-    }
-    if (!covered)
+    if (!referenced.has(entry.path))
       add(
         "W_HUB_ORPHAN",
         "Nothing in the hub links to this file, so no route can load it.",
