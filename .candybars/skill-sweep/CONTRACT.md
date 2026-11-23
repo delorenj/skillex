@@ -35,6 +35,9 @@ The driver (`sweep.py --apply`) commits and pushes your edits. Do not run git yo
 
 ## How to fix
 
+- **Uncommitted edits already in a cohort path are yours.** They come from an earlier pass tonight
+  that was interrupted (a gateway restart, say), because skills with anyone else's uncommitted
+  work never make the cohort. Check them with `git diff`, keep what is right, finish the rest.
 - **Edit only the path shown for each skill.** For a vendored skill, that is the `EDIT HERE`
   upstream path. The driver re-vendors the catalog copy, so never edit the catalog copy.
 - **A fix must keep the behaviour and be a genuine improvement.** Don't split strings, encode
