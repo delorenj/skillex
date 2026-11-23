@@ -1,11 +1,10 @@
-"""Official MCP SDK server for a project-local codegraph-voyage sidecar."""
+"""Official MCP SDK server for the installed codegraph-voyage CLI."""
 
 from __future__ import annotations
 
 import argparse
 import asyncio
 import json
-import os
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -184,11 +183,6 @@ def _project_root(value: Any) -> Path:
         raise ToolExecutionError(
             f"CodeGraph DB not found at {codegraph_db}. Run `codegraph init` or `codegraph sync` first."
         )
-    module_dir = root / "tools" / "codegraph_voyage"
-    if not module_dir.is_dir():
-        raise ToolExecutionError(
-            f"codegraph-voyage sidecar not found at {module_dir}; install it in the target project first."
-        )
     return root
 
 
@@ -218,13 +212,10 @@ def _optional_flag(command: list[str], flag: str, value: Any, name: str) -> None
 
 
 async def _run_command(root: Path, command: list[str], *, timeout: float = 600.0) -> CommandResult:
-    env = os.environ.copy()
-    env["PYTHONPATH"] = str(root)
     try:
         process = await asyncio.create_subprocess_exec(
             *command,
             cwd=str(root),
-            env=env,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
@@ -239,7 +230,10 @@ async def _run_command(root: Path, command: list[str], *, timeout: float = 600.0
                 f"codegraph-voyage timed out after {timeout:.0f}s; subprocess was terminated"
             ) from exc
     except FileNotFoundError as exc:
-        raise ToolExecutionError("python3 executable was not found on the MCP server PATH") from exc
+        raise ToolExecutionError(
+            "codegraph-voyage executable was not found on the MCP server PATH; "
+            "install codegraph-voyage in the server environment"
+        ) from exc
 
     if process.returncode is None:
         raise ToolExecutionError("codegraph-voyage subprocess ended without a return code")
@@ -267,12 +261,12 @@ def _parse_json(stdout: str, command_name: str) -> Any:
 
 
 async def execute_tool(name: str, arguments: Mapping[str, Any]) -> dict[str, Any]:
-    """Validate a tool request, run the sidecar, and normalize its result."""
+    """Validate a tool request, run the standalone CLI, and normalize its result."""
     root = _project_root(arguments.get("project_path"))
-    command = ["python3", "-m", "tools.codegraph_voyage"]
+    command = ["codegraph-voyage"]
 
     if name == "index":
-        command.extend(["index", *_common_arguments(arguments)])
+        command.extend(["index", "--project", str(root), *_common_arguments(arguments)])
         _optional_flag(command, "--file-filter", arguments.get("file_filter"), "file_filter")
         _optional_flag(command, "--kind", arguments.get("kind"), "kind")
         if arguments.get("max_source_lines") is not None:
@@ -287,7 +281,9 @@ async def execute_tool(name: str, arguments: Mapping[str, Any]) -> dict[str, Any
 
     if name in {"search", "semantic_candidates"}:
         query = _safe_text(arguments.get("query"), "query", required=True)
-        command.extend(["search", str(query), *_common_arguments(arguments)])
+        command.extend(
+            ["search", str(query), "--project", str(root), *_common_arguments(arguments)]
+        )
         command.extend(
             ["--top-k", str(_positive_int(arguments.get("top_k"), "top_k", DEFAULT_TOP_K))]
         )
@@ -304,13 +300,15 @@ async def execute_tool(name: str, arguments: Mapping[str, Any]) -> dict[str, Any
         return {"stdout": result.stdout, "return_code": result.return_code}
 
     if name == "status":
-        command.append("status")
+        command.extend(["status", "--project", str(root)])
         result = await _run_command(root, command, timeout=120.0)
         return {"stdout": result.stdout, "return_code": result.return_code}
 
     if name == "explore":
         query = _safe_text(arguments.get("query"), "query", required=True)
-        command.extend(["explore", str(query), *_common_arguments(arguments)])
+        command.extend(
+            ["explore", str(query), "--project", str(root), *_common_arguments(arguments)]
+        )
         command.extend(
             ["--top-k", str(_positive_int(arguments.get("top_k"), "top_k", DEFAULT_TOP_K))]
         )
