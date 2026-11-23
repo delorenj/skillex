@@ -61,12 +61,11 @@
   "outcome": "needs-human",
   "verdict": "safe",
   "notes": [
+   "Published by the first apply: https://github.com/delorenj/skills/commit/ce9750b76ddb52fce16a93a2d5cb8e2e89bd7f19 ; GitHub main was read back at that revision. This retry preserves the publication receipt after the first parent desk push failed.",
    "Rescan is safe with no findings. Installed voxxy help accepts the documented flags; core health returned voxcpm ready and elevenlabs ready. Source confirms transcript behavior, clip caps, provenance fields and vox-local refusal semantics. No audio was generated, registered or delivered during this review.",
    "Needs an ownership/routing decision: vox-tts already includes an interactive voice-cloning workflow and repeats the cap/fallback guidance; the voxxy repository owns the underlying service. Do not merge or delete either skill in this pass.",
    "A pre-existing personal recording anecdote remains unchanged under the people/family exclusion. Its suitability for a public skill needs the owner's privacy decision; no family identity was inferred or verified."
   ],
-  "commits": [
-   "all-skills@ce9750b"
-  ]
+  "commits": []
  }
 }
