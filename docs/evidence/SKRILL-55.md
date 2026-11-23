@@ -240,6 +240,7 @@ bwrap --tmpfs / --ro-bind /usr /usr \
   --symlink usr/bin /bin --symlink usr/sbin /sbin \
   --symlink usr/lib /lib --symlink usr/lib64 /lib64 \
   --ro-bind /etc /etc --bind /home /home --dev-bind /dev /dev \
+  --bind "$TMPDIR" /dev/shm \
   --proc /proc --ro-bind /sys /sys --bind /run /run \
   --bind "$TMPDIR" /scratch --bind "$TMPDIR" /tmp --setenv TMPDIR /scratch \
   --chdir /home/delorenj/code/skillex/.worktrees/skrill55-delivery-package \
@@ -252,6 +253,68 @@ this setting succeeded, using the same GitHub host/user and default identity fil
 no SSH/repository configuration was changed. The landed main package suite was also
 run directly from `/home/delorenj/code/skillex/mcp-servers/codegraph-voyage-mcp`:
 **27 passed in 3.12s**, including five tools over stdio and SSE.
+
+## Verified source landing readback
+
+The namespace's `/dev/shm` is also bound to required scratch storage: the original
+host `/dev/shm` appears unmapped in the user namespace. Without that bind the
+cross-device test got an ownership refusal before its expected filesystem refusal.
+With the bind, the unchanged test accurately skips for lack of a separate filesystem;
+the original non-namespace Node run had passed that test. No host system temp or shm
+storage is used by the corrected full replay.
+
+The ordinary full hook (no bypass) and source push returned:
+
+```text
+Node: 1352 tests; 1350 passed; 0 failed; 2 skipped
+Ruff: All checks passed!
+mypy: Success: no issues found in 42 source files
+Python: 973 passed, 9 skipped, 52 warnings in 15.38s
+serialized-checks passed (58.00 seconds)
+To github.com:delorenj/skillex.git
+   f10d3cc..8330beb main -> main
+```
+
+Live `git ls-remote origin refs/heads/main` then returned:
+
+```text
+8330beb4558f165d55a730580d763c13b4c1891b refs/heads/main  # skillex
+c093b1c9ea7ccb3a0197eb3979071c5234da1b5a refs/heads/main  # skills
+```
+
+Both local mains had `git rev-list --left-right --count main...origin/main` output
+`0 0`. Remote owned blobs and all seven local owned files matched their reviewed
+candidates exactly. Root `HEAD:all-skills` was
+`c093b1c9ea7ccb3a0197eb3979071c5234da1b5a`. Selected canonical docs resolved to the
+existing `all-skills/codegraph-voyage` directory and both hashes matched above.
+Preservation check passed with the original baseline hash, all 40 unrelated dirty
+files/modes, both empty staged diffs, and all 12 existing registered worktrees intact.
+
+`git unpushed /home/delorenj/code/skillex` returned 1 with 11 notices before delivery
+cleanup: two main dirty-file notices; six pre-existing recovery/unrelated worktree
+notices (including `skillex-retire-mise`'s old unpushed commit); and three notices for
+our new delivery worktrees. Only the latter three are removed by delivery cleanup;
+no unrelated warning authorizes pushing or changing someone else's files/branches.
+
+This evidence-only follow-up records already executed results. It is committed with
+an explicit path, fast-forward merged, and pushed through the same complete hook;
+its final SHA is the commit containing this document, not a change to reviewed code
+or docs. Final remote-ref/preservation/cleanup outputs are returned to the caller.
+
+### Durable delivery lessons
+
+- Cherry-pick only nominated commits from recovery branches with unrelated ancestors;
+  compare final owned blobs with the reviewed candidate before every source push.
+- Land the component main before pinning it, prove the prior gitlink is an ancestor,
+  and avoid submodule recursion into the dirty canonical checkout.
+- Snapshot unrelated file bytes/modes and existing worktree refs/status before landing;
+  use only fast-forward main merges and explicit-path commits, then compare the snapshot.
+- Keep companion and standalone CLI environments separate; verify installed server
+  bytes before protocol tests because their console-script names collide.
+- When a path-sensitive baseline test rejects a required `.hermes` scratch ancestor,
+  use a scratch-backed private namespace rather than editing unrelated source, changing
+  global temp policy, or bypassing the repository hook. Preserve UID mappings and bind
+  hardcoded fixture temp paths back to scratch; declare environment-caused skips.
 
 ## Independent review reports
 
