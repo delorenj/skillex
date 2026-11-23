@@ -175,6 +175,7 @@ export function linkTargets(line: string): string[] {
       index = end + 1;
     } else {
       let depth = 0;
+      let invalid = false;
       while (index < line.length) {
         const char = line[index];
         if (char === "\\") {
@@ -186,10 +187,13 @@ export function linkTargets(line: string): string[] {
           if (depth === 0) break;
           depth--;
         }
-        if (/\s/.test(char ?? "") && depth === 0) break;
+        if (/\s/.test(char ?? "")) {
+          if (depth > 0) invalid = true;
+          break;
+        }
         index++;
       }
-      if (depth !== 0) continue;
+      if (invalid || depth !== 0) continue;
     }
     const target = line.slice(start, index);
     if (!target) continue;

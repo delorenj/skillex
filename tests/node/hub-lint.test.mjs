@@ -231,6 +231,27 @@ it("balanced and escaped parentheses in inline destinations resolve exactly", as
   );
 });
 
+it("unescaped whitespace inside nested destinations is not a link", async (t) => {
+  const f = hub(t, {
+    body: "# alpha\n\n[x](missing( bad).md) [deep](missing(one(two bad)).md)\n",
+  });
+  const report = await lintSkill(undefined, { path: f.path, cwd: f.root });
+  assert.equal(report.exit, ExitCode.SUCCESS, JSON.stringify(report.findings));
+  assert.equal(report.data.links, 0);
+});
+
+it("nested and escaped parentheses and angle destinations with spaces stay valid", async (t) => {
+  const f = hub(t, {
+    body: "# alpha\n\n[nested](references/a(b(c)).md) [escaped](references/d\\(e\\).md) [space](<references/a b.md>)\n",
+  });
+  f.file(join(f.path, "references", "a(b(c)).md"), "# Nested\n");
+  f.file(join(f.path, "references", "d(e).md"), "# Escaped\n");
+  f.file(join(f.path, "references", "a b.md"), "# Space\n");
+  const report = await lintSkill(undefined, { path: f.path, cwd: f.root });
+  assert.equal(report.exit, ExitCode.SUCCESS, JSON.stringify(report.findings));
+  assert.equal(report.data.links, 3);
+});
+
 it("E_HUB_NESTED_SKILL: no SKILL.md below the hub root", async (t) => {
   const f = hub(t);
   f.file(join(f.path, "subskills", "doctor", "SKILL.md"), "# Wrong entry name\n");
