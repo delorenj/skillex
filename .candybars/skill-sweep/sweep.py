@@ -138,6 +138,13 @@ def inventory() -> list[dict]:
                 rel=str(path.relative_to(repo)),
                 source=owner.get("source"),
             )
+            branch = subprocess.run(
+                ["git", "-C", str(repo), "branch", "--show-current"], capture_output=True, text=True
+            ).stdout.strip()
+            if (
+                not branch
+            ):  # a detached submodule checkout: a commit there would belong to no branch
+                item.update(kind="readonly", why=f"{repo.name} checkout is on a detached HEAD")
         elif origin.get("type") == "vendored" and origin.get("source"):
             src = srcs.get(origin["source"], {})
             ck = src.get("checkout", origin["source"])
@@ -177,7 +184,7 @@ def inventory() -> list[dict]:
                     if not top
                     else f"source pinned to {version[:12]}, checkout on {branch or 'a detached HEAD'}"
                 )
-                item.update(kind="vendored-readonly", source=origin["source"], why=why)
+                item.update(kind="readonly", source=origin["source"], why=why)
         skills.append(item)
     return skills
 
@@ -403,9 +410,9 @@ def mode_brief() -> None:
                 f"- EDIT HERE (upstream, the source of truth): {s['edit']}\n"
                 f"- catalog copy (do not edit; the applier re-vendors it): {s['path']}"
             )
-        elif s["kind"] == "vendored-readonly":
+        elif s["kind"] == "readonly":
             print(
-                f"- path: {s['path']} (vendored; {s['why']}. Review only, edit nothing. Put each fix you "
+                f"- path: {s['path']} ({s['why']}. Review only, edit nothing. Put each fix you "
                 f"would make in notes and mark the skill needs-human)"
             )
         else:
@@ -505,11 +512,11 @@ TRAILER = "\n\nSkill-Sweep: nightly cohort review (.candybars/skill-sweep in ski
 def land(s: dict, outcome: str, notes: list, changes: list, commits: list, scan_fn, lines: list):
     """Gate and commit one skill's edits where its bytes live; re-vendor a vendored one."""
     name = s["name"]
-    if s["kind"] == "vendored-readonly":
+    if s["kind"] == "readonly":
         stray = dirty(s["repo"], s["rel"])
         if stray:
             notes = [
-                f"edited a read-only vendored copy; left uncommitted: {', '.join(stray[:5])}",
+                f"edited a read-only skill; left uncommitted: {', '.join(stray[:5])}",
                 *notes,
             ]
             outcome = "needs-human"
