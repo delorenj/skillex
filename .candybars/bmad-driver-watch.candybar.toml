@@ -17,3 +17,6 @@ kind = "exec"
 argv = ["/home/delorenj/.local/share/mise/installs/node/24/bin/node", "/home/delorenj/.agents/skills/bmad-driver/scripts/bmad-driver.mjs", "watch"]
 # A tick is a few bmad-loop and zellij calls per drive; a wedged zellij must not stack ticks.
 timeout_s = 240
+# The tick exits non-zero only when a drive has been failing (unreadable, nudges undelivered) for
+# 30+ min; page Jarad then.
+on_failure = ["/home/delorenj/.local/bin/ntfy-alert", "--title", "bmad-driver-watch", "--priority", "high", "A bmad-loop drive has been failing for 30+ min: node ~/.agents/skills/bmad-driver/scripts/bmad-driver.mjs status"]
