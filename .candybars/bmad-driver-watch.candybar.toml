@@ -1,0 +1,19 @@
+# The bmad-driver watcher: every 5 minutes, look at every active bmad-loop drive (any repo) and
+# either take the safe automatic step (resume an interrupted run, wait out a usage limit) or wake
+# the drive's orchestrator pane with one [crank] [bmad-driver] nudge. No LLM runs here: an unchanged
+# or healthy drive costs nothing, and with no active drive a tick is a no-op.
+# Skill and runbook: all-skills/bmad-driver (SKILL.md, references/attend.md). State:
+# ~/.local/state/bmad-driver/drives/.
+[candybar]
+name = "bmad-driver-watch"
+description = "Attend every active bmad-loop drive: auto-resume or wake its orchestrator pane"
+tags = ["bmad", "agents", "zellij"]
+schedule = "*/5 * * * *"
+timezone = "America/New_York"
+enabled = false
+
+[candybar.runner]
+kind = "exec"
+argv = ["/home/delorenj/.local/share/mise/installs/node/24/bin/node", "/home/delorenj/.agents/skills/bmad-driver/scripts/bmad-driver.mjs", "watch"]
+# A tick is a few bmad-loop and zellij calls per drive; a wedged zellij must not stack ticks.
+timeout_s = 240
