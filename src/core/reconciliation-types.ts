@@ -16,7 +16,9 @@ export interface SyncChange {
     | "remove-link"
     | "replace-root"
     | "write-receipt"
-    | "recover";
+    | "recover"
+    /** A dangling link in a global downstream agent root (pi, Antigravity); see downstream.ts. */
+    | "prune-downstream-link";
   readonly path: string;
   readonly target?: string;
 }

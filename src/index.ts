@@ -136,6 +136,12 @@ export type {
   DoctorWriterInspection,
   RunningLegacyWriter,
 } from "./core/doctor-types.js";
+export {
+  type DanglingDownstreamLink,
+  danglingDownstreamLinks,
+  GLOBAL_DOWNSTREAM_ROOTS,
+  pruneDownstreamLinks,
+} from "./core/downstream.js";
 export type { EffectiveBinding, EffectiveSelection } from "./core/effective-selection.js";
 export { resolveEffectiveSelection } from "./core/effective-selection.js";
 export { SkillexError } from "./core/error.js";

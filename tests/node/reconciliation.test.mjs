@@ -803,3 +803,59 @@ it("refuses a foreign entry that arrives after journaling before guarded publica
   assert.ok(!receipt(result.data).value.data.links[join(activation(f.project), "beta")]);
   assert.ok(receipt(result.data).value.data.pending);
 });
+
+it("prunes only dangling downstream agent links that point into the canonical root", async (t) => {
+  const f = fixture(t);
+  f.skill("alpha");
+  f.skill("beta");
+  f.manifest("global", { skills: ["alpha", "beta"] });
+  ok(await sync({ ...f.options, scope: "global" }));
+  const pi = join(f.home, ".pi", "agent", "skills");
+  const antigravity = join(f.home, ".gemini", "antigravity", "skills");
+  const live = f.link(join(pi, "alpha"), join(activation(f.home), "alpha"));
+  const deselected = f.link(join(pi, "beta"), join(activation(f.home), "beta"));
+  const viaAlias = f.link(join(antigravity, "beta"), join(f.home, ".claude", "skills", "beta"));
+  const foreign = f.link(join(pi, "elsewhere"), join(f.root, "nowhere", "elsewhere"));
+  const real = f.file(join(pi, "local", "SKILL.md"), "# local\n");
+  // A downstream root that is itself a link belongs to someone else; nothing in it is judged.
+  const aliased = f.directory(join(f.root, "aliased-root"));
+  f.link(join(aliased, "gone"), join(activation(f.home), "gone"));
+  f.link(join(f.home, ".gemini", "antigravity-cli", "skills"), aliased);
+
+  f.manifest("global", { skills: ["alpha"] });
+  const result = ok(await sync({ ...f.options, scope: "global" }));
+  const pruned = result.applied.filter((item) => item.action === "prune-downstream-link");
+  assert.deepEqual(pruned.map((item) => item.path).sort(), [deselected, viaAlias].sort());
+  for (const path of [deselected, viaAlias]) assert.ok(!existsSync(path) && !lstatSafe(path));
+  for (const path of [live, foreign, join(aliased, "gone")]) assert.ok(lstatSafe(path));
+  assert.ok(existsSync(real));
+
+  const stray = f.link(join(pi, "gone"), join(activation(f.home), "gone"));
+  const before = snapshot(f.root);
+  const plan = ok(await planSync({ ...f.options, scope: "global" }));
+  assert.deepEqual(
+    plan.changes.map((item) => [item.action, item.path]),
+    [["prune-downstream-link", stray]],
+  );
+  finding(
+    await sync({ ...f.options, scope: "global", dryRun: true, exitCode: true }),
+    "W_DOWNSTREAM_LINK_DANGLING",
+    6,
+  );
+  assert.deepEqual(snapshot(f.root), before);
+  const again = ok(await sync({ ...f.options, scope: "global" }));
+  assert.deepEqual(
+    again.applied.map((item) => item.path),
+    [stray],
+  );
+  assert.ok(!lstatSafe(stray));
+  assert.deepEqual(ok(await sync({ ...f.options, scope: "global" })).applied, []);
+});
+
+function lstatSafe(path) {
+  try {
+    return lstatSync(path);
+  } catch {
+    return null;
+  }
+}

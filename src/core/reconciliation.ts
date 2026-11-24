@@ -34,6 +34,12 @@ import type {
 import { aliasPaths } from "./aliases.js";
 import { canonicalSkill, setMembers, setMemberTarget } from "./composition.js";
 import { type DerivationPreview, planDerivedSet, verifyDerivedMembers } from "./derivation.js";
+import {
+  danglingDownstreamLinks,
+  downstreamChanges,
+  downstreamFindings,
+  pruneDownstreamLinks,
+} from "./downstream.js";
 import { fail, SkillexError } from "./error.js";
 import { withLock } from "./lock.js";
 import { ownedSkill, ownedSource } from "./owned-sources.js";
@@ -1138,14 +1144,39 @@ export async function reconcileUnlocked(
   }
 }
 
+/** Global downstream roots (pi, Antigravity) carry per-skill links into the canonical root. */
+function globalRoot(plan: SyncPlan): string | undefined {
+  return plan.scopes.find((scope) => scope.scope === "global")?.root;
+}
+
+async function withDownstream(
+  plan: SyncPlan,
+  findings: readonly Diagnostic[],
+): Promise<{ plan: SyncPlan; findings: Diagnostic[] }> {
+  const home = globalRoot(plan);
+  const links = home ? await danglingDownstreamLinks(home) : [];
+  return {
+    plan: links.length
+      ? { ...plan, changes: [...plan.changes, ...downstreamChanges(links)] }
+      : plan,
+    findings: [...findings, ...downstreamFindings(links)],
+  };
+}
+
+async function pruneDownstream(plan: SyncPlan): Promise<SyncChange[]> {
+  const home = globalRoot(plan);
+  return home ? await pruneDownstreamLinks(home) : [];
+}
+
 export async function planSync(
   options: SyncOptions = {},
 ): Promise<ResultEnvelope<SyncPlan | null>> {
   try {
     const prepared = await prepareSyncUnlocked(options);
-    return makeResult("sync plan", prepared.plan, {
-      exit: options.exitCode && prepared.plan.changes.length ? ExitCode.DRIFT : ExitCode.SUCCESS,
-      findings: prepared.findings,
+    const { plan, findings } = await withDownstream(prepared.plan, prepared.findings);
+    return makeResult("sync plan", plan, {
+      exit: options.exitCode && plan.changes.length ? ExitCode.DRIFT : ExitCode.SUCCESS,
+      findings,
     });
   } catch (error) {
     return errorResult("sync plan", error);
@@ -1160,14 +1191,26 @@ export async function sync(options: SyncOptions = {}): Promise<ResultEnvelope<Sy
         fix: "Use sync --dry-run --exit-code to check drift without writing.",
       });
     const initial = await prepareSyncUnlocked(options);
-    if (options.dryRun || !initial.plan.changes.length)
+    if (options.dryRun) {
+      const { plan, findings } = await withDownstream(initial.plan, initial.findings);
       return makeResult(
         "sync",
-        { ...initial.plan, dryRun: options.dryRun === true, applied: [] },
+        { ...plan, dryRun: true, applied: [] },
         {
-          exit: options.exitCode && initial.plan.changes.length ? ExitCode.DRIFT : ExitCode.SUCCESS,
-          findings: initial.findings,
+          exit: options.exitCode && plan.changes.length ? ExitCode.DRIFT : ExitCode.SUCCESS,
+          findings,
         },
+      );
+    }
+    if (!initial.plan.changes.length)
+      return makeResult(
+        "sync",
+        {
+          ...initial.plan,
+          dryRun: false,
+          applied: await pruneDownstream(initial.plan),
+        },
+        { findings: initial.findings },
       );
     let outcome: ResultEnvelope<SyncResult | null> | undefined;
     try {
@@ -1175,6 +1218,15 @@ export async function sync(options: SyncOptions = {}): Promise<ResultEnvelope<Sy
         lockResource,
         async () => {
           outcome = await reconcileUnlocked(options);
+          // Deselection is what strands downstream links, so prune only after it lands.
+          if (outcome.ok && outcome.data) {
+            const pruned = await pruneDownstream(outcome.data);
+            if (pruned.length)
+              outcome = {
+                ...outcome,
+                data: { ...outcome.data, applied: [...outcome.data.applied, ...pruned] },
+              };
+          }
           return outcome;
         },
         options,

@@ -68,6 +68,8 @@ use a scope-owned derivation rather than modifying the shared set.
 
 Plain `sync` reconciles global plus the nearest project, or global alone outside a project. `--scope project --project PATH` restricts writes to that project while still resolving inheritance. Existing foreign files and installer-owned content are preserved. Only recorded owned links can be pruned.
 
+Some agents read `~/.agents/skills` natively and also keep their own root of per-skill links, so their root is never aliased (an alias would list every skill twice). These are the global downstream roots: `~/.pi/agent/skills`, `~/.gemini/antigravity/skills` and `~/.gemini/antigravity-cli/skills` (`GLOBAL_DOWNSTREAM_ROOTS` in `src/core/downstream.ts`). An installer such as `npx skills add` links into them, and the link dangles once the skill is deselected. A global `sync` removes such a link (`prune-downstream-link`) only when it is still dangling and its target is in `~/.agents/skills` or a global CLI alias. It never touches live links, real directories, links elsewhere, or a downstream root that is itself a link. `status` and `doctor` report pending ones as `W_DOWNSTREAM_LINK_DANGLING`. A new agent of this kind gets the same cleanup by adding its root to that list.
+
 ## Repeatable integration repairs
 
 ```sh
