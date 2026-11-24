@@ -4,6 +4,7 @@
 // repository (for example ~/.claude/tmp), which made those suites fail depending on the
 // caller's environment. Fall back to a temp root that is not inside any Git repository.
 import { existsSync, realpathSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 
 function insideRepository(path) {
@@ -31,9 +32,11 @@ for (const key of Object.keys(process.env)) {
   if (GIT_REPO_ENV.test(key)) delete process.env[key];
 }
 
+// Suites read process.env.TMPDIR directly, so it must also be SET: GitHub-hosted runners leave
+// it unset, and join(undefined, ...) failed 40 hub-lint and link-source tests in CI there.
 if (process.platform !== "win32") {
   const configured = process.env.TMPDIR;
-  if (configured !== undefined && configured !== "" && insideRepository(configured)) {
+  if (configured === undefined || configured === "" || insideRepository(configured)) {
     for (const candidate of ["/tmp", "/var/tmp"]) {
       if (existsSync(candidate) && !insideRepository(candidate)) {
         process.env.TMPDIR = candidate;
@@ -42,3 +45,4 @@ if (process.platform !== "win32") {
     }
   }
 }
+process.env.TMPDIR ||= tmpdir();
